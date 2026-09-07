@@ -1,0 +1,89 @@
+spring:
+  application:
+    name: jamkkaebi
+
+  # 로컬 개발용 비밀 값을 .env 에서 읽는다. Spring Boot 는 .env 를 기본으로 읽지 않아,
+  # 이 줄이 없으면 파일을 채워도 값이 들어오지 않는다.
+  #
+  # optional: 이라 파일이 없어도 기동에 지장이 없다 — 배포 환경은 .env 를 두지 않고 진짜
+  # 환경변수를 쓰기 때문이다. 환경변수가 .env 보다 우선하므로 배포 값이 파일에 덮이지 않는다.
+  config:
+    import: optional:file:.env[.properties]
+
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:jamkkaebi}?serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      # MVP 단계라 스키마를 엔티티에서 생성한다. 운영 배포 전에는 마이그레이션 도구(Flyway 등)로
+      # 옮기고 validate 로 바꾼다 — update 는 컬럼 삭제·타입 변경을 반영하지 않는다.
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+    open-in-view: false
+
+  # 소셜 로그인. 인가코드 교환·프로필 조회는 Spring Security OAuth2 Client 가 처리한다.
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: ${GOOGLE_CLIENT_ID}
+            client-secret: ${GOOGLE_CLIENT_SECRET}
+            # 이메일을 수집하지 않으므로 email 스코프를 요청하지 않는다.
+            scope:
+              - openid
+              - profile
+          kakao:
+            client-id: ${KAKAO_CLIENT_ID}
+            client-secret: ${KAKAO_CLIENT_SECRET}
+            client-name: Kakao
+            authorization-grant-type: authorization_code
+            # 카카오는 client_secret 을 헤더가 아닌 본문으로 받는다.
+            client-authentication-method: client_secret_post
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            # 동의항목은 닉네임만.
+            scope:
+              - profile_nickname
+        provider:
+          kakao:
+            authorization-uri: https://kauth.kakao.com/oauth/authorize
+            token-uri: https://kauth.kakao.com/oauth/token
+            user-info-uri: https://kapi.kakao.com/v2/user/me
+            user-name-attribute: id
+
+# 자체 JWT 설정
+jwt:
+  # 서명 키(HMAC-SHA256, 32바이트 이상). 기본값을 두지 않는다 — 비어 있으면 기동 자체를 실패시켜
+  # 누구나 위조할 수 있는 토큰이 조용히 발급되는 상황을 막는다.
+  secret: ${JWT_SECRET}
+  # 게임 클라이언트의 로컬 저장소는 안전한 보관처가 아니다(평문으로 읽히는 경우가 많다).
+  # 그래서 Access 를 짧게 두고 Refresh 를 매번 회전시켜 유출됐을 때의 노출 창을 줄인다.
+  access-token-validity-ms: 1800000       # 30분
+  refresh-token-validity-ms: 2592000000   # 30일
+
+app:
+  auth:
+    # 로그인을 마친 브라우저가 게임 앱으로 돌아올 커스텀 스킴. 여기에는 일회용 인계 코드만 싣는다
+    # — JWT 를 실으면 브라우저 기록에 남고, 같은 스킴을 등록한 다른 앱이 가로챌 수 있다.
+    deep-link-uri: ${AUTH_DEEP_LINK_URI:jamkkaebi://auth}
+    # 인계 코드 수명. 앱이 딥링크를 받아 교환하는 데 걸리는 시간만 있으면 된다.
+    handoff-ttl: 60s
+    # verifier 해시를 담아 두는 로그인 세션 수명. 사용자가 소셜 동의 화면에 머무는 시간이다.
+    login-session-ttl: 10m
+
+# 리버스 프록시(nginx 등) 뒤에 있을 때 X-Forwarded-* 헤더를 신뢰한다.
+#
+# 소셜에 보내는 redirect_uri 는 {baseUrl} 로 만들어지는데, 이 값은 들어온 요청에서 유추된다.
+# 프록시가 HTTPS 를 끊고 내부로 http://내부주소:8080 으로 넘기면 baseUrl 이 그 내부 주소가 돼,
+# 콘솔에 등록한 https 주소와 달라져 redirect_uri_mismatch 로 로그인이 통째로 막힌다.
+server:
+  forward-headers-strategy: framework
+
+logging:
+  level:
+    com.example.jamkkaebi: DEBUG
