@@ -12,6 +12,9 @@ import org.springframework.stereotype.Component;
  * 시도마다 한 행씩 생기므로, 사용자가 늘수록 증가 속도도 같이 빨라진다. 만료된 행은 조회에서
  * 걸러지긴 하지만 그건 정확성 문제가 아니라 저장 공간·인덱스 문제다.
  *
+ * <p>같은 이유로 Refresh Token 도 함께 치운다. 수명이 30일로 길 뿐 쌓이는 성질은 같고, 회전
+ * 방식이라 <b>재발급 한 번마다</b> 한 행이 더 생긴다. 다만 폐기된 행은 재사용 감지의 근거라
+ * 만료 즉시 지우지 않는다 — 그 판단은 {@link RefreshTokenService#purgeExpired()} 안에 있다.
  */
 @Component
 public class AuthCleanupScheduler {
@@ -23,19 +26,24 @@ public class AuthCleanupScheduler {
 
     private final LoginSessionService loginSessionService;
     private final HandoffService handoffService;
+    private final RefreshTokenService refreshTokenService;
 
     public AuthCleanupScheduler(LoginSessionService loginSessionService,
-                                HandoffService handoffService) {
+                                HandoffService handoffService,
+                                RefreshTokenService refreshTokenService) {
         this.loginSessionService = loginSessionService;
         this.handoffService = handoffService;
+        this.refreshTokenService = refreshTokenService;
     }
 
     @Scheduled(fixedDelay = INTERVAL_MS, initialDelay = INTERVAL_MS)
     public void purgeExpired() {
         int sessions = loginSessionService.purgeExpired();
         int handoffs = handoffService.purgeExpired();
-        if (sessions > 0 || handoffs > 0) {
-            log.debug("만료된 로그인 세션 {}건, 인계 코드 {}건을 정리했습니다.", sessions, handoffs);
+        int refreshTokens = refreshTokenService.purgeExpired();
+        if (sessions > 0 || handoffs > 0 || refreshTokens > 0) {
+            log.debug("만료된 로그인 세션 {}건, 인계 코드 {}건, Refresh Token {}건을 정리했습니다.",
+                    sessions, handoffs, refreshTokens);
         }
     }
 }

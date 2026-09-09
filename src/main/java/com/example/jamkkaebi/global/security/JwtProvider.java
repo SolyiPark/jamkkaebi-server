@@ -76,6 +76,11 @@ public class JwtProvider {
         return friendCode;
     }
 
+    /** 발급 응답에 남은 수명을 실어 주기 위해 노출한다. */
+    public long getAccessTokenValidityMs() {
+        return accessTokenValidityMs;
+    }
+
     public long getRefreshTokenValidityMs() {
         return refreshTokenValidityMs;
     }

@@ -58,8 +58,9 @@ public class DevTokenController {
         String key = (request == null || request.key() == null || request.key().isBlank())
                 ? DEFAULT_DEV_KEY : request.key().trim();
 
-        User user = userRegistrationService.findOrRegister(
+        UserRegistrationService.Registration registration = userRegistrationService.findOrRegister(
                 AuthProvider.GOOGLE, DEV_PROVIDER_USER_ID_PREFIX + key, DEFAULT_DEV_NICKNAME);
+        User user = registration.user();
 
         String accessToken = jwtProvider.createAccessToken(user.getFriendCode());
         String refreshToken = jwtProvider.createRefreshToken(user.getFriendCode());
@@ -69,7 +70,12 @@ public class DevTokenController {
         return ResponseEntity.ok(ApiResponse.success(
                 "DEV_TOKEN_ISSUED", "개발용 토큰을 발급했습니다.",
                 new AuthTokenResponse(
-                        accessToken, refreshToken, user.getFriendCode(), user.getNickname())));
+                        accessToken,
+                        refreshToken,
+                        jwtProvider.getAccessTokenValidityMs() / 1000L,
+                        user.getFriendCode(),
+                        user.getNickname(),
+                        registration.newUser())));
     }
 
     /**

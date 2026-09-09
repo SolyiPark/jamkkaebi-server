@@ -44,12 +44,23 @@ public class AuthHandoff {
     @Column(name = "used_at")
     private LocalDateTime usedAt;
 
+    /**
+     * 이 인계를 만든 로그인이 <b>신규 가입</b>이었는지.
+     *
+     * <p>가입은 브라우저 콜백에서 일어나고 클라이언트는 그 뒤 교환 요청에서만 서버와 만난다. 두
+     * 요청을 잇는 것이 이 코드뿐이라, 가입 여부도 여기에 실어 옮긴다.
+     */
+    @Column(name = "new_user", nullable = false)
+    private boolean newUser;
+
     @Builder
-    private AuthHandoff(String code, Long userId, String verifierHash, LocalDateTime expiresAt) {
+    private AuthHandoff(String code, Long userId, String verifierHash,
+                        LocalDateTime expiresAt, boolean newUser) {
         this.code = code;
         this.userId = userId;
         this.verifierHash = verifierHash;
         this.expiresAt = expiresAt;
+        this.newUser = newUser;
     }
 
     public boolean isExpired(LocalDateTime now) {

@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Optional;
@@ -23,6 +24,8 @@ public class RefreshTokenService {
 
     private static final Logger log = LoggerFactory.getLogger(RefreshTokenService.class);
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    /** 만료 후에도 재사용 감지를 위해 행을 남겨 두는 기간. */
+    private static final Duration RETENTION_AFTER_EXPIRY = Duration.ofDays(7);
 
     private final RefreshTokenRepository refreshTokenRepository;
 
@@ -87,6 +90,21 @@ public class RefreshTokenService {
     @Transactional
     public void revokeAll(Long userId) {
         refreshTokenRepository.revokeAllByUserId(userId, LocalDateTime.now(KST));
+    }
+
+    /**
+     * 수명이 다한 지 오래된 행을 치운다.
+     *
+     * <p>이 테이블은 <b>로그인과 재발급마다 한 행씩 늘어난다.</b> 회전 방식이라 30분마다 한 번씩
+     * 재발급하는 사용자 한 명이 하루에 48행을 남기고, 지우는 주체가 없으면 그대로 쌓인다.
+     *
+     * <p>만료 직후가 아니라 {@link #RETENTION_AFTER_EXPIRY} 만큼 기다렸다 지운다 — 폐기된 행이
+     * 재사용 감지의 근거이므로, 경계에 걸친 토큰이 "저장된 적 없음"으로 둔갑하지 않게 여유를 둔다.
+     */
+    @Transactional
+    public int purgeExpired() {
+        return refreshTokenRepository.deleteExpiredBefore(
+                LocalDateTime.now(KST).minus(RETENTION_AFTER_EXPIRY));
     }
 
     private LocalDateTime expiresAt(long ttlMs) {

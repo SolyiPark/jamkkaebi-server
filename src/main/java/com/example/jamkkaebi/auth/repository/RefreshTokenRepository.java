@@ -41,4 +41,15 @@ public interface RefreshTokenRepository extends JpaRepository<RefreshToken, Long
                AND r.revokedAt IS NULL
             """)
     int revokeAllByUserId(@Param("userId") Long userId, @Param("now") LocalDateTime now);
+
+    /**
+     * 만료된 지 충분히 지난 행을 지운다.
+     *
+     * <p><b>기준이 만료 시각이지 폐기 여부가 아니다.</b> 폐기된 행은 재사용 감지의 유일한 근거라,
+     * 회전 즉시 지우면 탈취된 옛 토큰이 다시 들어와도 "저장된 적 없는 토큰"으로 보여 경보가
+     * 울리지 않는다. 원래 수명이 끝난 뒤에야 지우는 이유가 그것이다.
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("DELETE FROM RefreshToken r WHERE r.expiresAt <= :threshold")
+    int deleteExpiredBefore(@Param("threshold") LocalDateTime threshold);
 }

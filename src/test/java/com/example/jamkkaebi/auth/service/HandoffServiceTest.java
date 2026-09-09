@@ -42,15 +42,15 @@ class HandoffServiceTest {
     @Test
     @DisplayName("올바른 verifier 로 교환하면 사용자 식별자를 돌려준다")
     void exchangesWithCorrectVerifier() {
-        String code = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER));
+        String code = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER), false);
 
-        assertThat(handoffService.exchange(code, VERIFIER)).isEqualTo(USER_ID);
+        assertThat(handoffService.exchange(code, VERIFIER).userId()).isEqualTo(USER_ID);
     }
 
     @Test
     @DisplayName("같은 코드를 두 번 교환할 수 없다 — 일회용")
     void rejectsSecondExchange() {
-        String code = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER));
+        String code = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER), false);
         handoffService.exchange(code, VERIFIER);
 
         assertThatThrownBy(() -> handoffService.exchange(code, VERIFIER))
@@ -62,7 +62,7 @@ class HandoffServiceTest {
     @Test
     @DisplayName("딥링크만 가로챈 쪽은 교환하지 못한다 — verifier 원문이 없기 때문")
     void rejectsWrongVerifier() {
-        String code = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER));
+        String code = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER), false);
 
         assertThatThrownBy(() -> handoffService.exchange(code, "guessed-verifier"))
                 .isInstanceOf(BusinessException.class)
@@ -73,7 +73,7 @@ class HandoffServiceTest {
     @Test
     @DisplayName("verifier 를 틀리면 코드도 함께 소진된다 — 같은 코드로 계속 찍어 볼 수 없다")
     void burnsCodeEvenOnWrongVerifier() {
-        String code = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER));
+        String code = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER), false);
 
         assertThatThrownBy(() -> handoffService.exchange(code, "guessed-verifier"))
                 .isInstanceOf(BusinessException.class);
@@ -97,8 +97,8 @@ class HandoffServiceTest {
     @Test
     @DisplayName("발급된 코드는 추측할 수 없을 만큼 길다")
     void issuesUnguessableCode() {
-        String first = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER));
-        String second = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER));
+        String first = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER), false);
+        String second = handoffService.issue(USER_ID, TokenHasher.sha256(VERIFIER), false);
 
         assertThat(first).isNotEqualTo(second);
         assertThat(first.length()).isGreaterThanOrEqualTo(40); // 32바이트 base64url

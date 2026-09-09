@@ -52,24 +52,41 @@ public class UserRegistrationService {
     }
 
     /**
+     * 로그인 한 번의 결과.
+     *
+     * <p>가입 여부를 함께 돌려주는 이유는, <b>이 시점 말고는 신규 계정을 알아볼 방법이 없기</b>
+     * 때문이다. 가입 직후 닉네임 수정 화면을 띄우려면 클라이언트가 그 사실을 알아야 하는데,
+     * 나중에 {@code createdAt} 을 보고 "최근에 만들어졌으니 신규"라고 추측하는 방식은 재로그인과
+     * 첫 로그인을 구분하지 못한다.
+     *
+     * @param user    찾았거나 방금 만든 사용자
+     * @param newUser 이번 호출에서 새로 가입했는지
+     */
+    public record Registration(User user, boolean newUser) {
+    }
+
+    /**
      * 소셜 계정에 연결된 사용자를 찾고, 없으면 가입시킨다.
      *
      * <p>같은 계정의 <b>최초 로그인이 동시에</b> 들어오면(브라우저를 두 번 열었다든지) 양쪽 모두
      * "없음"을 보고 가입을 시도한다. 늦은 쪽은 {@code uk_users_provider_user} 에서 걸리는데, 그건
      * 오류가 아니라 <b>본인 계정이 방금 만들어졌다</b>는 뜻이다. 다시 조회해 멱등 성공으로 잇는다.
+     * 이때 {@code newUser} 는 거짓이다 — 실제로 행을 만든 쪽에서 이미 참으로 알렸으므로, 여기서도
+     * 참을 주면 같은 계정에 수정 화면이 두 번 뜬다.
      */
-    public User findOrRegister(AuthProvider provider, String providerUserId, String rawNickname) {
+    public Registration findOrRegister(AuthProvider provider, String providerUserId, String rawNickname) {
         Optional<User> existing =
                 userRepository.findByProviderAndProviderUserId(provider, providerUserId);
         if (existing.isPresent()) {
-            return existing.get();
+            return new Registration(existing.get(), false);
         }
         try {
-            return Objects.requireNonNull(registrationTransaction.execute(
-                    status -> register(provider, providerUserId, rawNickname)));
+            return new Registration(Objects.requireNonNull(registrationTransaction.execute(
+                    status -> register(provider, providerUserId, rawNickname))), true);
         } catch (DataIntegrityViolationException exception) {
-            return userRepository.findByProviderAndProviderUserId(provider, providerUserId)
+            User raced = userRepository.findByProviderAndProviderUserId(provider, providerUserId)
                     .orElseThrow(() -> exception);
+            return new Registration(raced, false);
         }
     }
 

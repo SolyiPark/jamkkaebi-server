@@ -36,6 +36,9 @@ import java.time.LocalDateTime;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class RefreshToken extends BaseTimeEntity {
 
+    /** 기기 표시 값의 최대 길이. 요청 DTO 가 같은 값을 검증해 저장 단계에서 터지지 않게 한다. */
+    public static final int DEVICE_LABEL_MAX_LENGTH = 100;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -55,7 +58,7 @@ public class RefreshToken extends BaseTimeEntity {
     private LocalDateTime revokedAt;
 
     /** 어느 기기에서 발급했는지 표시하는 선택 값. 세션 목록·문제 추적용이다. */
-    @Column(name = "device_label", length = 100)
+    @Column(name = "device_label", length = DEVICE_LABEL_MAX_LENGTH)
     private String deviceLabel;
 
     @Builder

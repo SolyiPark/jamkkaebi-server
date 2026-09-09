@@ -28,6 +28,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -44,7 +45,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 class AuthFlowTest {
 
-    private static final String VERIFIER = "unity-random-verifier-abcdef";
+    /** 32자 이상이어야 한다 — TokenExchangeRequest 가 하한을 강제한다. */
+    private static final String VERIFIER = "unity-random-verifier-0123456789abcdef";
+    /** 로그인 시작이 받는 값은 언제나 Base64(SHA-256(verifier)) 형식이다. */
+    private static final String VERIFIER_HASH = TokenHasher.sha256(VERIFIER);
+    /** 딥링크만 가로챈 쪽이 찍어 보는 값. 형식 검증이 아니라 대조에서 걸려야 한다. */
+    private static final String WRONG_VERIFIER = "attacker-guess-0123456789abcdefghij";
 
     @Autowired
     private MockMvc mockMvc;
@@ -86,14 +92,29 @@ class AuthFlowTest {
         mockMvc.perform(post("/api/auth/login/start")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"provider":"GOOGLE","verifierHash":"hashed-verifier"}
-                                """))
+                                {"provider":"GOOGLE","verifierHash":"%s"}
+                                """.formatted(VERIFIER_HASH)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("LOGIN_STARTED"))
                 .andExpect(jsonPath("$.data.authorizeUrl")
                         .value(org.hamcrest.Matchers.containsString("/oauth2/authorization/google")))
                 .andExpect(jsonPath("$.data.authorizeUrl")
-                        .value(org.hamcrest.Matchers.containsString("verifier_hash=hashed-verifier")));
+                        .value(org.hamcrest.Matchers.containsString("verifier_hash=")));
+    }
+
+    @Test
+    @DisplayName("해시가 아닌 verifier 원문을 보내면 로그인 시작을 거부한다")
+    void loginStartRejectsRawVerifier() throws Exception {
+        // 형식을 막지 않으면 원문이 브라우저 주소창을 지나 인계 구간의 방어가 통째로 사라지고,
+        // 64자를 넘는 값은 인가 요청을 만드는 필터 안에서 저장에 실패해 500 이 된다.
+        mockMvc.perform(post("/api/auth/login/start")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"provider":"GOOGLE","verifierHash":"%s"}
+                                """.formatted(VERIFIER)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("C001"))
+                .andExpect(jsonPath("$.errors[0].field").value("verifierHash"));
     }
 
     @Test
@@ -142,7 +163,7 @@ class AuthFlowTest {
     @DisplayName("인계 코드를 교환하면 토큰과 친구 코드를 받는다 — 내부 PK 는 나가지 않는다")
     void exchangeReturnsTokens() throws Exception {
         User user = registerUser("g-flow-1");
-        String handoff = handoffService.issue(user.getId(), TokenHasher.sha256(VERIFIER));
+        String handoff = handoffService.issue(user.getId(), VERIFIER_HASH, false);
 
         mockMvc.perform(post("/api/auth/exchange")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -156,14 +177,42 @@ class AuthFlowTest {
     }
 
     @Test
-    @DisplayName("verifier 가 틀리면 교환을 거부한다")
-    void exchangeRejectsWrongVerifier() throws Exception {
-        User user = registerUser("g-flow-2");
-        String handoff = handoffService.issue(user.getId(), TokenHasher.sha256(VERIFIER));
+    @DisplayName("신규 가입 로그인은 newUser 로 표시된다 — 클라이언트가 닉네임 수정 화면을 띄운다")
+    void exchangeReportsNewUser() throws Exception {
+        User user = registerUser("g-flow-new");
+        String handoff = handoffService.issue(user.getId(), VERIFIER_HASH, true);
 
         mockMvc.perform(post("/api/auth/exchange")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(exchangeBody(handoff, "wrong-verifier")))
+                        .content(exchangeBody(handoff, VERIFIER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.newUser").value(true))
+                // 클라이언트가 만료 시각을 상수로 박아 두지 않도록 남은 수명을 함께 준다.
+                .andExpect(jsonPath("$.data.accessTokenExpiresIn").value(1800));
+    }
+
+    @Test
+    @DisplayName("재발급 응답은 newUser 가 아니다 — 이미 있는 계정의 갱신이기 때문")
+    void reissueIsNeverNewUser() throws Exception {
+        User user = registerUser("g-flow-not-new");
+        String refreshToken = exchangeFor(user, "$.data.refreshToken");
+
+        mockMvc.perform(post("/api/auth/reissue")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reissueBody(refreshToken)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.newUser").value(false));
+    }
+
+    @Test
+    @DisplayName("verifier 가 틀리면 교환을 거부한다")
+    void exchangeRejectsWrongVerifier() throws Exception {
+        User user = registerUser("g-flow-2");
+        String handoff = handoffService.issue(user.getId(), VERIFIER_HASH, false);
+
+        mockMvc.perform(post("/api/auth/exchange")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(exchangeBody(handoff, WRONG_VERIFIER)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("A008"));
     }
@@ -258,6 +307,91 @@ class AuthFlowTest {
     }
 
     @Test
+    @DisplayName("만료된 Refresh Token 은 A004 가 아니라 A005 다 — 재발급을 무한 반복하면 안 된다")
+    void expiredRefreshTokenAsksForRelogin() throws Exception {
+        User user = registerUser("g-flow-expired");
+        JwtProvider expiredIssuer = new JwtProvider(
+                new JwtProperties(jwtProperties.secret(), -1_000L, -1_000L));
+        String expired = expiredIssuer.createRefreshToken(user.getFriendCode());
+
+        mockMvc.perform(post("/api/auth/reissue")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(reissueBody(expired)))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("A005"));
+    }
+
+    @Test
+    @DisplayName("길이 제한을 넘는 deviceLabel 은 저장 전에 막는다 — 표시용 값 때문에 로그인이 실패하면 안 된다")
+    void rejectsOverlongDeviceLabel() throws Exception {
+        User user = registerUser("g-flow-label");
+        String handoff = handoffService.issue(user.getId(), VERIFIER_HASH, false);
+
+        mockMvc.perform(post("/api/auth/exchange")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"handoff":"%s","verifier":"%s","deviceLabel":"%s"}
+                                """.formatted(handoff, VERIFIER, "가".repeat(200))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("C001"))
+                .andExpect(jsonPath("$.errors[0].field").value("deviceLabel"));
+    }
+
+    // ---------- 6단계: 가입 직후 닉네임 수정 ----------
+
+    @Test
+    @DisplayName("가입 직후 닉네임을 바꿀 수 있다 — 소셜 닉네임은 사용자가 고른 이름이 아니다")
+    void updatesNicknameAfterSignup() throws Exception {
+        User user = registerUser("g-flow-nickname");
+        String accessToken = exchangeForAccessToken(user);
+
+        mockMvc.perform(patch("/api/users/me/nickname")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nickname":"새이름"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("NICKNAME_UPDATED"))
+                .andExpect(jsonPath("$.data.nickname").value("새이름"));
+
+        mockMvc.perform(get("/api/users/me").header("Authorization", "Bearer " + accessToken))
+                .andExpect(jsonPath("$.data.nickname").value("새이름"));
+    }
+
+    @Test
+    @DisplayName("직접 입력한 닉네임은 기준에 걸리면 거부한다 — 조용히 기본값으로 바꾸지 않는다")
+    void rejectsInvalidNicknameInsteadOfSanitizing() throws Exception {
+        User user = registerUser("g-flow-nickname-bad");
+        String accessToken = exchangeForAccessToken(user);
+
+        mockMvc.perform(patch("/api/users/me/nickname")
+                        .header("Authorization", "Bearer " + accessToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nickname":"관리자"}
+                                """))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("C001"))
+                .andExpect(jsonPath("$.errors[0].field").value("nickname"));
+
+        mockMvc.perform(get("/api/users/me").header("Authorization", "Bearer " + accessToken))
+                .andExpect(jsonPath("$.data.nickname").value(user.getNickname()));
+    }
+
+    @Test
+    @DisplayName("로그인하지 않으면 닉네임을 바꿀 수 없다")
+    void nicknameUpdateRequiresLogin() throws Exception {
+        mockMvc.perform(patch("/api/users/me/nickname")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"nickname":"새이름"}
+                                """))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("A001"));
+    }
+
+    @Test
     @DisplayName("로그아웃하면 그 뒤의 재발급이 막힌다")
     void logoutStopsReissue() throws Exception {
         User user = registerUser("g-flow-8");
@@ -278,7 +412,9 @@ class AuthFlowTest {
     // ---------- 도우미 ----------
 
     private User registerUser(String providerUserId) {
-        return userRegistrationService.findOrRegister(AuthProvider.GOOGLE, providerUserId, "잠깨비");
+        return userRegistrationService
+                .findOrRegister(AuthProvider.GOOGLE, providerUserId, "잠깨비")
+                .user();
     }
 
     private String exchangeForAccessToken(User user) throws Exception {
@@ -287,7 +423,7 @@ class AuthFlowTest {
 
     /** 인계 코드를 발급해 교환하고, 응답에서 원하는 토큰을 꺼낸다. */
     private String exchangeFor(User user, String jsonPathExpression) throws Exception {
-        String handoff = handoffService.issue(user.getId(), TokenHasher.sha256(VERIFIER));
+        String handoff = handoffService.issue(user.getId(), VERIFIER_HASH, false);
         MvcResult result = mockMvc.perform(post("/api/auth/exchange")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(exchangeBody(handoff, VERIFIER)))

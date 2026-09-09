@@ -43,17 +43,16 @@ public class AuthService {
      */
     @Transactional
     public AuthTokenResponse exchange(String handoffCode, String verifier, String deviceLabel) {
-        Long userId = handoffService.exchange(handoffCode, verifier);
-        User user = userRepository.findById(userId)
+        HandoffService.Handoff handoff = handoffService.exchange(handoffCode, verifier);
+        User user = userRepository.findById(handoff.userId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         String accessToken = jwtProvider.createAccessToken(user.getFriendCode());
         String refreshToken = jwtProvider.createRefreshToken(user.getFriendCode());
         refreshTokenService.save(
-                userId, refreshToken, jwtProvider.getRefreshTokenValidityMs(), deviceLabel);
+                handoff.userId(), refreshToken, jwtProvider.getRefreshTokenValidityMs(), deviceLabel);
 
-        return new AuthTokenResponse(
-                accessToken, refreshToken, user.getFriendCode(), user.getNickname());
+        return tokenResponse(accessToken, refreshToken, user, handoff.newUser());
     }
 
     /**
@@ -64,7 +63,7 @@ public class AuthService {
      */
     @Transactional
     public AuthTokenResponse reissue(String refreshToken, String deviceLabel) {
-        String friendCode = jwtProvider.parseFriendCode(refreshToken, TokenType.REFRESH);
+        String friendCode = parseRefreshToken(refreshToken);
         User user = userRepository.findByFriendCode(friendCode)
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN));
 
@@ -78,8 +77,35 @@ public class AuthService {
         if (result != RefreshTokenService.RotationResult.ROTATED) {
             throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
         }
+        // 재발급은 기존 계정의 갱신이므로 신규 가입일 수 없다.
+        return tokenResponse(newAccessToken, newRefreshToken, user, false);
+    }
+
+    /**
+     * Refresh Token 을 해석해 친구 코드를 꺼낸다. <b>실패 사유는 모두 A005 로 모은다.</b>
+     *
+     * <p>{@link JwtProvider} 는 만료를 A004 로 구분해 주는데, 그 구분은 Access Token 을 위한
+     * 것이다. 클라이언트는 A004 를 "조용히 재발급"으로 읽도록 만들어져 있어서, 재발급 응답에
+     * A004 가 나가면 <b>만료된 Refresh Token 으로 재발급을 무한히 되풀이한다</b>. 이 경로에서
+     * 만료는 재로그인이 유일한 해결책이므로 위조·불일치와 같은 코드로 돌려준다.
+     */
+    private String parseRefreshToken(String refreshToken) {
+        try {
+            return jwtProvider.parseFriendCode(refreshToken, TokenType.REFRESH);
+        } catch (BusinessException exception) {
+            throw new BusinessException(ErrorCode.INVALID_REFRESH_TOKEN);
+        }
+    }
+
+    private AuthTokenResponse tokenResponse(String accessToken, String refreshToken,
+                                            User user, boolean newUser) {
         return new AuthTokenResponse(
-                newAccessToken, newRefreshToken, friendCode, user.getNickname());
+                accessToken,
+                refreshToken,
+                jwtProvider.getAccessTokenValidityMs() / 1000L,
+                user.getFriendCode(),
+                user.getNickname(),
+                newUser);
     }
 
     /** 이 사용자의 Refresh Token 을 모두 폐기한다. */

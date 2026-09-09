@@ -31,8 +31,14 @@ import java.util.Locale;
  *       막히는 경우가 있다.</li>
  *   <li>로그인이 끝나면 {@code jamkkaebi://auth?code=...} 딥링크로 돌아온다.</li>
  *   <li>{@code POST /api/auth/exchange} 에 코드와 <b>verifier 원문</b>을 보내 토큰을 받는다.</li>
+ *   <li>응답의 {@code newUser} 가 참이면 닉네임 수정 화면을 띄우고
+ *       {@code PATCH /api/users/me/nickname} 으로 보낸다 — 소셜에서 받은 이름은 10자로 잘리거나
+ *       기본값으로 바뀐 값이라 사용자가 고른 이름이 아니다.</li>
  *   <li>이후 요청에 {@code Authorization: Bearer <accessToken>} 을 붙이고, A004(만료)를 받으면
- *       {@code /api/auth/reissue} 로 조용히 갱신한다.</li>
+ *       {@code /api/auth/reissue} 로 조용히 갱신한다. 남은 수명은 발급 응답의
+ *       {@code accessTokenExpiresIn}(초)에 들어 있다.</li>
+ *   <li>재발급이 A005 로 실패하면 그때는 처음부터 다시 로그인한다. <b>이 경로에서 A004 는 나오지
+ *       않는다</b> — 만료된 Refresh Token 도 A005 로 모아 재발급을 반복하지 않게 한다.</li>
  * </ol>
  */
 @RestController

@@ -46,12 +46,22 @@ public class HandoffService {
     }
 
     /**
+     * 인계 코드가 실어 나르는 로그인 결과.
+     *
+     * @param userId  로그인한 사용자의 내부 식별자
+     * @param newUser 그 로그인이 신규 가입이었는지
+     */
+    public record Handoff(Long userId, boolean newUser) {
+    }
+
+    /**
      * 로그인을 마친 사용자에게 인계 코드를 발급한다.
      *
      * @param verifierHash 로그인 세션에서 옮겨 온 값. 교환 때 이 해시와 대조한다.
+     * @param newUser      이번 로그인이 신규 가입이었는지
      */
     @Transactional
-    public String issue(Long userId, String verifierHash) {
+    public String issue(Long userId, String verifierHash, boolean newUser) {
         byte[] bytes = new byte[CODE_BYTES];
         random.nextBytes(bytes);
         String code = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
@@ -61,12 +71,13 @@ public class HandoffService {
                 .userId(userId)
                 .verifierHash(verifierHash)
                 .expiresAt(LocalDateTime.now(KST).plus(authProperties.handoffTtl()))
+                .newUser(newUser)
                 .build());
         return code;
     }
 
     /**
-     * 인계 코드를 사용자 식별자로 바꾼다. 코드는 <b>제시된 순간</b> 폐기된다.
+     * 인계 코드를 로그인 결과로 바꾼다. 코드는 <b>제시된 순간</b> 폐기된다.
      *
      * <p>순서가 중요하다. 먼저 코드를 소진하고(조건부 UPDATE — 동시에 두 번 교환해도 하나만 통과),
      * 그 다음 {@code verifier} 를 대조한다. 반대로 하면 딥링크를 가로챈 쪽이 같은 코드로 verifier 를
@@ -74,12 +85,12 @@ public class HandoffService {
      *
      * <p>없음·만료·이미 사용·verifier 불일치를 모두 같은 오류로 돌려준다. (찍어맞추기 방지)
      */
-    public Long exchange(String code, String verifier) {
+    public Handoff exchange(String code, String verifier) {
         AuthHandoff handoff = consume(code);
         if (handoff == null || !TokenHasher.matches(verifier, handoff.getVerifierHash())) {
             throw new BusinessException(ErrorCode.INVALID_HANDOFF_CODE);
         }
-        return handoff.getUserId();
+        return new Handoff(handoff.getUserId(), handoff.isNewUser());
     }
 
     /** 코드를 소진하고 그 내용을 돌려준다. 쓸 수 없는 코드면 {@code null}. */

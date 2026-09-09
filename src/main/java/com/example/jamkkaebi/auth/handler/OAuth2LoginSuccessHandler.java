@@ -6,7 +6,6 @@ import com.example.jamkkaebi.auth.service.HandoffService;
 import com.example.jamkkaebi.auth.service.LoginSessionService;
 import com.example.jamkkaebi.auth.service.SocialProfile;
 import com.example.jamkkaebi.auth.service.SocialProfileExtractor;
-import com.example.jamkkaebi.user.domain.User;
 import com.example.jamkkaebi.user.service.UserRegistrationService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -78,8 +77,9 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         }
 
         try {
-            User user = register(authentication);
-            String handoff = handoffService.issue(user.getId(), verifierHash.get());
+            UserRegistrationService.Registration registration = register(authentication);
+            String handoff = handoffService.issue(
+                    registration.user().getId(), verifierHash.get(), registration.newUser());
             redirectToApp(response, UriComponentsBuilder
                     .fromUriString(authProperties.deepLinkUri())
                     .queryParam("code", handoff)
@@ -94,7 +94,7 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         }
     }
 
-    private User register(Authentication authentication) {
+    private UserRegistrationService.Registration register(Authentication authentication) {
         OAuth2AuthenticationToken token = (OAuth2AuthenticationToken) authentication;
         AuthProvider provider =
                 AuthProvider.fromRegistrationId(token.getAuthorizedClientRegistrationId());

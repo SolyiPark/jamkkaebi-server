@@ -83,6 +83,12 @@ app:
 # 콘솔에 등록한 https 주소와 달라져 redirect_uri_mismatch 로 로그인이 통째로 막힌다.
 server:
   forward-headers-strategy: framework
+  servlet:
+    session:
+      # 이 서버가 만드는 세션은 소셜 로그인 왕복(state 보관) 전용이고, 성공 핸들러가 끝나면서
+      # 곧바로 무효화한다. 남는 것은 동의 화면에서 이탈한 세션뿐이라 기본 30분은 길다.
+      # 로그인 세션 수명(app.auth.login-session-ttl)과 같은 10분으로 맞춘다.
+      timeout: 10m
 
 logging:
   level:

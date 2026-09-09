@@ -1,0 +1,22 @@
+# 개발 편의 설정. dev 프로파일에서만 적용된다.
+#
+#   실행 방법: VM 옵션에 -Dspring.profiles.active=dev
+#             (IntelliJ: 실행 구성 편집 → VM 옵션)
+#
+# application.yml 의 값을 여기서 덮어쓴다. 테스트가 불편하다고 커밋되는 기본값을 느슨하게 바꾸면
+# 되돌리는 것을 잊은 채 배포되는 날이 온다. 그래서 느슨하게 만드는 값은 전부 이 파일에만 둔다.
+
+app:
+  auth:
+    # 인계 코드 수명. 운영 기본값은 60초다.
+    #
+    # PC 브라우저에는 jamkkaebi:// 를 받을 앱이 없어, 개발자가 응답 헤더나 DB 에서 코드를 눈으로
+    # 찾아 손으로 붙여넣어야 한다. 60초는 그 손작업에 맞지 않는다. 실기기에서는 앱이 딥링크를
+    # 즉시 받아 교환하므로 운영에서는 60초로 충분하다 — 짧을수록 가로챈 쪽에게 주는 시간이 줄어든다.
+    handoff-ttl: 10m
+
+logging:
+  level:
+    # 소셜 왕복이 어디서 끊겼는지 보려면 이 둘이 필요하다.
+    org.springframework.security.oauth2: DEBUG
+    org.springframework.security.web.authentication: DEBUG

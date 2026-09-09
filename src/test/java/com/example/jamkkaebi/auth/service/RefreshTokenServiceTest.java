@@ -7,6 +7,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.time.Duration;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -105,6 +107,23 @@ class RefreshTokenServiceTest {
                 .isNotEqualTo(RefreshTokenService.RotationResult.ROTATED);
         assertThat(refreshTokenService.rotate(1L, "tablet-token", "next", TTL_MS, "tablet"))
                 .isNotEqualTo(RefreshTokenService.RotationResult.ROTATED);
+    }
+
+    @Test
+    @DisplayName("만료된 지 오래된 토큰만 지운다 — 재사용 감지의 근거를 먼저 버리지 않는다")
+    void purgesOnlyLongExpiredTokens() {
+        // 만료된 지 8일 지난 토큰. 그 시점엔 토큰 자체가 이미 무효라 남겨 둘 이유가 없다.
+        refreshTokenService.save(1L, "long-gone", -Duration.ofDays(8).toMillis(), "phone");
+        // 방금 회전돼 폐기됐지만 원래 수명은 아직 남은 토큰. 이 행이 재사용 감지의 근거다.
+        refreshTokenService.save(1L, "just-rotated", TTL_MS, "phone");
+        refreshTokenService.rotate(1L, "just-rotated", "current", TTL_MS, "phone");
+
+        assertThat(refreshTokenService.purgeExpired()).isEqualTo(1);
+
+        assertThat(refreshTokenRepository.findByTokenHash(hash("long-gone"))).isEmpty();
+        // 폐기됐지만 남아 있어야 유출을 알아챌 수 있다.
+        assertThat(refreshTokenService.rotate(1L, "just-rotated", "next", TTL_MS, "phone"))
+                .isEqualTo(RefreshTokenService.RotationResult.REUSE_DETECTED);
     }
 
     private String hash(String token) {
