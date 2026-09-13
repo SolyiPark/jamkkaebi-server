@@ -72,6 +72,25 @@ class FriendRequestFlowTest extends FriendApiTestSupport {
     }
 
     @Test
+    @DisplayName("대기 중인 요청을 다시 보내면 새로 만들지 않고 기존 요청을 200 으로 돌려준다")
+    void resendingOutstandingRequestReturnsExistingOne() throws Exception {
+        Player alice = player("앨리스");
+        Player bob = player("밥이");
+        sendRequest(alice, bob.code())
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.expiresAt").value(startsWith("2026-09-26T10:00")));
+
+        clock.advance(Duration.ofHours(1));
+
+        sendRequest(alice, bob.code())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("FRIEND_REQUEST_SENT"))
+                .andExpect(jsonPath("$.data.relation").value("REQUEST_SENT"))
+                .andExpect(jsonPath("$.data.expiresAt").value(startsWith("2026-09-26T10:00")));
+        assertThat(friendRequestRepository.count()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("거절은 보낸 쪽에 드러나지 않는다 — 보낸 요청함에 남고, 다시 보내도 같은 응답이다")
     void rejectionIsHiddenFromSender() throws Exception {
         Player alice = player("앨리스");
@@ -89,8 +108,10 @@ class FriendRequestFlowTest extends FriendApiTestSupport {
         get(alice, "/api/friends/lookup/{code}", bob.code())
                 .andExpect(jsonPath("$.data.relation").value("REQUEST_SENT"));
 
+        // 거절되지 않은 요청을 다시 보냈을 때와 같은 200 응답이어야 거절 사실이 드러나지 않는다.
         sendRequest(alice, bob.code())
-                .andExpect(status().isCreated())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value("FRIEND_REQUEST_SENT"))
                 .andExpect(jsonPath("$.data.relation").value("REQUEST_SENT"));
         assertThat(friendRequestRepository.count()).isEqualTo(1);
 

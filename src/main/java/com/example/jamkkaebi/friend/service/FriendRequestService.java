@@ -65,13 +65,20 @@ public class FriendRequestService {
         this.gameClock = gameClock;
     }
 
+    /** 친구 요청을 보낸 결과가 어떤 경우였는지. */
+    public enum SendOutcome {
+        REQUEST_CREATED, // 새 요청을 저장했다
+        ALREADY_SENT,    // 요청이 있어 새로 만들지 않고 그 요청을 돌려줬다
+        FRIEND_ADDED     // 상대가 이미 나에게 요청해 둔 상태라 바로 친구가 됐다
+    }
+
     /**
      * 친구 요청 결과.
      *
-     * @param friendAdded 상대가 이미 나에게 요청해 둔 상태라 바로 친구가 됐는지
-     * @param response    응답 본문
+     * @param outcome  어떤 경우였는지
+     * @param response 응답 본문
      */
-    public record SendResult(boolean friendAdded, FriendRequestResponse response) {
+    public record SendResult(SendOutcome outcome, FriendRequestResponse response) {
     }
 
     /**
@@ -105,7 +112,7 @@ public class FriendRequestService {
                 friendRequestRepository.findByFromUserIdAndToUserId(me.getId(), target.getId());
         if (mine.isPresent() && mine.get().isOutstanding(now)) {
             markRecommendationRequested(me, target);
-            return new SendResult(false,
+            return new SendResult(SendOutcome.ALREADY_SENT,
                     FriendRequestResponse.sent(playerCardAssembler.card(target), mine.get().getExpiresAt()));
         }
 
@@ -117,7 +124,7 @@ public class FriendRequestService {
         if (crossing) {
             becomeFriends(me, target);
             markRecommendationRequested(me, target);
-            return new SendResult(true, FriendRequestResponse.friend(playerCardAssembler.card(target)));
+            return new SendResult(SendOutcome.FRIEND_ADDED, FriendRequestResponse.friend(playerCardAssembler.card(target)));
         }
 
         if (friendRequestRepository.countOutstandingSent(me.getId(), now) >= properties.sentRequestLimit()) {
@@ -140,7 +147,7 @@ public class FriendRequestService {
                 .expiresAt(now.plus(properties.requestTtl()))
                 .build());
         markRecommendationRequested(me, target);
-        return new SendResult(false,
+        return new SendResult(SendOutcome.REQUEST_CREATED,
                 FriendRequestResponse.sent(playerCardAssembler.card(target), request.getExpiresAt()));
     }
 

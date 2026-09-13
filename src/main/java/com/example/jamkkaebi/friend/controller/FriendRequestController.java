@@ -46,12 +46,16 @@ public class FriendRequestController {
     ) {
         FriendRequestService.SendResult result =
                 friendRequestService.send(principal.friendCode(), request.friendCode());
-        // 상대 요청이 이미 와 있어 바로 친구가 된 경우
-        if (result.friendAdded()) {
-            return ResponseEntity.ok(ApiResponse.success("FRIEND_ADDED", "친구가 되었습니다.", result.response()));
-        }
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("FRIEND_REQUEST_SENT", "친구 요청을 보냈습니다.", result.response()));
+        return switch (result.outcome()) {
+            case REQUEST_CREATED -> ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ApiResponse.success("FRIEND_REQUEST_SENT", "친구 요청을 보냈습니다.", result.response()));
+            // 새로 만든 리소스가 없으므로 201 이 아니다. 코드는 같게 둬 클라이언트 분기는 바뀌지 않는다.
+            case ALREADY_SENT -> ResponseEntity.ok(
+                    ApiResponse.success("FRIEND_REQUEST_SENT", "이미 친구 요청을 보냈습니다.", result.response()));
+            // 상대 요청이 이미 와 있어 바로 친구가 된 경우
+            case FRIEND_ADDED -> ResponseEntity.ok(
+                    ApiResponse.success("FRIEND_ADDED", "친구가 되었습니다.", result.response()));
+        };
     }
 
     @GetMapping
