@@ -34,7 +34,7 @@ public class UserController {
     ) {
         User user = userProfileService.getByFriendCode(principal.friendCode());
         return ResponseEntity.ok(ApiResponse.success(
-                "PROFILE_FOUND", "프로필을 조회했습니다.", MyProfileResponse.from(user)));
+                "OK", "프로필을 조회했습니다.", MyProfileResponse.from(user)));
     }
 
     /**

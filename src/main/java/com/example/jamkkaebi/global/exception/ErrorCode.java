@@ -36,7 +36,22 @@ public enum ErrorCode {
             "로그인 인계 코드가 유효하지 않습니다. 다시 로그인해주세요."),
 
     // User
-    USER_NOT_FOUND(HttpStatus.NOT_FOUND, "U001", "사용자를 찾을 수 없습니다.");
+    USER_NOT_FOUND(HttpStatus.NOT_FOUND, "U001", "사용자를 찾을 수 없습니다."),
+
+    // Friend
+    // 없는 코드와 차단 관계를 한 코드로 묶는다. 나누면 상대가 나를 차단했는지 역추적할 수 있다.
+    FRIEND_CODE_NOT_FOUND(HttpStatus.NOT_FOUND, "F001", "존재하지 않는 코드입니다."),
+    FRIEND_CODE_LOOKUP_LIMITED(HttpStatus.TOO_MANY_REQUESTS, "F002",
+            "조회 시도가 너무 많습니다. 잠시 후 다시 시도해주세요."),
+    SENT_REQUEST_LIMIT_REACHED(HttpStatus.CONFLICT, "F003", "보낸 요청이 가득 찼습니다."),
+    RECEIVER_INBOX_FULL(HttpStatus.CONFLICT, "F004", "상대방의 수신함이 가득 찼습니다."),
+    FRIEND_LIMIT_REACHED(HttpStatus.CONFLICT, "F005", "친구 목록이 가득 찼습니다."),
+    TARGET_FRIEND_LIMIT_REACHED(HttpStatus.CONFLICT, "F006", "상대방의 친구 목록이 가득 찼습니다."),
+    FRIEND_REQUEST_NOT_FOUND(HttpStatus.NOT_FOUND, "F007", "친구 요청을 찾을 수 없습니다."),
+    FRIEND_NOT_FOUND(HttpStatus.NOT_FOUND, "F008", "친구를 찾을 수 없습니다."),
+    GIFT_ALREADY_SENT_TODAY(HttpStatus.CONFLICT, "F009", "오늘은 이미 상자를 선물했습니다."),
+    GIFT_RECEIVER_FULL(HttpStatus.CONFLICT, "F010", "상대방이 오늘 받을 수 있는 선물이 가득 찼습니다."),
+    ALREADY_FRIENDS(HttpStatus.CONFLICT, "F011", "이미 친구입니다.");
 
     private final HttpStatus status;
     private final String code;

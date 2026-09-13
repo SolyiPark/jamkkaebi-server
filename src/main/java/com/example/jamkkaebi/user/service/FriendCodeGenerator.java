@@ -18,8 +18,8 @@ import java.security.SecureRandom;
 @Component
 public class FriendCodeGenerator {
 
-    /** 0·O·1·I·L 을 뺀 31자. */
-    private static final char[] ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ".toCharArray();
+    /** 0·O·1·I·L 을 뺀 31자. 입력 검사와 같은 집합이어야 해서 {@link FriendCodeFormat} 에 둔다. */
+    private static final char[] ALPHABET = FriendCodeFormat.ALPHABET.toCharArray();
 
     private final SecureRandom random = new SecureRandom();
 
