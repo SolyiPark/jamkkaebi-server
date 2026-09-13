@@ -38,6 +38,16 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(errorCode, exception.getErrors()));
     }
 
+    /** 호출 한도 초과. 다시 시도할 수 있는 시점을 {@code Retry-After} 헤더(초)로 알려 준다. */
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTooManyRequests(TooManyRequestsException exception) {
+        ErrorCode errorCode = exception.getErrorCode();
+        return ResponseEntity.status(errorCode.getStatus())
+                .header(org.springframework.http.HttpHeaders.RETRY_AFTER,
+                        String.valueOf(exception.getRetryAfterSeconds()))
+                .body(ApiResponse.error(errorCode));
+    }
+
     /** 요청 본문 검증 실패. 필드별 사유를 errors 로 내려준다. */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Void>> handleMethodArgumentNotValid(
