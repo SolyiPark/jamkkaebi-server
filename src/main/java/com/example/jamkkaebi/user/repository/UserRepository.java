@@ -22,6 +22,18 @@ public interface UserRepository extends JpaRepository<User, Long> {
     /** JWT 의 sub 로 들어 있는 친구 코드로 사용자를 찾는다. */
     Optional<User> findByFriendCode(String friendCode);
 
+    /**
+     * 친구 코드로 찾으면서 그 행을 <b>바로 잠근다.</b>
+     *
+     * <p>먼저 평범하게 읽고 나중에 잠그면 소용이 없다 — MySQL 의 기본 격리 수준(REPEATABLE READ)에서는
+     * 트랜잭션의 첫 읽기가 스냅샷을 만들고 이후 평범한 읽기가 그 스냅샷을 그대로 쓰기 때문에, 잠금을
+     * 얻은 뒤에도 옛 값을 보게 된다. 그러면 동시에 들어온 상자 열기 두 건이 둘 다 "무료 아직 안 씀"과
+     * "잔액 충분"을 보고 통과한다. 잠그는 조회를 <b>첫 읽기</b>로 두면 그 시점의 최신 행을 읽는다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM User u WHERE u.friendCode = :friendCode")
+    Optional<User> findByFriendCodeForUpdate(@Param("friendCode") String friendCode);
+
     boolean existsByFriendCode(String friendCode);
 
     /**

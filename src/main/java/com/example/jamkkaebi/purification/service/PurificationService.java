@@ -152,7 +152,8 @@ public class PurificationService {
     public PurificationResultResponse report(String friendCode, String sessionToken,
                                              PurificationResultRequest request) {
         User user = userProfileService.getByFriendCode(friendCode);
-        PlaySession session = sessionRepository.findBySessionToken(sessionToken)
+        // 잠그고 읽는다 — 같은 결과가 동시에 두 번 오면 둘 다 ISSUED 를 보고 두 번 정산한다.
+        PlaySession session = sessionRepository.findBySessionTokenForUpdate(sessionToken)
                 .filter(found -> found.getUserId().equals(user.getId()))
                 .orElseThrow(() -> new BusinessException(ErrorCode.PURIFICATION_SESSION_NOT_FOUND));
 

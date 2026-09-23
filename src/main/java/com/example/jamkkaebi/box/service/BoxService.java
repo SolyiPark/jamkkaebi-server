@@ -83,8 +83,10 @@ public class BoxService {
     // 상자 하나를 연다. 뽑기·작업대 등록·중복 환전·재화 소비가 <b>한 트랜잭션</b>에서 끝난다.
     @Transactional
     public BoxOpenResponse open(String friendCode, BoxOpenRequest request) {
-        User user = userProfileService.getByFriendCode(friendCode);
-        userRepository.lockAllByIds(List.of(user.getId()));
+        // 잠그는 조회가 이 트랜잭션의 첫 읽기여야 한다. 먼저 평범하게 읽으면 그 스냅샷이 굳어,
+        // 잠근 뒤에도 옛 잔액·옛 상자 기록을 보고 동시 요청 두 건이 모두 통과한다.
+        User user = userRepository.findByFriendCodeForUpdate(friendCode)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         Optional<BoxOpenLog> replayed = openLogRepository
                 .findByUserIdAndRequestId(user.getId(), request.requestId());
@@ -166,8 +168,8 @@ public class BoxService {
         if (!properties.purchasable()) {
             throw new BusinessException(ErrorCode.BOX_NOT_READY);
         }
-        Integer dailyLimit = properties.purchaseDailyLimit();
-        if (dailyLimit != null && purchaseCount(user.getId(), today) >= dailyLimit) {
+        if (properties.hasPurchaseDailyLimit()
+                && purchaseCount(user.getId(), today) >= properties.purchaseDailyLimit()) {
             throw new BusinessException(ErrorCode.BOX_PURCHASE_LIMIT_REACHED);
         }
         int price = properties.purchasePrice();
@@ -210,7 +212,7 @@ public class BoxService {
                         // 클라이언트가 키의 유무로 버튼을 가린다.
                         properties.purchasable() ? properties.purchasePrice() : null,
                         (int) purchaseCount(user.getId(), today),
-                        properties.purchaseDailyLimit()),
+                        properties.hasPurchaseDailyLimit() ? properties.purchaseDailyLimit() : null),
                 new BoxStatusResponse.WorkbenchStatus(inProgress, capacity, inProgress >= capacity),
                 gameClock.nextResetAt());
     }
