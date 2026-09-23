@@ -85,7 +85,7 @@ public class User extends BaseTimeEntity {
     @Column(length = 255)
     private String email;
 
-    /** 프로필 아바타(정령) 식별자. {@code null} 이면 기본 사람 모양이다. */
+    /** 프로필 아바타(도깨비) 식별자. {@code null} 이면 기본 사람 모양이다. */
     @Column(name = "spirit_id")
     private Long spiritId;
 

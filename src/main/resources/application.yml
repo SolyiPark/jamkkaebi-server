@@ -82,6 +82,36 @@ app:
     # 따라간다 (기획서 13-5). 재화 기획 확정 전 임시값이다.
     visit-reward-jeongseong: 5
 
+  # 코어 루프(상자·정화·성장). 기획서 값이 확정된 것은 코드 기본값(BoxProperties 등)에 두고,
+  # 여기에는 재화 기획이 확정되면 바뀔 값만 적는다 — 그래야 무엇이 임시값인지 한눈에 보인다.
+  box:
+    # 중복 카드 1장의 환전량. 기획서는 "시대의 결정 + 소량의 정성"까지만 정했다.
+    duplicate-jeongseong: 10
+    duplicate-crystal: 3
+    # 정성으로 상자를 더 여는 값과 1일 구매 상한. 기획서 5-1 의 "상한 논의" 자리다.
+    # 값을 음수로 두면 구매 경로 자체가 닫힌다.
+    purchase-price: 50
+    purchase-daily-limit: 3
+
+  purification:
+    # 클리어 기본 정성. 여기에 난이도 배율이 곱해진다 (보통 ×1.2 → 36).
+    clear-jeongseong: 30
+    # 보너스 타일 1개가 주는 양. 배율은 곱하지 않는다 — 매우 쉬움(×0.8)에서 1개짜리 결정 타일이
+    # 0개가 되어 캐낼 이유가 사라지기 때문이다.
+    bonus-tile-jeongseong: 5
+    bonus-tile-crystal: 1
+    # 완벽 정화(손상 0)가 정성에 얹는 비율. 최초 정화에는 적용하지 않는다 (기획서 6-8).
+    perfect-bonus-rate: 0.5
+    # 관리 플레이 1회가 주는 성장 게이지. 난이도 배율이 곱해진다.
+    growth-gauge-per-clear: 20
+
+  growth:
+    # 각성+ / 완전각성으로 올라가는 데 필요한 성장 게이지.
+    # 한 판이 주는 양에 단계별 배율이 붙지 않으므로, 필요량만 커진다 (API 명세 부록 C-7).
+    gauge-required:
+      AWAKENED_PLUS: 100
+      FULLY_AWAKENED: 150
+
 # 리버스 프록시(nginx 등) 뒤에 있을 때 X-Forwarded-* 헤더를 신뢰한다.
 #
 # 소셜에 보내는 redirect_uri 는 {baseUrl} 로 만들어지는데, 이 값은 들어온 요청에서 유추된다.

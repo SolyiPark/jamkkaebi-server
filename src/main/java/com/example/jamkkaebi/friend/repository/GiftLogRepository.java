@@ -20,6 +20,10 @@ public interface GiftLogRepository extends JpaRepository<GiftLog, Long> {
     // 이 날 받은 선물 중 아직 쓰지 않은 상자권이 있는가.
     boolean existsByToUserIdAndSentDateAndConvertedFalseAndClaimedFalse(Long toUserId, LocalDate sentDate);
 
+    // 쓸 수 있는 상자권 한 장. 하루 최대 한 장이라 첫 행이 곧 그 장이다.
+    Optional<GiftLog> findFirstByToUserIdAndSentDateAndConvertedFalseAndClaimedFalse(
+            Long toUserId, LocalDate sentDate);
+
     @Query("""
             SELECT new com.example.jamkkaebi.friend.repository.UserCount(g.toUserId, COUNT(g))
               FROM GiftLog g
