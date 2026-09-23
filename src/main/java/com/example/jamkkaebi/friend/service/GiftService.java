@@ -122,6 +122,25 @@ public class GiftService {
         return giftLogRepository.existsByToUserIdAndSentDateAndConvertedFalseAndClaimedFalse(myId, today);
     }
 
+    /**
+     * 상자권 한 장을 쓴다. 상자를 여는 트랜잭션 안에서 부른다.
+     *
+     * <p><b>받은 날에만</b> 쓸 수 있다 — 넘어가게 두면 선물을 며칠 모아 두었다 한 번에 여는 경로가
+     * 생기고, 그러면 하루 한 번이라는 상자의 리듬이 깨진다.
+     *
+     * @return 쓸 상자권이 있어 소진했으면 {@code true}
+     */
+    @Transactional
+    public boolean claimTicket(Long myId, LocalDate today) {
+        return giftLogRepository
+                .findFirstByToUserIdAndSentDateAndConvertedFalseAndClaimedFalse(myId, today)
+                .map(ticket -> {
+                    ticket.claim();
+                    return true;
+                })
+                .orElse(false);
+    }
+
     private GiftState stateFor(Long friendId, Optional<Long> sentTo, long receivedToday) {
         if (sentTo.isPresent()) {
             return sentTo.get().equals(friendId) ? GiftState.SENT : GiftState.DONE_TODAY;

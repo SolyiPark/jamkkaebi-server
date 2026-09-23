@@ -57,6 +57,11 @@ public class GiftLog extends BaseTimeEntity {
     @Column(nullable = false)
     private boolean claimed;
 
+    /** 상자권을 썼다. 상자 도메인이 실제로 상자를 여는 트랜잭션 안에서 부른다. */
+    public void claim() {
+        this.claimed = true;
+    }
+
     @Builder
     private GiftLog(Long fromUserId, Long toUserId, LocalDate sentDate, boolean converted) {
         this.fromUserId = fromUserId;
