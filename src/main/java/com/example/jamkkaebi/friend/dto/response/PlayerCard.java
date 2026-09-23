@@ -7,7 +7,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  *
  * @param friendCode     친구 코드 (하이픈 없음)
  * @param nickname       닉네임
- * @param spiritId       프로필 아바타 정령. 기본 아바타면 키 생략
+ * @param spiritId       프로필 아바타 도깨비. 기본 아바타면 키 생략
  * @param streakDays     오늘 기준 연속 접속 일수 (끊겼으면 0)
  * @param collectionRate 수집률(%), 내림
  */
