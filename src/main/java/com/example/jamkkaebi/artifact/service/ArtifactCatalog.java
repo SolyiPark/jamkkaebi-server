@@ -69,6 +69,12 @@ public class ArtifactCatalog {
         return buildingRepository.findAll();
     }
 
+    // 없는 건물 번호 = 보유하지 않은 건물로 취급
+    public BuildingMaster building(Integer buildingId) {
+        return buildingRepository.findById(buildingId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.BUILDING_NOT_OWNED));
+    }
+
     public Optional<BuildingMaster> buildingOf(Era era) {
         return buildingRepository.findByEra(era);
     }

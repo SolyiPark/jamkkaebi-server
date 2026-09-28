@@ -40,6 +40,25 @@ public class EraCrystalWallet {
         }
     }
 
+    /**
+     * 시대의 결정을 쓴다. 잔액이 모자라면 아무것도 빼지 않고 {@code false}.
+     */
+    @Transactional
+    public boolean spend(Long userId, Era era, int amount) {
+        if (amount <= 0) {
+            return true;
+        }
+        return repository.spendCrystal(userId, era, amount) > 0;
+    }
+
+    // 지갑이 아직 없으면 0
+    @Transactional(readOnly = true)
+    public int balance(Long userId, Era era) {
+        return repository.findByUserIdAndEra(userId, era)
+                .map(UserEraCrystal::getCrystal)
+                .orElse(0);
+    }
+
     @Transactional(readOnly = true)
     public Map<Era, Integer> balances(Long userId) {
         Map<Era, Integer> balances = new EnumMap<>(Era.class);
