@@ -56,6 +56,13 @@ public enum ErrorCode {
     AWAKENING_STAGE_MISMATCH(HttpStatus.CONFLICT, "W004",
             "도깨비의 각성 단계가 바뀌었습니다. 새로고침 후 다시 시도해주세요."),
 
+    // Building — 건물 강화 (작업대)
+    // 미지급과 없는 번호를 한 코드로 묶는다. 유물(W001)과 같은 규칙이다.
+    BUILDING_NOT_OWNED(HttpStatus.NOT_FOUND, "BD001", "보유하지 않은 건물입니다."),
+    NOT_ENOUGH_ERA_CRYSTAL(HttpStatus.CONFLICT, "BD002", "시대의 결정이 부족합니다."),
+    BUILDING_LEVEL_MISMATCH(HttpStatus.CONFLICT, "BD003",
+            "건물 레벨이 바뀌었습니다. 새로고침 후 다시 시도해주세요."),
+
     // Purification — 유물 정화
     DIFFICULTY_LOCKED(HttpStatus.CONFLICT, "P001", "아직 열리지 않은 난이도입니다."),
     // 없는 토큰·남의 토큰·만료·무효화를 한 코드로 묶는다. 나누면 남의 세션 토큰을 찍어 볼 수 있다.

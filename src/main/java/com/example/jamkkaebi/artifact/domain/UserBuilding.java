@@ -49,6 +49,11 @@ public class UserBuilding extends BaseTimeEntity {
     @Column(name = "acquired_at", nullable = false)
     private LocalDateTime acquiredAt;
 
+    // 전시관 배치 여부
+    @ColumnDefault("false")
+    @Column(name = "is_displayed", nullable = false)
+    private boolean displayed;
+
     @ColumnDefault("false")
     @Column(name = "is_hidden", nullable = false)
     private boolean hidden;
@@ -78,6 +83,7 @@ public class UserBuilding extends BaseTimeEntity {
     }
 
     public void placeAt(int posX, int posY) {
+        this.displayed = true;
         this.posX = posX;
         this.posY = posY;
     }
