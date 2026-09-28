@@ -112,6 +112,13 @@ app:
       AWAKENED_PLUS: 100
       FULLY_AWAKENED: 150
 
+  building:
+    # 건물 Lv.2 / Lv.3 으로 올라가는 데 드는 그 시대의 결정. 도깨비 강화와 자원을 공유하지 않는다.
+    # 값을 음수로 두면 그 레벨은 비용 미확정으로 잠긴다 (BD002).
+    level-up-cost:
+      2: 30
+      3: 60
+
 # 리버스 프록시(nginx 등) 뒤에 있을 때 X-Forwarded-* 헤더를 신뢰한다.
 #
 # 소셜에 보내는 redirect_uri 는 {baseUrl} 로 만들어지는데, 이 값은 들어온 요청에서 유추된다.
