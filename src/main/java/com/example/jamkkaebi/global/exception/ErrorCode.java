@@ -63,6 +63,11 @@ public enum ErrorCode {
     BUILDING_LEVEL_MISMATCH(HttpStatus.CONFLICT, "BD003",
             "건물 레벨이 바뀌었습니다. 새로고침 후 다시 시도해주세요."),
 
+    // Exhibition — 전시관
+    // 정령 수호를 마치지 않은 유물과 받지 않은 건물을 한 코드로 묶는다. 클라이언트가 둘 수 있는 목록은
+    // 전시관 조회 응답에서 이미 알고 있어, 어긋났다면 새로고침이 해결책이라는 점이 같다.
+    EXHIBIT_ITEM_NOT_PLACEABLE(HttpStatus.CONFLICT, "E001", "전시관에 둘 수 없는 항목이 있습니다."),
+
     // Purification — 유물 정화
     DIFFICULTY_LOCKED(HttpStatus.CONFLICT, "P001", "아직 열리지 않은 난이도입니다."),
     // 없는 토큰·남의 토큰·만료·무효화를 한 코드로 묶는다. 나누면 남의 세션 토큰을 찍어 볼 수 있다.

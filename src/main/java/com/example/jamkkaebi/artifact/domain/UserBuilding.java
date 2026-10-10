@@ -13,6 +13,7 @@ import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.DynamicUpdate;
 
 import java.time.LocalDateTime;
 
@@ -20,7 +21,11 @@ import java.time.LocalDateTime;
  * 사용자가 완성한 건물. 시대 유물 3종을 모두 마치면 자동으로 지급된다.
  *
  * <p>건물은 시대의 결정으로 키우는 관리형 대상이라 레벨만 있다.
+ *
+ * <p><b>바뀐 컬럼만 UPDATE 한다</b>({@code @DynamicUpdate}). 레벨(강화)과 배치 좌표(전시관)를 서로 다른 요청이
+ * 고치므로, 행 전체를 쓰면 한쪽이 읽어 둔 옛 값으로 다른 쪽의 변경을 덮어쓸 수 있다.
  */
+@DynamicUpdate
 @Entity
 @Table(
         name = "user_buildings",
@@ -86,6 +91,10 @@ public class UserBuilding extends BaseTimeEntity {
         this.displayed = true;
         this.posX = posX;
         this.posY = posY;
+    }
+
+    public void removeFromExhibition() {
+        this.displayed = false;
     }
 
     public void changeHidden(boolean hidden) {

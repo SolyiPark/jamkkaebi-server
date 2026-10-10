@@ -12,6 +12,7 @@ import com.example.jamkkaebi.artifact.service.MasterDataSeeder;
 import com.example.jamkkaebi.auth.domain.AuthProvider;
 import com.example.jamkkaebi.box.repository.BoxOpenLogRepository;
 import com.example.jamkkaebi.box.repository.GachaPityRepository;
+import com.example.jamkkaebi.friend.repository.ExhibitionSnapshotRepository;
 import com.example.jamkkaebi.friend.repository.GiftLogRepository;
 import com.example.jamkkaebi.global.security.JwtProvider;
 import com.example.jamkkaebi.purification.repository.PlaySessionRepository;
@@ -71,6 +72,8 @@ abstract class CoreLoopApiTestSupport {
     @Autowired
     protected GiftLogRepository giftLogRepository;
     @Autowired
+    protected ExhibitionSnapshotRepository snapshotRepository;
+    @Autowired
     protected ArtifactCatalog catalog;
     @Autowired
     protected TransactionTemplate transactionTemplate;
@@ -97,6 +100,7 @@ abstract class CoreLoopApiTestSupport {
         boxOpenLogRepository.deleteAll();
         gachaPityRepository.deleteAll();
         giftLogRepository.deleteAll();
+        snapshotRepository.deleteAll();
         userArtifactRepository.deleteAll();
         userBuildingRepository.deleteAll();
         crystalRepository.deleteAll();
@@ -166,6 +170,13 @@ abstract class CoreLoopApiTestSupport {
 
     protected ResultActions post(Player player, String url, String body, Object... uriVariables) throws Exception {
         return mockMvc.perform(MockMvcRequestBuilders.post(url, uriVariables)
+                .header("Authorization", "Bearer " + player.token())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body));
+    }
+
+    protected ResultActions put(Player player, String url, String body, Object... uriVariables) throws Exception {
+        return mockMvc.perform(MockMvcRequestBuilders.put(url, uriVariables)
                 .header("Authorization", "Bearer " + player.token())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body));

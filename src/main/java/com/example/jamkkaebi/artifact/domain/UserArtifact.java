@@ -196,6 +196,10 @@ public class UserArtifact extends BaseTimeEntity {
         this.posY = posY;
     }
 
+    public void removeFromExhibition() {
+        this.displayed = false;
+    }
+
     public void changeHidden(boolean hidden) {
         this.hidden = hidden;
     }

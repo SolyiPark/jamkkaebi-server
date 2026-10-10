@@ -112,6 +112,11 @@ app:
       AWAKENED_PLUS: 100
       FULLY_AWAKENED: 150
 
+  exhibition:
+    # 배치 좌표 범위. 클라이언트의 아이소메트릭 맵 크기가 정해지면 이 값을 맞춘다 (임시값).
+    grid-width: 20
+    grid-height: 20
+
   building:
     # 건물 Lv.2 / Lv.3 으로 올라가는 데 드는 그 시대의 결정. 도깨비 강화와 자원을 공유하지 않는다.
     # 값을 음수로 두면 그 레벨은 비용 미확정으로 잠긴다 (BD002).
