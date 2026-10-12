@@ -74,8 +74,8 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         get(player, "/api/exhibition")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("OK"))
-                .andExpect(jsonPath("$.data.grid.width").value(20))
-                .andExpect(jsonPath("$.data.grid.height").value(20))
+                .andExpect(jsonPath("$.data.grid.width").value(7))
+                .andExpect(jsonPath("$.data.grid.height").value(7))
                 .andExpect(jsonPath("$.data.spirits").isEmpty())
                 .andExpect(jsonPath("$.data.buildings").isEmpty());
     }
@@ -142,21 +142,21 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         int buildingId = giveBuilding(player, Era.GORYEO);
 
         put(player, "/api/exhibition/layout", layout(
-                item("SPIRIT", INCENSE_BURNER, 6, 11),
-                item("BUILDING", buildingId, 10, 4)))
+                item("SPIRIT", INCENSE_BURNER, 3, 5),
+                item("BUILDING", buildingId, 5, 4)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("EXHIBITION_SAVED"))
                 .andExpect(jsonPath("$.data.spirits[0].displayed").value(true))
-                .andExpect(jsonPath("$.data.spirits[0].position.x").value(6))
-                .andExpect(jsonPath("$.data.spirits[0].position.y").value(11))
+                .andExpect(jsonPath("$.data.spirits[0].position.x").value(3))
+                .andExpect(jsonPath("$.data.spirits[0].position.y").value(5))
                 .andExpect(jsonPath("$.data.buildings[0].displayed").value(true))
-                .andExpect(jsonPath("$.data.buildings[0].position.x").value(10))
+                .andExpect(jsonPath("$.data.buildings[0].position.x").value(5))
                 .andExpect(jsonPath("$.data.buildings[0].position.y").value(4));
 
         get(player, "/api/exhibition")
-                .andExpect(jsonPath("$.data.spirits[0].position.x").value(6))
-                .andExpect(jsonPath("$.data.spirits[0].position.y").value(11))
-                .andExpect(jsonPath("$.data.buildings[0].position.x").value(10))
+                .andExpect(jsonPath("$.data.spirits[0].position.x").value(3))
+                .andExpect(jsonPath("$.data.spirits[0].position.y").value(5))
+                .andExpect(jsonPath("$.data.buildings[0].position.x").value(5))
                 .andExpect(jsonPath("$.data.buildings[0].position.y").value(4));
 
         // 작업대의 상세도 배치 여부를 같이 보여 준다.
@@ -175,10 +175,10 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
 
         put(player, "/api/exhibition/layout", layout(
                 item("SPIRIT", INCENSE_BURNER, 0, 0),
-                item("SPIRIT", MAPAE, 19, 19)))
+                item("SPIRIT", MAPAE, 6, 6)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.spirits[1].position.x").value(19))
-                .andExpect(jsonPath("$.data.spirits[1].position.y").value(19));
+                .andExpect(jsonPath("$.data.spirits[1].position.x").value(6))
+                .andExpect(jsonPath("$.data.spirits[1].position.y").value(6));
     }
 
     @Test
@@ -186,14 +186,14 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     void 배치_저장_멱등() throws Exception {
         Player player = player("학예사");
         giveCompleted(player, INCENSE_BURNER);
-        String body = layout(item("SPIRIT", INCENSE_BURNER, 6, 11));
+        String body = layout(item("SPIRIT", INCENSE_BURNER, 3, 5));
 
         put(player, "/api/exhibition/layout", body).andExpect(status().isOk());
         put(player, "/api/exhibition/layout", body)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.spirits.length()").value(1))
-                .andExpect(jsonPath("$.data.spirits[0].position.x").value(6))
-                .andExpect(jsonPath("$.data.spirits[0].position.y").value(11));
+                .andExpect(jsonPath("$.data.spirits[0].position.x").value(3))
+                .andExpect(jsonPath("$.data.spirits[0].position.y").value(5));
     }
 
     @Test
@@ -211,14 +211,14 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(status().isOk());
 
         // 마패만 남기고 위치를 옮긴다 — 대향로와 건물은 내려간다.
-        put(player, "/api/exhibition/layout", layout(item("SPIRIT", MAPAE, 7, 8)))
+        put(player, "/api/exhibition/layout", layout(item("SPIRIT", MAPAE, 4, 5)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.spirits[0].artifactId").value(INCENSE_BURNER))
                 .andExpect(jsonPath("$.data.spirits[0].displayed").value(false))
                 .andExpect(jsonPath("$.data.spirits[0].position").doesNotExist())
                 .andExpect(jsonPath("$.data.spirits[1].displayed").value(true))
-                .andExpect(jsonPath("$.data.spirits[1].position.x").value(7))
-                .andExpect(jsonPath("$.data.spirits[1].position.y").value(8))
+                .andExpect(jsonPath("$.data.spirits[1].position.x").value(4))
+                .andExpect(jsonPath("$.data.spirits[1].position.y").value(5))
                 .andExpect(jsonPath("$.data.buildings[0].displayed").value(false))
                 .andExpect(jsonPath("$.data.buildings[0].position").doesNotExist());
 
@@ -284,13 +284,13 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         giveCompleted(player, MAPAE);
 
         put(player, "/api/exhibition/layout", layout(
-                item("SPIRIT", INCENSE_BURNER, 20, 5),
+                item("SPIRIT", INCENSE_BURNER, 7, 5),
                 item("SPIRIT", MAPAE, 5, -1)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("C001"))
                 .andExpect(jsonPath("$.errors.length()").value(2))
                 .andExpect(jsonPath("$.errors[0].field").value("items[0].x"))
-                .andExpect(jsonPath("$.errors[0].reason").value("0 이상 20 미만이어야 합니다."))
+                .andExpect(jsonPath("$.errors[0].reason").value("0 이상 7 미만이어야 합니다."))
                 .andExpect(jsonPath("$.errors[1].field").value("items[1].y"));
 
         assertThat(userArtifactRepository.findAllByUserId(player.id())).noneMatch(UserArtifact::isDisplayed);
@@ -353,7 +353,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     void 숨기기() throws Exception {
         Player player = player("학예사");
         giveCompleted(player, INCENSE_BURNER);
-        put(player, "/api/exhibition/layout", layout(item("SPIRIT", INCENSE_BURNER, 6, 11)))
+        put(player, "/api/exhibition/layout", layout(item("SPIRIT", INCENSE_BURNER, 3, 5)))
                 .andExpect(status().isOk());
 
         patch(player, "/api/exhibition/spirits/{id}/visibility", "{\"hidden\":true}", INCENSE_BURNER)
@@ -365,8 +365,8 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         get(player, "/api/exhibition")
                 .andExpect(jsonPath("$.data.spirits[0].hidden").value(true))
                 .andExpect(jsonPath("$.data.spirits[0].displayed").value(true))
-                .andExpect(jsonPath("$.data.spirits[0].position.x").value(6))
-                .andExpect(jsonPath("$.data.spirits[0].position.y").value(11));
+                .andExpect(jsonPath("$.data.spirits[0].position.x").value(3))
+                .andExpect(jsonPath("$.data.spirits[0].position.y").value(5));
         get(player, "/api/artifacts/{id}", INCENSE_BURNER)
                 .andExpect(jsonPath("$.data.hidden").value(true));
 
@@ -380,7 +380,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.hidden").value(false));
         get(player, "/api/exhibition")
                 .andExpect(jsonPath("$.data.spirits[0].hidden").value(false))
-                .andExpect(jsonPath("$.data.spirits[0].position.x").value(6));
+                .andExpect(jsonPath("$.data.spirits[0].position.x").value(3));
     }
 
     @Test
@@ -434,28 +434,28 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(status().isOk());
 
         put(owner, "/api/exhibition/layout", layout(
-                item("SPIRIT", INCENSE_BURNER, 6, 11),
-                item("SPIRIT", MAPAE, 9, 9),
-                item("BUILDING", buildingId, 10, 4)))
+                item("SPIRIT", INCENSE_BURNER, 3, 5),
+                item("SPIRIT", MAPAE, 4, 4),
+                item("BUILDING", buildingId, 5, 4)))
                 .andExpect(status().isOk());
         patch(owner, "/api/exhibition/spirits/{id}/visibility", "{\"hidden\":true}", MAPAE)
                 .andExpect(status().isOk());
 
         get(visitor, "/api/friends/{code}/exhibition", owner.code())
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.grid.width").value(20))
+                .andExpect(jsonPath("$.data.grid.width").value(7))
                 .andExpect(jsonPath("$.data.spirits.length()").value(1))
                 .andExpect(jsonPath("$.data.spirits[0].artifactId").value(INCENSE_BURNER))
                 .andExpect(jsonPath("$.data.spirits[0].revealLevel").value("NAMED"))
                 .andExpect(jsonPath("$.data.spirits[0].spiritName").value("향로지기"))
                 .andExpect(jsonPath("$.data.spirits[0].realName").value("금동대향로"))
                 .andExpect(jsonPath("$.data.spirits[0].awakeningStage").value("AWAKENED"))
-                .andExpect(jsonPath("$.data.spirits[0].position.x").value(6))
-                .andExpect(jsonPath("$.data.spirits[0].position.y").value(11))
+                .andExpect(jsonPath("$.data.spirits[0].position.x").value(3))
+                .andExpect(jsonPath("$.data.spirits[0].position.y").value(5))
                 .andExpect(jsonPath("$.data.spirits[0].clarity").doesNotExist())
                 .andExpect(jsonPath("$.data.buildings.length()").value(1))
                 .andExpect(jsonPath("$.data.buildings[0].buildingId").value(buildingId))
-                .andExpect(jsonPath("$.data.buildings[0].position.x").value(10))
+                .andExpect(jsonPath("$.data.buildings[0].position.x").value(5))
                 .andExpect(jsonPath("$.data.capturedAt").exists());
     }
 
@@ -466,7 +466,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         Player visitor = player("방문객");
         friendshipRepository.save(Friendship.between(owner.id(), visitor.id()));
         giveCompleted(owner, INCENSE_BURNER);
-        put(owner, "/api/exhibition/layout", layout(item("SPIRIT", INCENSE_BURNER, 6, 11)))
+        put(owner, "/api/exhibition/layout", layout(item("SPIRIT", INCENSE_BURNER, 3, 5)))
                 .andExpect(status().isOk());
         get(visitor, "/api/friends/{code}/exhibition", owner.code())
                 .andExpect(jsonPath("$.data.spirits.length()").value(1));
@@ -536,7 +536,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         post(owner, "/api/buildings/{id}/level-up", "{\"targetLevel\":2}", buildingId)
                 .andExpect(status().isOk());
 
-        put(owner, "/api/exhibition/layout", layout(item("BUILDING", buildingId, 10, 4)))
+        put(owner, "/api/exhibition/layout", layout(item("BUILDING", buildingId, 5, 4)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.buildings[0].level").value(2));
         get(visitor, "/api/friends/{code}/exhibition", owner.code())
@@ -587,7 +587,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         giveCompleted(owner, MAPAE);
         int buildingId = giveBuilding(owner, Era.GORYEO);
         String layoutA = layout(item("SPIRIT", INCENSE_BURNER, 1, 1), item("BUILDING", buildingId, 5, 5));
-        String layoutB = layout(item("SPIRIT", MAPAE, 7, 7), item("SPIRIT", INCENSE_BURNER, 2, 3));
+        String layoutB = layout(item("SPIRIT", MAPAE, 6, 6), item("SPIRIT", INCENSE_BURNER, 2, 3));
 
         ExecutorService pool = Executors.newFixedThreadPool(4);
         try {

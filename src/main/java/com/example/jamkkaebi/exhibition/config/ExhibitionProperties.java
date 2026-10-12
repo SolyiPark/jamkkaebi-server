@@ -19,8 +19,8 @@ public record ExhibitionProperties(
 ) {
 
     public ExhibitionProperties {
-        gridWidth = orDefault(gridWidth, 20);
-        gridHeight = orDefault(gridHeight, 20);
+        gridWidth = orDefault(gridWidth, 7);
+        gridHeight = orDefault(gridHeight, 7);
         // 범위 밖 좌표
         if (gridWidth <= 0 || gridHeight <= 0) {
             throw new IllegalArgumentException("전시관 그리드의 가로·세로는 1 이상이어야 합니다.");

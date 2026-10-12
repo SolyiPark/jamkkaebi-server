@@ -140,10 +140,10 @@ class FriendDailyFlowTest extends FriendApiTestSupport {
         get(visitor, "/api/friends/{code}/exhibition", owner.code())
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.owner.friendCode").value(owner.code()))
-                .andExpect(jsonPath("$.data.grid.width").value(20))
+                .andExpect(jsonPath("$.data.grid.width").value(7))
                 .andExpect(jsonPath("$.data.spirits[0].spiritName").value("향로지기"))
                 .andExpect(jsonPath("$.data.spirits[0].revealLevel").value("NAMED"))
-                .andExpect(jsonPath("$.data.spirits[0].position.x").value(6))
+                .andExpect(jsonPath("$.data.spirits[0].position.x").value(3))
                 .andExpect(jsonPath("$.data.capturedAt").value(startsWith("2026-09-12T10:00")))
                 .andExpect(jsonPath("$.data.giftState").value("AVAILABLE"))
                 .andExpect(jsonPath("$.data.visitRewardAvailable").value(true));
@@ -334,7 +334,7 @@ class FriendDailyFlowTest extends FriendApiTestSupport {
                 FakeExhibitionViewReader.GRID,
                 List.of(new ExhibitionView.SpiritView(
                         2, Era.THREE_KINGDOMS, "백제, 향이 스민 산맥", "금동대향로", spiritName,
-                        AwakeningStage.AWAKENED_PLUS, new ExhibitionView.Position(6, 11))),
+                        AwakeningStage.AWAKENED_PLUS, new ExhibitionView.Position(3, 5))),
                 List.of());
     }
 

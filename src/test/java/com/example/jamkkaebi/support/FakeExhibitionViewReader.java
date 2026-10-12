@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class FakeExhibitionViewReader implements ExhibitionViewReader {
 
-    public static final ExhibitionView.Grid GRID = new ExhibitionView.Grid(20, 20);
+    public static final ExhibitionView.Grid GRID = new ExhibitionView.Grid(7, 7);
 
     private final Map<Long, ExhibitionView> views = new ConcurrentHashMap<>();
 
