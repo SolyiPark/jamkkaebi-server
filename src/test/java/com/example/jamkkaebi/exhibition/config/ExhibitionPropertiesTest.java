@@ -21,12 +21,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ExhibitionPropertiesTest {
 
     @Test
-    @DisplayName("설정이 없으면 20×20 을 쓴다")
+    @DisplayName("설정이 없으면 7×7 을 쓴다")
     void 기본값() {
         ExhibitionProperties properties = new ExhibitionProperties(null, null);
 
-        assertThat(properties.grid().width()).isEqualTo(20);
-        assertThat(properties.grid().height()).isEqualTo(20);
+        assertThat(properties.grid().width()).isEqualTo(7);
+        assertThat(properties.grid().height()).isEqualTo(7);
     }
 
     @Test
@@ -43,8 +43,8 @@ class ExhibitionPropertiesTest {
     @Test
     @DisplayName("0 이하는 어떤 좌표도 둘 수 없게 만들므로 기동에서 거절한다")
     void 잘못된_값() {
-        assertThatThrownBy(() -> new ExhibitionProperties(0, 20)).isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new ExhibitionProperties(20, -1)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ExhibitionProperties(0, 7)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new ExhibitionProperties(7, -1)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -56,9 +56,9 @@ class ExhibitionPropertiesTest {
         Binder binder = new Binder(ConfigurationPropertySources.from(yaml));
 
         // 기본값과 같은 값을 적어 두었으므로, 키 이름이 틀려도 기본값 덕에 통과하지 않게 원본 값을 직접 읽는다.
-        assertThat(binder.bind("app.exhibition.grid-width", Integer.class).get()).isEqualTo(20);
-        assertThat(binder.bind("app.exhibition.grid-height", Integer.class).get()).isEqualTo(20);
-        assertThat(binder.bind("app.exhibition", ExhibitionProperties.class).get().grid().width()).isEqualTo(20);
+        assertThat(binder.bind("app.exhibition.grid-width", Integer.class).get()).isEqualTo(7);
+        assertThat(binder.bind("app.exhibition.grid-height", Integer.class).get()).isEqualTo(7);
+        assertThat(binder.bind("app.exhibition", ExhibitionProperties.class).get().grid().width()).isEqualTo(7);
     }
 
     private ExhibitionProperties bind(MapConfigurationPropertySource source) {
