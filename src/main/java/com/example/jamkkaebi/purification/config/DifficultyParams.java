@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.purification.config;
 
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
 
 import java.math.BigDecimal;
 

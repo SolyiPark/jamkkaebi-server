@@ -1,11 +1,11 @@
 package com.example.jamkkaebi.friend.service;
 
-import com.example.jamkkaebi.artifact.domain.Era;
 import com.example.jamkkaebi.friend.dto.response.EraCount;
 import com.example.jamkkaebi.friend.dto.response.PlayerCard;
 import com.example.jamkkaebi.friend.spi.PlayerCollection;
 import com.example.jamkkaebi.friend.spi.PlayerCollectionReader;
 import com.example.jamkkaebi.global.time.GameClock;
+import com.example.jamkkaebi.relic.domain.Era;
 import com.example.jamkkaebi.user.domain.User;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;

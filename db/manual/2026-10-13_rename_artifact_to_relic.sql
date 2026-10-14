@@ -39,4 +39,6 @@ ALTER TABLE play_sessions RENAME INDEX idx_play_sessions_owner_artifact TO idx_p
 
 -- [4] 친구 전시관 스냅샷 — JSON 으로 저장돼 있어 키 이름도 바꿔야 한다.
 --     바꾸지 않으면 주인이 다시 접속할 때까지 친구 화면에서 유물 번호가 빠진다.
-UPDATE exhibition_snapshots SET payload = REPLACE(payload, '"artifactId":', '"relicId":');
+UPDATE exhibition_snapshots
+SET payload = REPLACE(payload, '"artifactId":', '"relicId":')
+WHERE payload LIKE '%"artifactId"%';

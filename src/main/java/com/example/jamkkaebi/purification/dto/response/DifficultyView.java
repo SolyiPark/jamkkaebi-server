@@ -1,8 +1,8 @@
 package com.example.jamkkaebi.purification.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Difficulty;
 import com.example.jamkkaebi.purification.config.DifficultyParams;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Difficulty;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.math.BigDecimal;

@@ -1,10 +1,10 @@
 package com.example.jamkkaebi.friend;
 
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Era;
 import com.example.jamkkaebi.friend.domain.Block;
 import com.example.jamkkaebi.friend.domain.FriendRecommendation;
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Era;
 import com.example.jamkkaebi.support.FakeExhibitionViewReader;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
