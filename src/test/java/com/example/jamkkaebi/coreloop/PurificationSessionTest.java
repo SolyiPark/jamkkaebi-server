@@ -1,13 +1,27 @@
 package com.example.jamkkaebi.coreloop;
 
-import com.example.jamkkaebi.artifact.domain.Difficulty;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
+import com.example.jamkkaebi.purification.domain.SessionStatus;
+import com.example.jamkkaebi.purification.service.ShapeSizePlanner;
+import com.example.jamkkaebi.relic.domain.Difficulty;
+import com.example.jamkkaebi.relic.domain.UserRelic;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -24,6 +38,9 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
             {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
              "bonusTiles":{"jeongseong":0,"eraCrystal":0}}
             """;
+
+    @Autowired
+    private ShapeSizePlanner shapeSizePlanner;
 
     @Test
     @DisplayName("난이도 목록은 네 단계를 수치와 함께 준다")
@@ -43,20 +60,73 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
+    @DisplayName("난이도마다 목표 형상을 개수와 칸 수 합으로 준다 — 기획서 6-11 의 3개/6칸 · 3개/8칸 · 3개/10칸 · 4개/14칸")
+    void 난이도별_목표_형상() throws Exception {
+        Player player = player("탐색가");
+
+        get(player, "/api/difficulties")
+                .andExpect(jsonPath("$.data.difficulties[0].shapeCount").value(3))
+                .andExpect(jsonPath("$.data.difficulties[0].shapeCellTotal").value(6))
+                .andExpect(jsonPath("$.data.difficulties[1].shapeCount").value(3))
+                .andExpect(jsonPath("$.data.difficulties[1].shapeCellTotal").value(8))
+                .andExpect(jsonPath("$.data.difficulties[2].shapeCount").value(3))
+                .andExpect(jsonPath("$.data.difficulties[2].shapeCellTotal").value(10))
+                .andExpect(jsonPath("$.data.difficulties[3].shapeCount").value(4))
+                .andExpect(jsonPath("$.data.difficulties[3].shapeCellTotal").value(14));
+    }
+
+    @Test
+    @DisplayName("보드의 형상별 칸 수는 그 판의 시드로 정해지고, 개수와 합은 난이도를 따른다")
+    void 보드의_형상별_칸_수() throws Exception {
+        Player player = player("발굴꾼");
+        giveCompleted(player, 1);
+
+        ResultActions started = post(player, "/api/purifications", """
+                {"relicId":1,"difficulty":"EASY"}
+                """)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.board.shapeCount").value(3))
+                .andExpect(jsonPath("$.data.board.shapeCellTotal").value(8))
+                .andExpect(jsonPath("$.data.board.shapeSizes.length()").value(3));
+
+        long seed = ((Number) read(started, "$.data.board.seed")).longValue();
+        List<Integer> sizes = read(started, "$.data.board.shapeSizes");
+        assertThat(sizes.stream().mapToInt(Integer::intValue).sum()).isEqualTo(8);
+        // 서버는 배분을 저장하지 않는다 — 시드만 있으면 같은 배분을 다시 낼 수 있어야 한다.
+        assertThat(sizes).isEqualTo(shapeSizePlanner.plan(seed, 3, 8));
+    }
+
+    @Test
+    @DisplayName("세션에는 그 유물의 봉인 매개체가 실려 보드 아트 세트를 고를 수 있다")
+    void 봉인_매개체() throws Exception {
+        Player player = player("수집가");
+        give(player, 1);
+        give(player, 2);
+        give(player, 6);
+
+        post(player, "/api/purifications", "{\"relicId\":1}")
+                .andExpect(jsonPath("$.data.sealMedium").value("RUST"));
+        post(player, "/api/purifications", "{\"relicId\":2}")
+                .andExpect(jsonPath("$.data.sealMedium").value("SOOT"));
+        post(player, "/api/purifications", "{\"relicId\":6}")
+                .andExpect(jsonPath("$.data.sealMedium").value("FOG"));
+    }
+
+    @Test
     @DisplayName("최초 정화는 보통 고정이고, 난이도를 보내면 거절한다")
     void 최초_정화는_난이도를_고를_수_없다() throws Exception {
         Player player = player("초보");
         give(player, 1);
 
         post(player, "/api/purifications", """
-                {"artifactId":1,"difficulty":"EASY"}
+                {"relicId":1,"difficulty":"EASY"}
                 """)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("C001"))
                 .andExpect(jsonPath("$.errors[0].field").value("difficulty"));
 
         post(player, "/api/purifications", """
-                {"artifactId":1}
+                {"relicId":1}
                 """)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.entryRoute").value("FIRST"))
@@ -75,7 +145,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
         giveCompleted(player, 1);
 
         post(player, "/api/purifications", """
-                {"artifactId":1,"difficulty":"HARD"}
+                {"relicId":1,"difficulty":"HARD"}
                 """)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("P001"));
@@ -88,7 +158,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
         giveCompleted(player, 1);
 
         post(player, "/api/purifications", """
-                {"artifactId":1}
+                {"relicId":1}
                 """)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[0].field").value("difficulty"));
@@ -181,7 +251,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.rewards.jeongseong").value(36));
 
         assertThat(jeongseongOf(player)).isEqualTo(afterFirst);
-        assertThat(userArtifactRepository.findByUserIdAndArtifactId(player.id(), 1)
+        assertThat(userRelicRepository.findByUserIdAndRelicId(player.id(), 1)
                 .orElseThrow().getCurrentPhase().order()).isEqualTo(2);
     }
 
@@ -219,8 +289,8 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.rewards.jeongseong").value(0))
                 .andExpect(jsonPath("$.data.revealed").doesNotExist());
 
-        UserArtifact stored = userArtifactRepository
-                .findByUserIdAndArtifactId(player.id(), 1).orElseThrow();
+        UserRelic stored = userRelicRepository
+                .findByUserIdAndRelicId(player.id(), 1).orElseThrow();
         assertThat(stored.getCurrentPhase().order()).isEqualTo(1);
         assertThat(jeongseongOf(player)).isZero();
 
@@ -291,5 +361,82 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.rewards.jeongseong").value(46))
                 .andExpect(jsonPath("$.data.rewards.eraCrystal.amount").value(1));
+    }
+
+    @Test
+    @DisplayName("같은 사용자의 정화 시작이 동시에 몰려도 보고할 수 있는 세션은 마지막 하나뿐이다")
+    void 동시_시작() throws Exception {
+        Player player = player("연타왕");
+        give(player, 1);
+
+        ExecutorService pool = Executors.newFixedThreadPool(4);
+        try {
+            for (int round = 0; round < 10; round++) {
+                List<Future<Integer>> starts = new ArrayList<>();
+                for (int i = 0; i < 4; i++) {
+                    starts.add(pool.submit(() -> post(player, "/api/purifications", "{\"relicId\":1}")
+                            .andReturn().getResponse().getStatus()));
+                }
+                for (Future<Integer> start : starts) {
+                    assertThat(start.get(10, TimeUnit.SECONDS)).as("%d 번째 판의 응답", round).isEqualTo(201);
+                }
+                assertThat(playSessionRepository.findAllByUserIdAndStatus(player.id(), SessionStatus.ISSUED))
+                        .as("%d 번째 판 뒤 보고할 수 있는 세션", round)
+                        .hasSize(1);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("정화 시작과 결과 보고는 모두 사용자 행을 먼저 잠근다 — 잠금 순서가 같아 서로 엇갈려 교착되지 않는다")
+    void 시작과_보고는_사용자_행을_먼저_잠근다() throws Exception {
+        Player player = player("줄서기");
+        give(player, 1);
+        String token = startPurification(player, 1, null);
+        clock.advance(Duration.ofMinutes(1));
+
+        assertWaitsForUserLock(player,
+                () -> post(player, "/api/purifications/{token}/result", SUCCESS_BODY, token)
+                        .andReturn().getResponse().getStatus(),
+                200);
+        assertWaitsForUserLock(player,
+                () -> post(player, "/api/purifications", "{\"relicId\":1}")
+                        .andReturn().getResponse().getStatus(),
+                201);
+    }
+
+    /**
+     * 다른 트랜잭션이 사용자 행을 잡고 있는 동안 {@code request} 가 끝나지 않고 기다렸다가, 잠금이 풀린 뒤에야
+     * {@code expectedStatus} 로 끝나는지 본다.
+     */
+    private void assertWaitsForUserLock(Player player, Callable<Integer> request, int expectedStatus)
+            throws Exception {
+        CountDownLatch locked = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> holder = pool.submit(() -> transactionTemplate.executeWithoutResult(status -> {
+                userRepository.lockAllByIds(List.of(player.id()));
+                locked.countDown();
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }));
+            assertThat(locked.await(10, TimeUnit.SECONDS)).isTrue();
+
+            Future<Integer> waiting = pool.submit(request);
+            assertThatThrownBy(() -> waiting.get(600, TimeUnit.MILLISECONDS)).isInstanceOf(TimeoutException.class);
+
+            release.countDown();
+            holder.get(10, TimeUnit.SECONDS);
+            assertThat(waiting.get(10, TimeUnit.SECONDS)).isEqualTo(expectedStatus);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
     }
 }
