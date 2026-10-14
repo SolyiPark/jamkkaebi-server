@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.friend.spi;
 
-import com.example.jamkkaebi.artifact.domain.Era;
+import com.example.jamkkaebi.relic.domain.Era;
 
 import java.util.EnumMap;
 import java.util.Map;
@@ -15,7 +15,7 @@ import java.util.Map;
  */
 public record PlayerCollection(Map<Era, Integer> completedByEra) {
 
-    public static final int TOTAL_ARTIFACTS = 9;
+    public static final int TOTAL_RELICS = 9;
 
     public static final PlayerCollection NONE = new PlayerCollection(Map.of());
 
@@ -29,12 +29,12 @@ public record PlayerCollection(Map<Era, Integer> completedByEra) {
         return completedByEra.getOrDefault(era, 0);
     }
 
-    public int completedArtifacts() {
+    public int completedRelics() {
         return completedByEra.values().stream().mapToInt(Integer::intValue).sum();
     }
 
     // 수집률(%), 내림
     public int collectionRate() {
-        return completedArtifacts() * 100 / TOTAL_ARTIFACTS;
+        return completedRelics() * 100 / TOTAL_RELICS;
     }
 }

@@ -1,12 +1,5 @@
 package com.example.jamkkaebi.box.service;
 
-import com.example.jamkkaebi.artifact.domain.ArtifactMaster;
-import com.example.jamkkaebi.artifact.domain.ArtifactStatus;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
-import com.example.jamkkaebi.artifact.dto.response.ArtifactCard;
-import com.example.jamkkaebi.artifact.repository.UserArtifactRepository;
-import com.example.jamkkaebi.artifact.service.ArtifactCatalog;
-import com.example.jamkkaebi.artifact.service.EraCrystalWallet;
 import com.example.jamkkaebi.box.config.BoxProperties;
 import com.example.jamkkaebi.box.domain.BoxOpenLog;
 import com.example.jamkkaebi.box.domain.BoxSource;
@@ -18,6 +11,13 @@ import com.example.jamkkaebi.friend.service.GiftService;
 import com.example.jamkkaebi.global.exception.BusinessException;
 import com.example.jamkkaebi.global.exception.ErrorCode;
 import com.example.jamkkaebi.global.time.GameClock;
+import com.example.jamkkaebi.relic.domain.RelicMaster;
+import com.example.jamkkaebi.relic.domain.RelicStatus;
+import com.example.jamkkaebi.relic.domain.UserRelic;
+import com.example.jamkkaebi.relic.dto.response.RelicCard;
+import com.example.jamkkaebi.relic.repository.UserRelicRepository;
+import com.example.jamkkaebi.relic.service.EraCrystalWallet;
+import com.example.jamkkaebi.relic.service.RelicCatalog;
 import com.example.jamkkaebi.user.domain.User;
 import com.example.jamkkaebi.user.repository.UserRepository;
 import com.example.jamkkaebi.user.service.UserProfileService;
@@ -43,9 +43,9 @@ public class BoxService {
 
     private final UserProfileService userProfileService;
     private final UserRepository userRepository;
-    private final UserArtifactRepository userArtifactRepository;
+    private final UserRelicRepository userRelicRepository;
     private final BoxOpenLogRepository openLogRepository;
-    private final ArtifactCatalog catalog;
+    private final RelicCatalog catalog;
     private final GachaMachine gachaMachine;
     private final EraCrystalWallet crystalWallet;
     private final GiftService giftService;
@@ -54,9 +54,9 @@ public class BoxService {
 
     public BoxService(UserProfileService userProfileService,
                       UserRepository userRepository,
-                      UserArtifactRepository userArtifactRepository,
+                      UserRelicRepository userRelicRepository,
                       BoxOpenLogRepository openLogRepository,
-                      ArtifactCatalog catalog,
+                      RelicCatalog catalog,
                       GachaMachine gachaMachine,
                       EraCrystalWallet crystalWallet,
                       GiftService giftService,
@@ -64,7 +64,7 @@ public class BoxService {
                       GameClock gameClock) {
         this.userProfileService = userProfileService;
         this.userRepository = userRepository;
-        this.userArtifactRepository = userArtifactRepository;
+        this.userRelicRepository = userRelicRepository;
         this.openLogRepository = openLogRepository;
         this.catalog = catalog;
         this.gachaMachine = gachaMachine;
@@ -103,11 +103,11 @@ public class BoxService {
         int spent = consumeEntry(user, request.source());
 
         LocalDateTime now = gameClock.now();
-        List<ArtifactMaster> all = catalog.allArtifacts();
-        List<Integer> ownedIds = userArtifactRepository.findArtifactIdsByUserId(user.getId());
+        List<RelicMaster> all = catalog.allRelics();
+        List<Integer> ownedIds = userRelicRepository.findRelicIdsByUserId(user.getId());
         Integer drawnId = gachaMachine.draw(user.getId(),
-                all.stream().map(ArtifactMaster::getId).toList(), ownedIds);
-        ArtifactMaster drawn = catalog.artifact(drawnId);
+                all.stream().map(RelicMaster::getId).toList(), ownedIds);
+        RelicMaster drawn = catalog.relic(drawnId);
 
         boolean duplicate = ownedIds.contains(drawnId);
         int jeongseongGained = 0;
@@ -119,13 +119,13 @@ public class BoxService {
             userRepository.addJeongseong(user.getId(), jeongseongGained);
             crystalWallet.add(user.getId(), drawn.getEra(), crystalGained);
         } else {
-            userArtifactRepository.save(UserArtifact.acquired(user.getId(), drawnId, now));
+            userRelicRepository.save(UserRelic.acquired(user.getId(), drawnId, now));
         }
 
         BoxOpenLog log = openLogRepository.save(BoxOpenLog.builder()
                 .userId(user.getId())
                 .requestId(request.requestId())
-                .artifactId(drawnId)
+                .relicId(drawnId)
                 .source(request.source())
                 .duplicate(duplicate)
                 .jeongseongGained(jeongseongGained)
@@ -181,10 +181,10 @@ public class BoxService {
     }
 
     private BoxOpenResponse render(User user, BoxOpenLog log) {
-        ArtifactMaster master = catalog.artifact(log.getArtifactId());
-        UserArtifact owned = userArtifactRepository
-                .findByUserIdAndArtifactId(user.getId(), log.getArtifactId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.ARTIFACT_NOT_OWNED));
+        RelicMaster master = catalog.relic(log.getRelicId());
+        UserRelic owned = userRelicRepository
+                .findByUserIdAndRelicId(user.getId(), log.getRelicId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.RELIC_NOT_OWNED));
 
         BoxOpenResponse.DuplicateReward duplicateReward = log.isDuplicate()
                 ? new BoxOpenResponse.DuplicateReward(
@@ -195,7 +195,7 @@ public class BoxService {
                 : null;
 
         return new BoxOpenResponse(
-                log.result(), ArtifactCard.of(master, owned), duplicateReward, spent, statusOf(user));
+                log.result(), RelicCard.of(master, owned), duplicateReward, spent, statusOf(user));
     }
 
     private BoxStatusResponse statusOf(User user) {
@@ -218,7 +218,7 @@ public class BoxService {
     }
 
     private long inProgressCount(Long userId) {
-        return userArtifactRepository.countByUserIdAndStatus(userId, ArtifactStatus.IN_PROGRESS);
+        return userRelicRepository.countByUserIdAndStatus(userId, RelicStatus.IN_PROGRESS);
     }
 
     private long purchaseCount(Long userId, LocalDate today) {

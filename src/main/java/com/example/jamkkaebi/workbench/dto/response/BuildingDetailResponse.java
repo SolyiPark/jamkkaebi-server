@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.workbench.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.Era;
+import com.example.jamkkaebi.relic.domain.Era;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.LocalDateTime;

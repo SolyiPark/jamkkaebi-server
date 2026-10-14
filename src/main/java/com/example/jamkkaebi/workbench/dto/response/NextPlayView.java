@@ -1,8 +1,8 @@
 package com.example.jamkkaebi.workbench.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.EntryRoute;
-import com.example.jamkkaebi.artifact.domain.Phase;
 import com.example.jamkkaebi.purification.dto.response.DifficultyOption;
+import com.example.jamkkaebi.relic.domain.EntryRoute;
+import com.example.jamkkaebi.relic.domain.Phase;
 
 import java.util.List;
 

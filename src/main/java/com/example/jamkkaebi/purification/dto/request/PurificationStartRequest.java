@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.purification.dto.request;
 
-import com.example.jamkkaebi.artifact.domain.Difficulty;
+import com.example.jamkkaebi.relic.domain.Difficulty;
 import jakarta.validation.constraints.NotNull;
 
 /**
@@ -9,8 +9,7 @@ import jakarta.validation.constraints.NotNull;
 public record PurificationStartRequest(
 
         @NotNull(message = "필수 값입니다.")
-        Integer artifactId,
-
+        Integer relicId,
         Difficulty difficulty
 ) {
 }

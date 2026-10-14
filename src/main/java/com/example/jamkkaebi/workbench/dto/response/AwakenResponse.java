@@ -1,8 +1,8 @@
 package com.example.jamkkaebi.workbench.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Difficulty;
-import com.example.jamkkaebi.artifact.dto.response.GaugeView;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Difficulty;
+import com.example.jamkkaebi.relic.dto.response.GaugeView;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.List;

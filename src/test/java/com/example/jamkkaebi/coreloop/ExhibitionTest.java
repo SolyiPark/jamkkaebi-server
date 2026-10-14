@@ -1,15 +1,15 @@
 package com.example.jamkkaebi.coreloop;
 
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
-import com.example.jamkkaebi.artifact.domain.UserBuilding;
-import com.example.jamkkaebi.artifact.service.EraCrystalWallet;
-import com.example.jamkkaebi.friend.domain.Friendship;
 import com.example.jamkkaebi.exhibition.service.ExhibitionViewProvider;
+import com.example.jamkkaebi.friend.domain.Friendship;
 import com.example.jamkkaebi.friend.repository.FriendshipRepository;
 import com.example.jamkkaebi.friend.service.ExhibitionSnapshotService;
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.UserBuilding;
+import com.example.jamkkaebi.relic.domain.UserRelic;
+import com.example.jamkkaebi.relic.service.EraCrystalWallet;
 import com.example.jamkkaebi.user.domain.UserActivityRecordedEvent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -92,7 +92,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         get(player, "/api/exhibition")
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.spirits.length()").value(2))
-                .andExpect(jsonPath("$.data.spirits[0].artifactId").value(INCENSE_BURNER))
+                .andExpect(jsonPath("$.data.spirits[0].relicId").value(INCENSE_BURNER))
                 .andExpect(jsonPath("$.data.spirits[0].era").value("THREE_KINGDOMS"))
                 .andExpect(jsonPath("$.data.spirits[0].revealLevel").value("NAMED"))
                 .andExpect(jsonPath("$.data.spirits[0].poeticAlias").value("백제, 향이 스민 산맥"))
@@ -103,7 +103,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.spirits[0].displayed").value(false))
                 .andExpect(jsonPath("$.data.spirits[0].hidden").value(false))
                 .andExpect(jsonPath("$.data.spirits[0].position").doesNotExist())
-                .andExpect(jsonPath("$.data.spirits[1].artifactId").value(MAPAE))
+                .andExpect(jsonPath("$.data.spirits[1].relicId").value(MAPAE))
                 .andExpect(jsonPath("$.data.buildings.length()").value(1))
                 .andExpect(jsonPath("$.data.buildings[0].buildingId").value(buildingId))
                 .andExpect(jsonPath("$.data.buildings[0].era").value("GORYEO"))
@@ -116,10 +116,10 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     @DisplayName("지어 준 이름과 각성 단계, 방치로 달라진 선명도가 그대로 실린다")
     void 이름_각성_선명도() throws Exception {
         Player player = player("학예사");
-        UserArtifact artifact = giveCompleted(player, INCENSE_BURNER);
-        patch(player, "/api/artifacts/{id}/spirit-name", "{\"name\":\"향로지기\"}", INCENSE_BURNER)
+        UserRelic relic = giveCompleted(player, INCENSE_BURNER);
+        patch(player, "/api/relics/{id}/spirit-name", "{\"name\":\"향로지기\"}", INCENSE_BURNER)
                 .andExpect(status().isOk());
-        setAwakening(artifact, AwakeningStage.AWAKENED_PLUS);
+        setAwakening(relic, AwakeningStage.AWAKENED_PLUS);
 
         clock.advance(Duration.ofDays(8));
         get(player, "/api/exhibition")
@@ -160,7 +160,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.buildings[0].position.y").value(4));
 
         // 작업대의 상세도 배치 여부를 같이 보여 준다.
-        get(player, "/api/artifacts/{id}", INCENSE_BURNER)
+        get(player, "/api/relics/{id}", INCENSE_BURNER)
                 .andExpect(jsonPath("$.data.displayed").value(true));
         get(player, "/api/buildings/{id}", buildingId)
                 .andExpect(jsonPath("$.data.displayed").value(true));
@@ -213,7 +213,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         // 마패만 남기고 위치를 옮긴다 — 대향로와 건물은 내려간다.
         put(player, "/api/exhibition/layout", layout(item("SPIRIT", MAPAE, 4, 5)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.spirits[0].artifactId").value(INCENSE_BURNER))
+                .andExpect(jsonPath("$.data.spirits[0].relicId").value(INCENSE_BURNER))
                 .andExpect(jsonPath("$.data.spirits[0].displayed").value(false))
                 .andExpect(jsonPath("$.data.spirits[0].position").doesNotExist())
                 .andExpect(jsonPath("$.data.spirits[1].displayed").value(true))
@@ -226,8 +226,8 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         put(player, "/api/exhibition/layout", layout())
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.spirits[1].displayed").value(false));
-        assertThat(userArtifactRepository.findAllByUserId(player.id()))
-                .noneMatch(UserArtifact::isDisplayed);
+        assertThat(userRelicRepository.findAllByUserId(player.id()))
+                .noneMatch(UserRelic::isDisplayed);
         assertThat(userBuildingRepository.findAllByUserId(player.id()))
                 .noneMatch(UserBuilding::isDisplayed);
     }
@@ -253,7 +253,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.errors[1].field").value("items[2]"))
                 .andExpect(jsonPath("$.errors[2].field").value("items[3]"));
 
-        assertThat(userArtifactRepository.findByUserIdAndArtifactId(player.id(), INCENSE_BURNER)
+        assertThat(userRelicRepository.findByUserIdAndRelicId(player.id(), INCENSE_BURNER)
                 .orElseThrow().isDisplayed()).isFalse();
     }
 
@@ -272,7 +272,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("E001"));
 
-        assertThat(userArtifactRepository.findByUserIdAndArtifactId(other.id(), INCENSE_BURNER)
+        assertThat(userRelicRepository.findByUserIdAndRelicId(other.id(), INCENSE_BURNER)
                 .orElseThrow().isDisplayed()).isFalse();
     }
 
@@ -293,7 +293,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.errors[0].reason").value("0 이상 7 미만이어야 합니다."))
                 .andExpect(jsonPath("$.errors[1].field").value("items[1].y"));
 
-        assertThat(userArtifactRepository.findAllByUserId(player.id())).noneMatch(UserArtifact::isDisplayed);
+        assertThat(userRelicRepository.findAllByUserId(player.id())).noneMatch(UserRelic::isDisplayed);
     }
 
     @Test
@@ -359,7 +359,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         patch(player, "/api/exhibition/spirits/{id}/visibility", "{\"hidden\":true}", INCENSE_BURNER)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("SPIRIT_VISIBILITY_UPDATED"))
-                .andExpect(jsonPath("$.data.artifactId").value(INCENSE_BURNER))
+                .andExpect(jsonPath("$.data.relicId").value(INCENSE_BURNER))
                 .andExpect(jsonPath("$.data.hidden").value(true));
 
         get(player, "/api/exhibition")
@@ -367,7 +367,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.spirits[0].displayed").value(true))
                 .andExpect(jsonPath("$.data.spirits[0].position.x").value(3))
                 .andExpect(jsonPath("$.data.spirits[0].position.y").value(5));
-        get(player, "/api/artifacts/{id}", INCENSE_BURNER)
+        get(player, "/api/relics/{id}", INCENSE_BURNER)
                 .andExpect(jsonPath("$.data.hidden").value(true));
 
         // 같은 값으로 다시 보내도 200 이다.
@@ -430,7 +430,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         giveCompleted(owner, GEUMGWAN);   // 배치하지 않는다
         giveCompleted(owner, MAPAE);      // 배치하고 숨긴다
         int buildingId = giveBuilding(owner, Era.GORYEO);
-        patch(owner, "/api/artifacts/{id}/spirit-name", "{\"name\":\"향로지기\"}", INCENSE_BURNER)
+        patch(owner, "/api/relics/{id}/spirit-name", "{\"name\":\"향로지기\"}", INCENSE_BURNER)
                 .andExpect(status().isOk());
 
         put(owner, "/api/exhibition/layout", layout(
@@ -445,7 +445,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.grid.width").value(7))
                 .andExpect(jsonPath("$.data.spirits.length()").value(1))
-                .andExpect(jsonPath("$.data.spirits[0].artifactId").value(INCENSE_BURNER))
+                .andExpect(jsonPath("$.data.spirits[0].relicId").value(INCENSE_BURNER))
                 .andExpect(jsonPath("$.data.spirits[0].revealLevel").value("NAMED"))
                 .andExpect(jsonPath("$.data.spirits[0].spiritName").value("향로지기"))
                 .andExpect(jsonPath("$.data.spirits[0].realName").value("금동대향로"))
@@ -640,9 +640,9 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     }
 
     /** 강화 확정은 게이지를 채워야 해서 단계를 곧바로 맞춘다. */
-    private void setAwakening(UserArtifact artifact, AwakeningStage stage) {
+    private void setAwakening(UserRelic relic, AwakeningStage stage) {
         transactionTemplate.executeWithoutResult(status -> {
-            UserArtifact managed = userArtifactRepository.findById(artifact.getId()).orElseThrow();
+            UserRelic managed = userRelicRepository.findById(relic.getId()).orElseThrow();
             while (managed.getAwakeningStage() != stage) {
                 managed.awaken(0);
             }

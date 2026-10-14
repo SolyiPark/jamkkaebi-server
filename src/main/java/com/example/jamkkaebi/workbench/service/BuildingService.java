@@ -1,13 +1,13 @@
 package com.example.jamkkaebi.workbench.service;
 
-import com.example.jamkkaebi.artifact.config.BuildingProperties;
-import com.example.jamkkaebi.artifact.domain.BuildingMaster;
-import com.example.jamkkaebi.artifact.domain.UserBuilding;
-import com.example.jamkkaebi.artifact.repository.UserBuildingRepository;
-import com.example.jamkkaebi.artifact.service.ArtifactCatalog;
-import com.example.jamkkaebi.artifact.service.EraCrystalWallet;
 import com.example.jamkkaebi.global.exception.BusinessException;
 import com.example.jamkkaebi.global.exception.ErrorCode;
+import com.example.jamkkaebi.relic.config.BuildingProperties;
+import com.example.jamkkaebi.relic.domain.BuildingMaster;
+import com.example.jamkkaebi.relic.domain.UserBuilding;
+import com.example.jamkkaebi.relic.repository.UserBuildingRepository;
+import com.example.jamkkaebi.relic.service.EraCrystalWallet;
+import com.example.jamkkaebi.relic.service.RelicCatalog;
 import com.example.jamkkaebi.user.domain.User;
 import com.example.jamkkaebi.user.repository.UserRepository;
 import com.example.jamkkaebi.user.service.UserProfileService;
@@ -29,14 +29,14 @@ public class BuildingService {
     private final UserProfileService userProfileService;
     private final UserRepository userRepository;
     private final UserBuildingRepository userBuildingRepository;
-    private final ArtifactCatalog catalog;
+    private final RelicCatalog catalog;
     private final EraCrystalWallet wallet;
     private final BuildingProperties properties;
 
     public BuildingService(UserProfileService userProfileService,
                            UserRepository userRepository,
                            UserBuildingRepository userBuildingRepository,
-                           ArtifactCatalog catalog,
+                           RelicCatalog catalog,
                            EraCrystalWallet wallet,
                            BuildingProperties properties) {
         this.userProfileService = userProfileService;

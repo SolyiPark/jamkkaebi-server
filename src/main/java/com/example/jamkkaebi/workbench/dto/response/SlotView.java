@@ -1,11 +1,11 @@
 package com.example.jamkkaebi.workbench.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.ArtifactMaster;
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.artifact.domain.Phase;
-import com.example.jamkkaebi.artifact.domain.RevealLevel;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
-import com.example.jamkkaebi.artifact.dto.response.ArtifactCard;
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.Phase;
+import com.example.jamkkaebi.relic.domain.RelicMaster;
+import com.example.jamkkaebi.relic.domain.RevealLevel;
+import com.example.jamkkaebi.relic.domain.UserRelic;
+import com.example.jamkkaebi.relic.dto.response.RelicCard;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
@@ -15,7 +15,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record SlotView(
-        Integer artifactId,
+        Integer relicId,
         Era era,
         RevealLevel revealLevel,
         String poeticAlias,
@@ -24,9 +24,9 @@ public record SlotView(
         Phase currentPhase
 ) {
 
-    public static SlotView of(ArtifactMaster master, UserArtifact owned) {
-        ArtifactCard card = ArtifactCard.of(master, owned);
-        return new SlotView(card.artifactId(), card.era(), card.revealLevel(),
+    public static SlotView of(RelicMaster master, UserRelic owned) {
+        RelicCard card = RelicCard.of(master, owned);
+        return new SlotView(card.relicId(), card.era(), card.revealLevel(),
                 card.poeticAlias(), card.realName(), card.spiritName(), owned.getCurrentPhase());
     }
 }

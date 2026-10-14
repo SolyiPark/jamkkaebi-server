@@ -1,13 +1,13 @@
 package com.example.jamkkaebi.workbench.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.ArtifactMaster;
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Clarity;
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.artifact.domain.RevealLevel;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
-import com.example.jamkkaebi.artifact.dto.response.ArtifactCard;
-import com.example.jamkkaebi.artifact.dto.response.GaugeView;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Clarity;
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.RelicMaster;
+import com.example.jamkkaebi.relic.domain.RevealLevel;
+import com.example.jamkkaebi.relic.domain.UserRelic;
+import com.example.jamkkaebi.relic.dto.response.GaugeView;
+import com.example.jamkkaebi.relic.dto.response.RelicCard;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
@@ -17,7 +17,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record SpiritView(
-        Integer artifactId,
+        Integer relicId,
         Era era,
         RevealLevel revealLevel,
         String poeticAlias,
@@ -29,10 +29,10 @@ public record SpiritView(
         Clarity clarity
 ) {
 
-    public static SpiritView of(ArtifactMaster master, UserArtifact owned,
+    public static SpiritView of(RelicMaster master, UserRelic owned,
                                 boolean growthReady, GaugeView growthGauge, Clarity clarity) {
-        ArtifactCard card = ArtifactCard.of(master, owned);
-        return new SpiritView(card.artifactId(), card.era(), card.revealLevel(),
+        RelicCard card = RelicCard.of(master, owned);
+        return new SpiritView(card.relicId(), card.era(), card.revealLevel(),
                 card.poeticAlias(), card.realName(), card.spiritName(),
                 owned.getAwakeningStage(), growthReady, growthGauge, clarity);
     }

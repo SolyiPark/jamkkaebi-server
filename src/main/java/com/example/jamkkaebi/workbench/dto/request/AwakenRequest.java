@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.workbench.dto.request;
 
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import jakarta.validation.constraints.NotNull;
 
 /**

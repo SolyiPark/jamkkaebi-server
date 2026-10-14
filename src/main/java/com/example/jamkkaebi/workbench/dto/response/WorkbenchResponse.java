@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.workbench.dto.response;
 
-import com.example.jamkkaebi.artifact.dto.response.BuildingView;
+import com.example.jamkkaebi.relic.dto.response.BuildingView;
 
 import java.util.List;
 

@@ -1,12 +1,12 @@
 package com.example.jamkkaebi.codex.controller;
 
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.codex.dto.response.CodexArtifactResponse;
 import com.example.jamkkaebi.codex.dto.response.CodexEraResponse;
+import com.example.jamkkaebi.codex.dto.response.CodexRelicResponse;
 import com.example.jamkkaebi.codex.dto.response.CodexSummaryResponse;
 import com.example.jamkkaebi.codex.service.CodexService;
 import com.example.jamkkaebi.global.response.ApiResponse;
 import com.example.jamkkaebi.global.security.AuthPrincipal;
+import com.example.jamkkaebi.relic.domain.Era;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 도감 — 열람 전용. 성장·강화 확정은 작업대({@code /api/artifacts}) 담당으로, 여기에는 조회만 있다.
+ * 도감 — 열람 전용. 성장·강화 확정은 작업대({@code /api/relics}) 담당으로, 여기에는 조회만 있다.
  */
 @RestController
 @RequestMapping("/api/codex")
@@ -44,12 +44,12 @@ public class CodexController {
                 "OK", "시대별 도감을 조회했습니다.", codexService.era(principal.friendCode(), era)));
     }
 
-    @GetMapping("/artifacts/{artifactId}")
-    public ResponseEntity<ApiResponse<CodexArtifactResponse>> getArtifact(
+    @GetMapping("/relics/{relicId}")
+    public ResponseEntity<ApiResponse<CodexRelicResponse>> getRelic(
             @AuthenticationPrincipal AuthPrincipal principal,
-            @PathVariable Integer artifactId
+            @PathVariable Integer relicId
     ) {
         return ResponseEntity.ok(ApiResponse.success(
-                "OK", "도감 카드를 조회했습니다.", codexService.artifact(principal.friendCode(), artifactId)));
+                "OK", "도감 카드를 조회했습니다.", codexService.relic(principal.friendCode(), relicId)));
     }
 }

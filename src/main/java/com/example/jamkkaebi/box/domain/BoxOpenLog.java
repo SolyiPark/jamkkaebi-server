@@ -47,8 +47,8 @@ public class BoxOpenLog extends BaseTimeEntity {
     @Column(name = "request_id", nullable = false, length = 64)
     private String requestId;
 
-    @Column(name = "artifact_id", nullable = false)
-    private Integer artifactId;
+    @Column(name = "relic_id", nullable = false)
+    private Integer relicId;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -77,11 +77,11 @@ public class BoxOpenLog extends BaseTimeEntity {
     private LocalDateTime openedAt;
 
     @Builder
-    private BoxOpenLog(Long userId, String requestId, Integer artifactId, BoxSource source, boolean duplicate,
+    private BoxOpenLog(Long userId, String requestId, Integer relicId, BoxSource source, boolean duplicate,
                        int jeongseongGained, int crystalGained, int jeongseongSpent, LocalDateTime openedAt) {
         this.userId = userId;
         this.requestId = requestId;
-        this.artifactId = artifactId;
+        this.relicId = relicId;
         this.source = source;
         this.duplicate = duplicate;
         this.jeongseongGained = jeongseongGained;

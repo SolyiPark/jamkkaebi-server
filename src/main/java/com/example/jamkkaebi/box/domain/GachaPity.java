@@ -21,7 +21,7 @@ import org.hibernate.annotations.ColumnDefault;
 @Table(
         name = "gacha_pity",
         uniqueConstraints = @UniqueConstraint(
-                name = "uk_gacha_pity_owner_artifact", columnNames = {"user_id", "artifact_id"}),
+                name = "uk_gacha_pity_owner_relic", columnNames = {"user_id", "relic_id"}),
         indexes = @Index(name = "idx_gacha_pity_owner", columnList = "user_id")
 )
 @Getter
@@ -35,20 +35,20 @@ public class GachaPity {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(name = "artifact_id", nullable = false)
-    private Integer artifactId;
+    @Column(name = "relic_id", nullable = false)
+    private Integer relicId;
 
     @ColumnDefault("0")
     @Column(name = "miss_streak", nullable = false)
     private int missStreak;
 
-    private GachaPity(Long userId, Integer artifactId) {
+    private GachaPity(Long userId, Integer relicId) {
         this.userId = userId;
-        this.artifactId = artifactId;
+        this.relicId = relicId;
     }
 
-    public static GachaPity start(Long userId, Integer artifactId) {
-        return new GachaPity(userId, artifactId);
+    public static GachaPity start(Long userId, Integer relicId) {
+        return new GachaPity(userId, relicId);
     }
 
     public void miss() {

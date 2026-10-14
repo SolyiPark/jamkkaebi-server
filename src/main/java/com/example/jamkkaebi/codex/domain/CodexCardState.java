@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.codex.domain;
 
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
+import com.example.jamkkaebi.relic.domain.UserRelic;
 
 /**
  * 도감 카드 한 장의 상태.
@@ -19,7 +19,7 @@ public enum CodexCardState {
     /**
      * @param owned 이 사용자의 진행 상태. 보유하지 않았으면 {@code null}
      */
-    public static CodexCardState of(UserArtifact owned) {
+    public static CodexCardState of(UserRelic owned) {
         if (owned == null) {
             return LOCKED;
         }

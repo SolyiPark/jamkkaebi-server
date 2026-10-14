@@ -49,14 +49,14 @@ public class ExhibitionController {
                 exhibitionService.saveLayout(principal.friendCode(), request.items())));
     }
 
-    @PatchMapping("/spirits/{artifactId}/visibility")
+    @PatchMapping("/spirits/{relicId}/visibility")
     public ResponseEntity<ApiResponse<SpiritVisibilityResponse>> changeVisibility(
             @AuthenticationPrincipal AuthPrincipal principal,
-            @PathVariable Integer artifactId,
+            @PathVariable Integer relicId,
             @Valid @RequestBody SpiritVisibilityRequest request
     ) {
         return ResponseEntity.ok(ApiResponse.success(
                 "SPIRIT_VISIBILITY_UPDATED", "도깨비 표시 설정을 바꿨습니다.",
-                exhibitionService.changeVisibility(principal.friendCode(), artifactId, request.hidden())));
+                exhibitionService.changeVisibility(principal.friendCode(), relicId, request.hidden())));
     }
 }

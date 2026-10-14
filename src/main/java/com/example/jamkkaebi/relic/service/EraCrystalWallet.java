@@ -1,0 +1,71 @@
+package com.example.jamkkaebi.relic.service;
+
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.UserEraCrystal;
+import com.example.jamkkaebi.relic.repository.UserEraCrystalRepository;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.EnumMap;
+import java.util.Map;
+
+/**
+ * 시대의 결정 지갑. 시대별로 나뉘어 있어 (사용자, 시대) 행 하나가 지갑 하나다.
+ *
+ * <p>지갑 행은 <b>처음 결정을 적립할 때 만든다.</b>
+ */
+@Component
+public class EraCrystalWallet {
+
+    private final UserEraCrystalRepository repository;
+
+    public EraCrystalWallet(UserEraCrystalRepository repository) {
+        this.repository = repository;
+    }
+
+    /**
+     * 시대의 결정을 적립한다.
+     *
+     * <p>읽고 더해서 쓰지 않고 UPDATE로 더한다
+     */
+    @Transactional
+    public void add(Long userId, Era era, int amount) {
+        if (amount <= 0) {
+            return;
+        }
+        if (repository.addCrystal(userId, era, amount) == 0) {
+            repository.save(UserEraCrystal.emptyWallet(userId, era));
+            repository.addCrystal(userId, era, amount);
+        }
+    }
+
+    /**
+     * 시대의 결정을 쓴다. 잔액이 모자라면 아무것도 빼지 않고 {@code false}.
+     */
+    @Transactional
+    public boolean spend(Long userId, Era era, int amount) {
+        if (amount <= 0) {
+            return true;
+        }
+        return repository.spendCrystal(userId, era, amount) > 0;
+    }
+
+    // 지갑이 아직 없으면 0
+    @Transactional(readOnly = true)
+    public int balance(Long userId, Era era) {
+        return repository.findByUserIdAndEra(userId, era)
+                .map(UserEraCrystal::getCrystal)
+                .orElse(0);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<Era, Integer> balances(Long userId) {
+        Map<Era, Integer> balances = new EnumMap<>(Era.class);
+        for (Era era : Era.values()) {
+            balances.put(era, 0);
+        }
+        repository.findAllByUserId(userId)
+                .forEach(wallet -> balances.put(wallet.getEra(), wallet.getCrystal()));
+        return balances;
+    }
+}
