@@ -1,10 +1,10 @@
 package com.example.jamkkaebi.friend;
 
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Era;
 import com.example.jamkkaebi.friend.domain.Block;
 import com.example.jamkkaebi.friend.domain.FriendRecommendation;
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Era;
 import com.example.jamkkaebi.support.FakeExhibitionViewReader;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -157,7 +157,7 @@ class FriendDailyFlowTest extends FriendApiTestSupport {
     }
 
     @Test
-    @DisplayName("한 번도 접속하지 않은 친구의 전시관은 비어 있고, 친구가 아니면 볼 수 없다")
+    @DisplayName("한 번도 접속하지 않은 친구의 전시관은 그리드만 있는 기본 빈 전시관이고, 친구가 아니면 볼 수 없다")
     void exhibitionWithoutSnapshotIsEmpty() throws Exception {
         Player owner = player("주인");
         Player visitor = player("방문객");
@@ -168,7 +168,9 @@ class FriendDailyFlowTest extends FriendApiTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.spirits").isEmpty())
                 .andExpect(jsonPath("$.data.buildings").isEmpty())
-                .andExpect(jsonPath("$.data.grid").doesNotExist())
+                // 그리드가 빠지면 클라이언트가 빈 전시관조차 그릴 수 없다.
+                .andExpect(jsonPath("$.data.grid.width").value(7))
+                .andExpect(jsonPath("$.data.grid.height").value(7))
                 .andExpect(jsonPath("$.data.capturedAt").doesNotExist());
         get(stranger, "/api/friends/{code}/exhibition", owner.code())
                 .andExpect(status().isNotFound())

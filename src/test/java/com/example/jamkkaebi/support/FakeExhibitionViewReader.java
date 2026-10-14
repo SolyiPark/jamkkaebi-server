@@ -26,6 +26,11 @@ public class FakeExhibitionViewReader implements ExhibitionViewReader {
 
     @Override
     public ExhibitionView readPublicView(Long userId) {
-        return views.getOrDefault(userId, new ExhibitionView(GRID, List.of(), List.of()));
+        return views.getOrDefault(userId, emptyView());
+    }
+
+    @Override
+    public ExhibitionView emptyView() {
+        return new ExhibitionView(GRID, List.of(), List.of());
     }
 }
