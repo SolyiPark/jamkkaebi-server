@@ -70,6 +70,12 @@ public class ExhibitionViewProvider implements ExhibitionViewReader {
         return new ExhibitionView(properties.grid(), spirits, buildings);
     }
 
+    //기본 빈 전시관
+    @Override
+    public ExhibitionView emptyView() {
+        return new ExhibitionView(properties.grid(), List.of(), List.of());
+    }
+
     private ExhibitionView.SpiritView spiritOf(RelicMaster master, UserRelic owned) {
         RelicCard card = RelicCard.of(master, owned);
         return new ExhibitionView.SpiritView(card.relicId(), card.era(), card.poeticAlias(), card.realName(),

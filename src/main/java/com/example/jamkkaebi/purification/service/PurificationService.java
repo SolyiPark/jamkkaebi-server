@@ -37,7 +37,6 @@ import com.example.jamkkaebi.relic.service.GrowthPolicy;
 import com.example.jamkkaebi.relic.service.RelicOwnership;
 import com.example.jamkkaebi.user.domain.User;
 import com.example.jamkkaebi.user.repository.UserRepository;
-import com.example.jamkkaebi.user.service.UserProfileService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -46,12 +45,11 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 /**
- * 유물 정화 — 세션 발급과 결과 정산.
+ * 유물 정화
  */
 @Service
 public class PurificationService {
 
-    private final UserProfileService userProfileService;
     private final UserRepository userRepository;
     private final UserRelicRepository userRelicRepository;
     private final PlaySessionRepository sessionRepository;
@@ -64,11 +62,11 @@ public class PurificationService {
     private final EraCrystalWallet crystalWallet;
     private final BuildingAwardService buildingAwardService;
     private final SessionTokens sessionTokens;
+    private final ShapeSizePlanner shapeSizePlanner;
     private final PurificationProperties properties;
     private final GameClock gameClock;
 
-    public PurificationService(UserProfileService userProfileService,
-                               UserRepository userRepository,
+    public PurificationService(UserRepository userRepository,
                                UserRelicRepository userRelicRepository,
                                PlaySessionRepository sessionRepository,
                                RelicOwnership ownership,
@@ -80,9 +78,9 @@ public class PurificationService {
                                EraCrystalWallet crystalWallet,
                                BuildingAwardService buildingAwardService,
                                SessionTokens sessionTokens,
+                               ShapeSizePlanner shapeSizePlanner,
                                PurificationProperties properties,
                                GameClock gameClock) {
-        this.userProfileService = userProfileService;
         this.userRepository = userRepository;
         this.userRelicRepository = userRelicRepository;
         this.sessionRepository = sessionRepository;
@@ -95,6 +93,7 @@ public class PurificationService {
         this.crystalWallet = crystalWallet;
         this.buildingAwardService = buildingAwardService;
         this.sessionTokens = sessionTokens;
+        this.shapeSizePlanner = shapeSizePlanner;
         this.properties = properties;
         this.gameClock = gameClock;
     }
@@ -110,7 +109,9 @@ public class PurificationService {
     // 플레이 한 판 시작
     @Transactional
     public PurificationStartResponse start(String friendCode, PurificationStartRequest request) {
-        User user = userProfileService.getByFriendCode(friendCode);
+        // 사용자 행을 이 트랜잭션의 첫 읽기로 잠근다. 같은 사용자의 시작이 동시에 두 번 오면 둘 다 "보고 안 한 세션
+        // 없음"을 보고 각자 새 세션을 넣어, 이전 세션 무효 처리(세션 쌓아두기 방지)가 뚫린다.
+        User user = lockUser(friendCode);
         RelicOwnership.Owned owned = ownership.require(user.getId(), request.relicId());
         LocalDateTime now = gameClock.now();
         PlayPlan plan = planner.planFor(owned.userRelic(), now);
@@ -141,18 +142,27 @@ public class PurificationService {
                 plan.entryRoute(),
                 plan.phase(),
                 difficulty,
-                new BoardView(session.getBoardSeed(), params.boardWidth(), params.boardHeight(),
-                        params.threatCount(), params.shapeCount(), params.tapBudget(), params.scoutLimit()),
+                owned.master().getSealMedium(),
+                boardOf(session.getBoardSeed(), params),
                 params.rewardMultiplier(),
                 plan.entryRoute().allowsPerfectBonus());
     }
 
-    // 결과를 보고하고 정산한다.
+    // 같은 시드·같은 난이도면 같은 보드가 된다.
+    private BoardView boardOf(long seed, DifficultyParams params) {
+        return new BoardView(seed, params.boardWidth(), params.boardHeight(), params.threatCount(),
+                params.shapeCount(), params.shapeCellTotal(),
+                shapeSizePlanner.plan(seed, params.shapeCount(), params.shapeCellTotal()),
+                params.tapBudget(), params.scoutLimit());
+    }
+
+    // 결과를 보고하고 정산
     @Transactional
     public PurificationResultResponse report(String friendCode, String sessionToken,
                                              PurificationResultRequest request) {
-        User user = userProfileService.getByFriendCode(friendCode);
-        // 잠그고 읽는다 — 같은 결과가 동시에 두 번 오면 둘 다 ISSUED 를 보고 두 번 정산한다.
+        // 시작과 같은 순서(사용자 → 세션)로 잠근다.
+        User user = lockUser(friendCode);
+
         PlaySession session = sessionRepository.findBySessionTokenForUpdate(sessionToken)
                 .filter(found -> found.getUserId().equals(user.getId()))
                 .orElseThrow(() -> new BusinessException(ErrorCode.PURIFICATION_SESSION_NOT_FOUND));
@@ -177,6 +187,12 @@ public class PurificationService {
         validateLimits(session, request, bonusJeongseong, bonusCrystal, now);
 
         return settle(session, user, request, bonusJeongseong, bonusCrystal, now);
+    }
+
+    // 사용자 행을 잠그고 읽는다.
+    private User lockUser(String friendCode) {
+        return userRepository.findByFriendCodeForUpdate(friendCode)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
     }
 
     private Difficulty resolveDifficulty(PlayPlan plan, Difficulty requested, AwakeningStage stage) {
@@ -268,7 +284,7 @@ public class PurificationService {
                 .gaugeEarned(reward.gauge())
                 .build(), now);
 
-        // 시대의 마지막 유물을 끝냈다면 건물 자동 지급
+        // 시대의 마지막 유물을 끝냈다면 건물 지급
         BuildingView awarded = completedNow
                 ? buildingAwardService.awardIfEraCompleted(user.getId(), master.getEra(), now)
                 .map(building -> BuildingView.of(building.master(), building.owned()))
@@ -304,7 +320,7 @@ public class PurificationService {
                         session.getJeongseongEarned(), crystalReward, session.getGaugeEarned()),
                 RelicCard.of(master, userRelic),
                 userRelic.getStatus(),
-                // 관리 플레이는 공개 단계가 오르지 않는다.
+                // 관리 플레이(!first)는 공개 단계가 오르지 않는다.
                 success && first ? userRelic.revealLevel() : null,
                 nextStep(session, userRelic, success, clarity),
                 userRelic.getRestorePhase(),
@@ -317,7 +333,7 @@ public class PurificationService {
     private PurificationResultResponse.NextStep nextStep(PlaySession session, UserRelic userRelic,
                                                          boolean success, Clarity clarity) {
         if (!success) {
-            // 실패로 잃는 것이 없으므로 다음 행동은 항상 "다시 하기"다.
+            //실패 하면 재시도(잃는 것 없음)
             return PurificationResultResponse.NextStep.of(NextAction.RETRY);
         }
         if (session.getEntryRoute() == EntryRoute.FIRST) {
@@ -328,7 +344,6 @@ public class PurificationService {
             return new PurificationResultResponse.NextStep(NextAction.NEXT_PHASE, next, Phase.from(next));
         }
         if (session.getPhase().isLast()) {
-            // 정령 수호를 마쳤으면 선명으로 돌아간다.
             return PurificationResultResponse.NextStep.of(NextAction.DONE);
         }
         List<Phase> remaining = clarityPolicy.remainingPhases(clarity, userRelic.getRestorePhase());

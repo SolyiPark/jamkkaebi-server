@@ -15,7 +15,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * 친구 전시관 방문 — 열람과 방문 보상.
@@ -54,20 +53,24 @@ public class FriendVisitService {
         this.gameClock = gameClock;
     }
 
-    // 친구 전시관 스냅샷
+    /**
+     * 친구 전시관 스냅샷.
+     *
+     * 아무것도 놓이지 않은 전시관은 오류가 아니라 <b>기본 빈 전시관</b>이다. (그리드만 싣는다)
+     */
     @Transactional(readOnly = true)
     public FriendExhibitionResponse exhibition(String myFriendCode, String rawFriendCode) {
         User me = friendUsers.me(myFriendCode);
         User friend = requireFriend(me, rawFriendCode);
         LocalDate today = gameClock.today();
-        Optional<ExhibitionSnapshotService.Snapshot> snapshot = snapshotService.find(friend.getId());
+        ExhibitionSnapshotService.Snapshot snapshot = snapshotService.findOrEmpty(friend.getId());
 
         return new FriendExhibitionResponse(
                 playerCardAssembler.card(friend),
-                snapshot.map(found -> found.view().grid()).orElse(null),
-                snapshot.map(found -> found.view().spirits()).orElse(List.of()),
-                snapshot.map(found -> found.view().buildings()).orElse(List.of()),
-                snapshot.map(ExhibitionSnapshotService.Snapshot::capturedAt).orElse(null),
+                snapshot.view().grid(),
+                snapshot.view().spirits(),
+                snapshot.view().buildings(),
+                snapshot.capturedAt(),
                 giftService.giftStates(me.getId(), List.of(friend.getId()), today).get(friend.getId()),
                 !visitLogRepository.existsByVisitorIdAndVisitDateAndRewardedTrue(me.getId(), today));
     }
@@ -94,7 +97,7 @@ public class FriendVisitService {
         return new VisitRewardResponse(reward, true);
     }
 
-    // 친구가 아니면 없는 코드·차단 관계와 구분하지 않는다
+    // 친구가 아니면 없는 코드. 차단 관계와 구분하지 않는다
     private User requireFriend(User me, String rawFriendCode) {
         return friendUsers.findByCode(rawFriendCode)
                 .filter(other -> !other.getId().equals(me.getId()))

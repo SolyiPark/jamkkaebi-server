@@ -1,8 +1,13 @@
 package com.example.jamkkaebi.purification.dto.response;
 
+import java.util.List;
+
 /**
- * 이번 판의 보드. <b>서버는 보드를 만들지 않고 시드만 준다</b> — 클라이언트가 같은 시드와 같은
- * 파라미터로 같은 보드를 만들어야 한다.
+ * 이번 판의 보드
+ *
+ * @param shapeCount     목표 형상 수. {@code shapeSizes} 의 길이와 같다
+ * @param shapeCellTotal 목표 형상들이 차지하는 칸 수의 합. {@code shapeSizes} 의 합과 같다
+ * @param shapeSizes     이번 판의 형상별 칸 수
  */
 public record BoardView(
         long seed,
@@ -10,6 +15,8 @@ public record BoardView(
         int height,
         int threatCount,
         int shapeCount,
+        int shapeCellTotal,
+        List<Integer> shapeSizes,
         int tapBudget,
         int scoutLimit
 ) {
