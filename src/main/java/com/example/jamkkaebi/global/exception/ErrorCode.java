@@ -37,6 +37,8 @@ public enum ErrorCode {
 
     // User
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "U001", "사용자를 찾을 수 없습니다."),
+    // 미획득과 정령 수호 전을 한 코드로 묶는다. 둘 다 할 일은 "그 도깨비를 끝까지 깨우기"로 같다.
+    SPIRIT_NOT_AWAKENED(HttpStatus.CONFLICT, "U002", "아직 깨우지 않은 도깨비는 아바타로 쓸 수 없습니다."),
 
     // Box — 일일 상자
     // "열 수 없다"를 한 코드로 묶는다. 무료를 이미 썼는지 선물권이 없는지는 클라이언트가 상자 상태
@@ -50,8 +52,8 @@ public enum ErrorCode {
     BOX_PURCHASE_LIMIT_REACHED(HttpStatus.CONFLICT, "B004", "오늘은 더 이상 상자를 구매할 수 없습니다."),
 
     // Workbench — 작업대 · 도깨비 성장
-    ARTIFACT_NOT_OWNED(HttpStatus.NOT_FOUND, "W001", "보유하지 않은 유물입니다."),
-    ARTIFACT_NOT_COMPLETED(HttpStatus.CONFLICT, "W002", "정령 수호까지 마친 유물만 할 수 있습니다."),
+    RELIC_NOT_OWNED(HttpStatus.NOT_FOUND, "W001", "보유하지 않은 유물입니다."),
+    RELIC_NOT_COMPLETED(HttpStatus.CONFLICT, "W002", "정령 수호까지 마친 유물만 할 수 있습니다."),
     GROWTH_GAUGE_NOT_FULL(HttpStatus.CONFLICT, "W003", "성장 게이지가 아직 가득 차지 않았습니다."),
     AWAKENING_STAGE_MISMATCH(HttpStatus.CONFLICT, "W004",
             "도깨비의 각성 단계가 바뀌었습니다. 새로고침 후 다시 시도해주세요."),

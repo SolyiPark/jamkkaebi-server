@@ -1,7 +1,7 @@
 package com.example.jamkkaebi.coreloop;
 
-import com.example.jamkkaebi.artifact.domain.Difficulty;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
+import com.example.jamkkaebi.relic.domain.Difficulty;
+import com.example.jamkkaebi.relic.domain.UserRelic;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -49,14 +49,14 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
         give(player, 1);
 
         post(player, "/api/purifications", """
-                {"artifactId":1,"difficulty":"EASY"}
+                {"relicId":1,"difficulty":"EASY"}
                 """)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("C001"))
                 .andExpect(jsonPath("$.errors[0].field").value("difficulty"));
 
         post(player, "/api/purifications", """
-                {"artifactId":1}
+                {"relicId":1}
                 """)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.entryRoute").value("FIRST"))
@@ -75,7 +75,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
         giveCompleted(player, 1);
 
         post(player, "/api/purifications", """
-                {"artifactId":1,"difficulty":"HARD"}
+                {"relicId":1,"difficulty":"HARD"}
                 """)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("P001"));
@@ -88,7 +88,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
         giveCompleted(player, 1);
 
         post(player, "/api/purifications", """
-                {"artifactId":1}
+                {"relicId":1}
                 """)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[0].field").value("difficulty"));
@@ -181,7 +181,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.rewards.jeongseong").value(36));
 
         assertThat(jeongseongOf(player)).isEqualTo(afterFirst);
-        assertThat(userArtifactRepository.findByUserIdAndArtifactId(player.id(), 1)
+        assertThat(userRelicRepository.findByUserIdAndRelicId(player.id(), 1)
                 .orElseThrow().getCurrentPhase().order()).isEqualTo(2);
     }
 
@@ -219,8 +219,8 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.rewards.jeongseong").value(0))
                 .andExpect(jsonPath("$.data.revealed").doesNotExist());
 
-        UserArtifact stored = userArtifactRepository
-                .findByUserIdAndArtifactId(player.id(), 1).orElseThrow();
+        UserRelic stored = userRelicRepository
+                .findByUserIdAndRelicId(player.id(), 1).orElseThrow();
         assertThat(stored.getCurrentPhase().order()).isEqualTo(1);
         assertThat(jeongseongOf(player)).isZero();
 

@@ -1,8 +1,8 @@
 package com.example.jamkkaebi.purification.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.Difficulty;
-import com.example.jamkkaebi.artifact.domain.EntryRoute;
-import com.example.jamkkaebi.artifact.domain.Phase;
+import com.example.jamkkaebi.relic.domain.Difficulty;
+import com.example.jamkkaebi.relic.domain.EntryRoute;
+import com.example.jamkkaebi.relic.domain.Phase;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;

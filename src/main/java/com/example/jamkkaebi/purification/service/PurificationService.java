@@ -1,22 +1,5 @@
 package com.example.jamkkaebi.purification.service;
 
-import com.example.jamkkaebi.artifact.domain.ArtifactMaster;
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Clarity;
-import com.example.jamkkaebi.artifact.domain.Difficulty;
-import com.example.jamkkaebi.artifact.domain.EntryRoute;
-import com.example.jamkkaebi.artifact.domain.Phase;
-import com.example.jamkkaebi.artifact.domain.RevealLevel;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
-import com.example.jamkkaebi.artifact.dto.response.ArtifactCard;
-import com.example.jamkkaebi.artifact.dto.response.BuildingView;
-import com.example.jamkkaebi.artifact.dto.response.GaugeView;
-import com.example.jamkkaebi.artifact.repository.UserArtifactRepository;
-import com.example.jamkkaebi.artifact.service.ArtifactOwnership;
-import com.example.jamkkaebi.artifact.service.BuildingAwardService;
-import com.example.jamkkaebi.artifact.service.ClarityPolicy;
-import com.example.jamkkaebi.artifact.service.EraCrystalWallet;
-import com.example.jamkkaebi.artifact.service.GrowthPolicy;
 import com.example.jamkkaebi.global.exception.BusinessException;
 import com.example.jamkkaebi.global.exception.ErrorCode;
 import com.example.jamkkaebi.global.response.FieldError;
@@ -35,6 +18,23 @@ import com.example.jamkkaebi.purification.dto.response.DifficultyView;
 import com.example.jamkkaebi.purification.dto.response.PurificationResultResponse;
 import com.example.jamkkaebi.purification.dto.response.PurificationStartResponse;
 import com.example.jamkkaebi.purification.repository.PlaySessionRepository;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Clarity;
+import com.example.jamkkaebi.relic.domain.Difficulty;
+import com.example.jamkkaebi.relic.domain.EntryRoute;
+import com.example.jamkkaebi.relic.domain.Phase;
+import com.example.jamkkaebi.relic.domain.RelicMaster;
+import com.example.jamkkaebi.relic.domain.RevealLevel;
+import com.example.jamkkaebi.relic.domain.UserRelic;
+import com.example.jamkkaebi.relic.dto.response.BuildingView;
+import com.example.jamkkaebi.relic.dto.response.GaugeView;
+import com.example.jamkkaebi.relic.dto.response.RelicCard;
+import com.example.jamkkaebi.relic.repository.UserRelicRepository;
+import com.example.jamkkaebi.relic.service.BuildingAwardService;
+import com.example.jamkkaebi.relic.service.ClarityPolicy;
+import com.example.jamkkaebi.relic.service.EraCrystalWallet;
+import com.example.jamkkaebi.relic.service.GrowthPolicy;
+import com.example.jamkkaebi.relic.service.RelicOwnership;
 import com.example.jamkkaebi.user.domain.User;
 import com.example.jamkkaebi.user.repository.UserRepository;
 import com.example.jamkkaebi.user.service.UserProfileService;
@@ -53,9 +53,9 @@ public class PurificationService {
 
     private final UserProfileService userProfileService;
     private final UserRepository userRepository;
-    private final UserArtifactRepository userArtifactRepository;
+    private final UserRelicRepository userRelicRepository;
     private final PlaySessionRepository sessionRepository;
-    private final ArtifactOwnership ownership;
+    private final RelicOwnership ownership;
     private final PlayPlanner planner;
     private final DifficultyCatalog difficulties;
     private final RewardCalculator rewardCalculator;
@@ -69,9 +69,9 @@ public class PurificationService {
 
     public PurificationService(UserProfileService userProfileService,
                                UserRepository userRepository,
-                               UserArtifactRepository userArtifactRepository,
+                               UserRelicRepository userRelicRepository,
                                PlaySessionRepository sessionRepository,
-                               ArtifactOwnership ownership,
+                               RelicOwnership ownership,
                                PlayPlanner planner,
                                DifficultyCatalog difficulties,
                                RewardCalculator rewardCalculator,
@@ -84,7 +84,7 @@ public class PurificationService {
                                GameClock gameClock) {
         this.userProfileService = userProfileService;
         this.userRepository = userRepository;
-        this.userArtifactRepository = userArtifactRepository;
+        this.userRelicRepository = userRelicRepository;
         this.sessionRepository = sessionRepository;
         this.ownership = ownership;
         this.planner = planner;
@@ -111,11 +111,11 @@ public class PurificationService {
     @Transactional
     public PurificationStartResponse start(String friendCode, PurificationStartRequest request) {
         User user = userProfileService.getByFriendCode(friendCode);
-        ArtifactOwnership.Owned owned = ownership.require(user.getId(), request.artifactId());
+        RelicOwnership.Owned owned = ownership.require(user.getId(), request.relicId());
         LocalDateTime now = gameClock.now();
-        PlayPlan plan = planner.planFor(owned.userArtifact(), now);
+        PlayPlan plan = planner.planFor(owned.userRelic(), now);
         Difficulty difficulty = resolveDifficulty(plan, request.difficulty(),
-                owned.userArtifact().getAwakeningStage());
+                owned.userRelic().getAwakeningStage());
         DifficultyParams params = difficulties.params(difficulty);
 
         sessionRepository.findAllByUserIdAndStatus(user.getId(), SessionStatus.ISSUED)
@@ -124,7 +124,7 @@ public class PurificationService {
         PlaySession session = sessionRepository.save(PlaySession.builder()
                 .sessionToken(sessionTokens.newToken())
                 .userId(user.getId())
-                .userArtifactId(owned.userArtifact().getId())
+                .userRelicId(owned.userRelic().getId())
                 .phase(plan.phase())
                 .difficulty(difficulty)
                 .entryRoute(plan.entryRoute())
@@ -224,9 +224,9 @@ public class PurificationService {
 
     private PurificationResultResponse settle(PlaySession session, User user, PurificationResultRequest request,
                                               int bonusJeongseong, int bonusCrystal, LocalDateTime now) {
-        UserArtifact userArtifact = userArtifactRepository.findById(session.getUserArtifactId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.ARTIFACT_NOT_OWNED));
-        ArtifactMaster master = ownership.require(user.getId(), userArtifact.getArtifactId()).master();
+        UserRelic userRelic = userRelicRepository.findById(session.getUserRelicId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.RELIC_NOT_OWNED));
+        RelicMaster master = ownership.require(user.getId(), userRelic.getRelicId()).master();
 
         boolean success = request.result() == PlayResult.SUCCESS;
         boolean perfect = success && request.damage() == 0 && session.getEntryRoute().allowsPerfectBonus();
@@ -237,15 +237,15 @@ public class PurificationService {
         boolean completedNow = false;
         if (success) {
             if (session.getEntryRoute() == EntryRoute.FIRST) {
-                userArtifact.clearFirstPhase(now);
-                completedNow = userArtifact.isCompleted() && session.getPhase().isLast();
+                userRelic.clearFirstPhase(now);
+                completedNow = userRelic.isCompleted() && session.getPhase().isLast();
             } else {
-                userArtifact.clearCarePhase(session.getPhase(), now);
-                userArtifact.chargeGrowth(reward.gauge());
+                userRelic.clearCarePhase(session.getPhase(), now);
+                userRelic.chargeGrowth(reward.gauge());
             }
         }
         if (session.getEntryRoute() == EntryRoute.CARE) {
-            userArtifact.recordPerfect(perfect);
+            userRelic.recordPerfect(perfect);
         }
         if (reward.jeongseong() > 0) {
             userRepository.addJeongseong(user.getId(), reward.jeongseong());
@@ -275,22 +275,22 @@ public class PurificationService {
                 .orElse(null)
                 : null;
 
-        return render(session, userArtifact, master, awarded);
+        return render(session, userRelic, master, awarded);
     }
 
     private PurificationResultResponse render(PlaySession session, User user) {
-        UserArtifact userArtifact = userArtifactRepository.findById(session.getUserArtifactId())
-                .orElseThrow(() -> new BusinessException(ErrorCode.ARTIFACT_NOT_OWNED));
-        ArtifactMaster master = ownership.require(user.getId(), userArtifact.getArtifactId()).master();
-        return render(session, userArtifact, master, null);
+        UserRelic userRelic = userRelicRepository.findById(session.getUserRelicId())
+                .orElseThrow(() -> new BusinessException(ErrorCode.RELIC_NOT_OWNED));
+        RelicMaster master = ownership.require(user.getId(), userRelic.getRelicId()).master();
+        return render(session, userRelic, master, null);
     }
 
-    private PurificationResultResponse render(PlaySession session, UserArtifact userArtifact,
-                                              ArtifactMaster master, BuildingView buildingAwarded) {
+    private PurificationResultResponse render(PlaySession session, UserRelic userRelic,
+                                              RelicMaster master, BuildingView buildingAwarded) {
         LocalDateTime now = gameClock.now();
         boolean success = session.getResult() == PlayResult.SUCCESS;
         boolean first = session.getEntryRoute() == EntryRoute.FIRST;
-        Clarity clarity = clarityPolicy.clarityOf(userArtifact, now);
+        Clarity clarity = clarityPolicy.clarityOf(userRelic, now);
 
         PurificationResultResponse.EraCrystalReward crystalReward = session.getCrystalEarned() > 0
                 ? new PurificationResultResponse.EraCrystalReward(master.getEra(), session.getCrystalEarned())
@@ -299,51 +299,51 @@ public class PurificationService {
         return new PurificationResultResponse(
                 session.getResult(),
                 Boolean.TRUE.equals(session.getPerfect()),
-                first ? null : userArtifact.getPerfectStreak(),
+                first ? null : userRelic.getPerfectStreak(),
                 new PurificationResultResponse.Rewards(
                         session.getJeongseongEarned(), crystalReward, session.getGaugeEarned()),
-                ArtifactCard.of(master, userArtifact),
-                userArtifact.getStatus(),
+                RelicCard.of(master, userRelic),
+                userRelic.getStatus(),
                 // 관리 플레이는 공개 단계가 오르지 않는다.
-                success && first ? userArtifact.revealLevel() : null,
-                nextStep(session, userArtifact, success, clarity),
-                userArtifact.getRestorePhase(),
-                awakeningView(userArtifact),
+                success && first ? userRelic.revealLevel() : null,
+                nextStep(session, userRelic, success, clarity),
+                userRelic.getRestorePhase(),
+                awakeningView(userRelic),
                 clarity,
                 buildingAwarded,
                 null);
     }
 
-    private PurificationResultResponse.NextStep nextStep(PlaySession session, UserArtifact userArtifact,
+    private PurificationResultResponse.NextStep nextStep(PlaySession session, UserRelic userRelic,
                                                          boolean success, Clarity clarity) {
         if (!success) {
             // 실패로 잃는 것이 없으므로 다음 행동은 항상 "다시 하기"다.
             return PurificationResultResponse.NextStep.of(NextAction.RETRY);
         }
         if (session.getEntryRoute() == EntryRoute.FIRST) {
-            if (userArtifact.isCompleted()) {
+            if (userRelic.isCompleted()) {
                 return PurificationResultResponse.NextStep.of(NextAction.DONE);
             }
-            Phase next = userArtifact.getCurrentPhase();
+            Phase next = userRelic.getCurrentPhase();
             return new PurificationResultResponse.NextStep(NextAction.NEXT_PHASE, next, Phase.from(next));
         }
         if (session.getPhase().isLast()) {
             // 정령 수호를 마쳤으면 선명으로 돌아간다.
             return PurificationResultResponse.NextStep.of(NextAction.DONE);
         }
-        List<Phase> remaining = clarityPolicy.remainingPhases(clarity, userArtifact.getRestorePhase());
+        List<Phase> remaining = clarityPolicy.remainingPhases(clarity, userRelic.getRestorePhase());
         return new PurificationResultResponse.NextStep(
                 NextAction.CONTINUE_RESTORE, remaining.isEmpty() ? null : remaining.getFirst(), remaining);
     }
 
-    private PurificationResultResponse.AwakeningView awakeningView(UserArtifact userArtifact) {
-        if (!userArtifact.isCompleted()) {
+    private PurificationResultResponse.AwakeningView awakeningView(UserRelic userRelic) {
+        if (!userRelic.isCompleted()) {
             return null;
         }
-        GaugeView gauge = growthPolicy.hasNextStage(userArtifact)
-                ? new GaugeView(userArtifact.getGrowthGauge(), growthPolicy.requiredFor(userArtifact))
+        GaugeView gauge = growthPolicy.hasNextStage(userRelic)
+                ? new GaugeView(userRelic.getGrowthGauge(), growthPolicy.requiredFor(userRelic))
                 : null;
         return new PurificationResultResponse.AwakeningView(
-                userArtifact.getAwakeningStage(), gauge, growthPolicy.growthReady(userArtifact));
+                userRelic.getAwakeningStage(), gauge, growthPolicy.growthReady(userRelic));
     }
 }

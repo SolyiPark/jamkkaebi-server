@@ -1,13 +1,13 @@
 package com.example.jamkkaebi.exhibition.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.ArtifactMaster;
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Clarity;
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.artifact.domain.RevealLevel;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
-import com.example.jamkkaebi.artifact.dto.response.ArtifactCard;
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Clarity;
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.RelicMaster;
+import com.example.jamkkaebi.relic.domain.RevealLevel;
+import com.example.jamkkaebi.relic.domain.UserRelic;
+import com.example.jamkkaebi.relic.dto.response.RelicCard;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
@@ -22,7 +22,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record ExhibitSpiritView(
-        Integer artifactId,
+        Integer relicId,
         Era era,
         RevealLevel revealLevel,
         String poeticAlias,
@@ -35,9 +35,9 @@ public record ExhibitSpiritView(
         ExhibitionView.Position position
 ) {
 
-    public static ExhibitSpiritView of(ArtifactMaster master, UserArtifact owned, Clarity clarity) {
-        ArtifactCard card = ArtifactCard.of(master, owned);
-        return new ExhibitSpiritView(card.artifactId(), card.era(), card.revealLevel(),
+    public static ExhibitSpiritView of(RelicMaster master, UserRelic owned, Clarity clarity) {
+        RelicCard card = RelicCard.of(master, owned);
+        return new ExhibitSpiritView(card.relicId(), card.era(), card.revealLevel(),
                 card.poeticAlias(), card.realName(), card.spiritName(),
                 owned.getAwakeningStage(), clarity,
                 owned.isDisplayed(), owned.isHidden(),

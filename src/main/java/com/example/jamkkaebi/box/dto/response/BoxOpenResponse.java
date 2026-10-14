@@ -1,8 +1,8 @@
 package com.example.jamkkaebi.box.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.artifact.dto.response.ArtifactCard;
 import com.example.jamkkaebi.box.domain.BoxResult;
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.dto.response.RelicCard;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**
@@ -17,7 +17,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record BoxOpenResponse(
         BoxResult result,
-        ArtifactCard artifact,
+        RelicCard relic,
         DuplicateReward duplicateReward,
         Spent spent,
         BoxStatusResponse box

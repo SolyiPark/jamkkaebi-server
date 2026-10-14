@@ -1,17 +1,17 @@
 package com.example.jamkkaebi.exhibition.service;
 
-import com.example.jamkkaebi.artifact.domain.ArtifactMaster;
-import com.example.jamkkaebi.artifact.domain.ArtifactStatus;
-import com.example.jamkkaebi.artifact.domain.BuildingMaster;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
-import com.example.jamkkaebi.artifact.domain.UserBuilding;
-import com.example.jamkkaebi.artifact.dto.response.ArtifactCard;
-import com.example.jamkkaebi.artifact.repository.UserArtifactRepository;
-import com.example.jamkkaebi.artifact.repository.UserBuildingRepository;
-import com.example.jamkkaebi.artifact.service.ArtifactCatalog;
 import com.example.jamkkaebi.exhibition.config.ExhibitionProperties;
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
 import com.example.jamkkaebi.friend.spi.ExhibitionViewReader;
+import com.example.jamkkaebi.relic.domain.BuildingMaster;
+import com.example.jamkkaebi.relic.domain.RelicMaster;
+import com.example.jamkkaebi.relic.domain.RelicStatus;
+import com.example.jamkkaebi.relic.domain.UserBuilding;
+import com.example.jamkkaebi.relic.domain.UserRelic;
+import com.example.jamkkaebi.relic.dto.response.RelicCard;
+import com.example.jamkkaebi.relic.repository.UserBuildingRepository;
+import com.example.jamkkaebi.relic.repository.UserRelicRepository;
+import com.example.jamkkaebi.relic.service.RelicCatalog;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,16 +28,16 @@ import java.util.Map;
 @Service
 public class ExhibitionViewProvider implements ExhibitionViewReader {
 
-    private final UserArtifactRepository userArtifactRepository;
+    private final UserRelicRepository userRelicRepository;
     private final UserBuildingRepository userBuildingRepository;
-    private final ArtifactCatalog catalog;
+    private final RelicCatalog catalog;
     private final ExhibitionProperties properties;
 
-    public ExhibitionViewProvider(UserArtifactRepository userArtifactRepository,
+    public ExhibitionViewProvider(UserRelicRepository userRelicRepository,
                                   UserBuildingRepository userBuildingRepository,
-                                  ArtifactCatalog catalog,
+                                  RelicCatalog catalog,
                                   ExhibitionProperties properties) {
-        this.userArtifactRepository = userArtifactRepository;
+        this.userRelicRepository = userRelicRepository;
         this.userBuildingRepository = userBuildingRepository;
         this.catalog = catalog;
         this.properties = properties;
@@ -46,15 +46,15 @@ public class ExhibitionViewProvider implements ExhibitionViewReader {
     @Override
     @Transactional(readOnly = true)
     public ExhibitionView readPublicView(Long userId) {
-        List<UserArtifact> shown = userArtifactRepository.findAllByUserIdAndStatus(userId, ArtifactStatus.COMPLETED)
+        List<UserRelic> shown = userRelicRepository.findAllByUserIdAndStatus(userId, RelicStatus.COMPLETED)
                 .stream()
-                .filter(artifact -> artifact.isDisplayed() && !artifact.isHidden())
-                .sorted(Comparator.comparing(UserArtifact::getArtifactId))
+                .filter(relic -> relic.isDisplayed() && !relic.isHidden())
+                .sorted(Comparator.comparing(UserRelic::getRelicId))
                 .toList();
-        Map<Integer, ArtifactMaster> artifactMasters = catalog.artifacts(
-                shown.stream().map(UserArtifact::getArtifactId).toList());
+        Map<Integer, RelicMaster> relicMasters = catalog.relics(
+                shown.stream().map(UserRelic::getRelicId).toList());
         List<ExhibitionView.SpiritView> spirits = shown.stream()
-                .map(artifact -> spiritOf(artifactMasters.get(artifact.getArtifactId()), artifact))
+                .map(relic -> spiritOf(relicMasters.get(relic.getRelicId()), relic))
                 .toList();
 
         List<UserBuilding> placed = userBuildingRepository.findAllByUserId(userId).stream()
@@ -70,9 +70,9 @@ public class ExhibitionViewProvider implements ExhibitionViewReader {
         return new ExhibitionView(properties.grid(), spirits, buildings);
     }
 
-    private ExhibitionView.SpiritView spiritOf(ArtifactMaster master, UserArtifact owned) {
-        ArtifactCard card = ArtifactCard.of(master, owned);
-        return new ExhibitionView.SpiritView(card.artifactId(), card.era(), card.poeticAlias(), card.realName(),
+    private ExhibitionView.SpiritView spiritOf(RelicMaster master, UserRelic owned) {
+        RelicCard card = RelicCard.of(master, owned);
+        return new ExhibitionView.SpiritView(card.relicId(), card.era(), card.poeticAlias(), card.realName(),
                 card.spiritName(), owned.getAwakeningStage(),
                 new ExhibitionView.Position(owned.getPosX(), owned.getPosY()));
     }

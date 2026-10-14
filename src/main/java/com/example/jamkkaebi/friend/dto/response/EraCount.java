@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.friend.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.Era;
+import com.example.jamkkaebi.relic.domain.Era;
 
 /**
  * 시대별 복원(완료) 유물 수.

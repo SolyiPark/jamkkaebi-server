@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.codex.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.Era;
+import com.example.jamkkaebi.relic.domain.Era;
 
 /**
  * 한 시대의 진행률. 시대별 학습 흐름을 보완하기 위해 세 시대를 함께 보여 주는 데 쓴다.

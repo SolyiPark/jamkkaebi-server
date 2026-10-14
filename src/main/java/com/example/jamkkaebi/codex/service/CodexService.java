@@ -1,24 +1,24 @@
 package com.example.jamkkaebi.codex.service;
 
-import com.example.jamkkaebi.artifact.domain.ArtifactMaster;
-import com.example.jamkkaebi.artifact.domain.Clarity;
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
-import com.example.jamkkaebi.artifact.domain.UserBuilding;
-import com.example.jamkkaebi.artifact.repository.UserArtifactRepository;
-import com.example.jamkkaebi.artifact.repository.UserBuildingRepository;
-import com.example.jamkkaebi.artifact.service.ArtifactCatalog;
-import com.example.jamkkaebi.artifact.service.ClarityPolicy;
-import com.example.jamkkaebi.codex.dto.response.CodexArtifactResponse;
 import com.example.jamkkaebi.codex.dto.response.CodexBuildingView;
 import com.example.jamkkaebi.codex.dto.response.CodexCardView;
 import com.example.jamkkaebi.codex.dto.response.CodexEraProgress;
 import com.example.jamkkaebi.codex.dto.response.CodexEraResponse;
+import com.example.jamkkaebi.codex.dto.response.CodexRelicResponse;
 import com.example.jamkkaebi.codex.dto.response.CodexSummaryResponse;
 import com.example.jamkkaebi.global.exception.BusinessException;
 import com.example.jamkkaebi.global.exception.ErrorCode;
 import com.example.jamkkaebi.global.response.FieldError;
 import com.example.jamkkaebi.global.time.GameClock;
+import com.example.jamkkaebi.relic.domain.Clarity;
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.RelicMaster;
+import com.example.jamkkaebi.relic.domain.UserBuilding;
+import com.example.jamkkaebi.relic.domain.UserRelic;
+import com.example.jamkkaebi.relic.repository.UserBuildingRepository;
+import com.example.jamkkaebi.relic.repository.UserRelicRepository;
+import com.example.jamkkaebi.relic.service.ClarityPolicy;
+import com.example.jamkkaebi.relic.service.RelicCatalog;
 import com.example.jamkkaebi.user.domain.User;
 import com.example.jamkkaebi.user.service.UserProfileService;
 import org.springframework.stereotype.Service;
@@ -43,20 +43,20 @@ import java.util.stream.Collectors;
 public class CodexService {
 
     private final UserProfileService userProfileService;
-    private final UserArtifactRepository userArtifactRepository;
+    private final UserRelicRepository userRelicRepository;
     private final UserBuildingRepository userBuildingRepository;
-    private final ArtifactCatalog catalog;
+    private final RelicCatalog catalog;
     private final ClarityPolicy clarityPolicy;
     private final GameClock gameClock;
 
     public CodexService(UserProfileService userProfileService,
-                        UserArtifactRepository userArtifactRepository,
+                        UserRelicRepository userRelicRepository,
                         UserBuildingRepository userBuildingRepository,
-                        ArtifactCatalog catalog,
+                        RelicCatalog catalog,
                         ClarityPolicy clarityPolicy,
                         GameClock gameClock) {
         this.userProfileService = userProfileService;
-        this.userArtifactRepository = userArtifactRepository;
+        this.userRelicRepository = userRelicRepository;
         this.userBuildingRepository = userBuildingRepository;
         this.catalog = catalog;
         this.clarityPolicy = clarityPolicy;
@@ -66,10 +66,10 @@ public class CodexService {
     // 도감 첫 화면
     public CodexSummaryResponse summary(String friendCode) {
         User user = userProfileService.getByFriendCode(friendCode);
-        Map<Integer, UserArtifact> owned = ownedArtifacts(user.getId());
+        Map<Integer, UserRelic> owned = ownedRelics(user.getId());
         Map<Integer, UserBuilding> buildings = ownedBuildings(user.getId());
-        Map<Era, List<ArtifactMaster>> mastersByEra = catalog.allArtifacts().stream()
-                .collect(Collectors.groupingBy(ArtifactMaster::getEra));
+        Map<Era, List<RelicMaster>> mastersByEra = catalog.allRelics().stream()
+                .collect(Collectors.groupingBy(RelicMaster::getEra));
 
         // 삼국 - 고려 - 조선 (역사 순)
         List<CodexEraProgress> eras = Arrays.stream(Era.values())
@@ -78,29 +78,29 @@ public class CodexService {
 
         int completed = eras.stream().mapToInt(CodexEraProgress::completedCount).sum();
         int buildingsAcquired = (int) eras.stream().filter(CodexEraProgress::buildingAcquired).count();
-        return new CodexSummaryResponse(eras, completed, rateOf(completed, ArtifactMaster.TOTAL), buildingsAcquired);
+        return new CodexSummaryResponse(eras, completed, rateOf(completed, RelicMaster.TOTAL), buildingsAcquired);
     }
 
     // 한 시대의 카드 3장과 건물 슬롯
     public CodexEraResponse era(String friendCode, Era era) {
         User user = userProfileService.getByFriendCode(friendCode);
-        Map<Integer, UserArtifact> owned = ownedArtifacts(user.getId());
+        Map<Integer, UserRelic> owned = ownedRelics(user.getId());
         LocalDateTime now = gameClock.now();
 
-        List<ArtifactMaster> masters = catalog.allArtifacts().stream()
+        List<RelicMaster> masters = catalog.allRelics().stream()
                 .filter(master -> master.getEra() == era)
-                .sorted(Comparator.comparing(ArtifactMaster::getId))
+                .sorted(Comparator.comparing(RelicMaster::getId))
                 .toList();
         List<CodexCardView> cards = masters.stream()
                 .map(master -> {
-                    UserArtifact userArtifact = owned.get(master.getId());
-                    return CodexCardView.of(master, userArtifact, clarityOf(userArtifact, now));
+                    UserRelic userRelic = owned.get(master.getId());
+                    return CodexCardView.of(master, userRelic, clarityOf(userRelic, now));
                 })
                 .toList();
 
         int completed = (int) masters.stream()
                 .map(master -> owned.get(master.getId()))
-                .filter(userArtifact -> userArtifact != null && userArtifact.isCompleted())
+                .filter(userRelic -> userRelic != null && userRelic.isCompleted())
                 .count();
         CodexBuildingView building = catalog.buildingOf(era)
                 .map(master -> CodexBuildingView.of(master,
@@ -116,29 +116,29 @@ public class CodexService {
      * <p>없는 유물 번호만 거절하고({@code C001}), 보유하지 않았거나 완료하지 않은 카드는 가려서 돌려준다.
      * 도감에서는 잠긴 칸도 눌러 볼 수 있어야 한다.
      */
-    public CodexArtifactResponse artifact(String friendCode, Integer artifactId) {
+    public CodexRelicResponse relic(String friendCode, Integer relicId) {
         User user = userProfileService.getByFriendCode(friendCode);
-        ArtifactMaster master = catalog.findArtifact(artifactId)
+        RelicMaster master = catalog.findRelic(relicId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.INVALID_INPUT,
-                        List.of(new FieldError("artifactId", "존재하지 않는 유물입니다."))));
-        UserArtifact owned = userArtifactRepository.findByUserIdAndArtifactId(user.getId(), artifactId)
+                        List.of(new FieldError("relicId", "존재하지 않는 유물입니다."))));
+        UserRelic owned = userRelicRepository.findByUserIdAndRelicId(user.getId(), relicId)
                 .orElse(null);
-        return CodexArtifactResponse.of(master, owned, clarityOf(owned, gameClock.now()));
+        return CodexRelicResponse.of(master, owned, clarityOf(owned, gameClock.now()));
     }
 
     private CodexEraProgress progressOf(Era era,
-                                        List<ArtifactMaster> masters,
-                                        Map<Integer, UserArtifact> owned,
+                                        List<RelicMaster> masters,
+                                        Map<Integer, UserRelic> owned,
                                         Map<Integer, UserBuilding> buildings) {
         int acquired = 0;
         int completed = 0;
-        for (ArtifactMaster master : masters) {
-            UserArtifact userArtifact = owned.get(master.getId());
-            if (userArtifact == null) {
+        for (RelicMaster master : masters) {
+            UserRelic userRelic = owned.get(master.getId());
+            if (userRelic == null) {
                 continue;
             }
             acquired++;
-            if (userArtifact.isCompleted()) {
+            if (userRelic.isCompleted()) {
                 completed++;
             }
         }
@@ -148,9 +148,9 @@ public class CodexService {
         return new CodexEraProgress(era, completed, acquired, buildingAcquired);
     }
 
-    private Map<Integer, UserArtifact> ownedArtifacts(Long userId) {
-        return userArtifactRepository.findAllByUserId(userId).stream()
-                .collect(Collectors.toMap(UserArtifact::getArtifactId, Function.identity()));
+    private Map<Integer, UserRelic> ownedRelics(Long userId) {
+        return userRelicRepository.findAllByUserId(userId).stream()
+                .collect(Collectors.toMap(UserRelic::getRelicId, Function.identity()));
     }
 
     private Map<Integer, UserBuilding> ownedBuildings(Long userId) {
@@ -159,7 +159,7 @@ public class CodexService {
     }
 
     // 보유하지 않은 유물은 선명도 없음
-    private Clarity clarityOf(UserArtifact owned, LocalDateTime now) {
+    private Clarity clarityOf(UserRelic owned, LocalDateTime now) {
         return owned == null ? null : clarityPolicy.clarityOf(owned, now);
     }
 

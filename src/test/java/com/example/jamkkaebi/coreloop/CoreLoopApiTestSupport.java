@@ -1,14 +1,5 @@
 package com.example.jamkkaebi.coreloop;
 
-import com.example.jamkkaebi.artifact.domain.ArtifactMaster;
-import com.example.jamkkaebi.artifact.domain.Difficulty;
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
-import com.example.jamkkaebi.artifact.repository.UserArtifactRepository;
-import com.example.jamkkaebi.artifact.repository.UserBuildingRepository;
-import com.example.jamkkaebi.artifact.repository.UserEraCrystalRepository;
-import com.example.jamkkaebi.artifact.service.ArtifactCatalog;
-import com.example.jamkkaebi.artifact.service.MasterDataSeeder;
 import com.example.jamkkaebi.auth.domain.AuthProvider;
 import com.example.jamkkaebi.box.repository.BoxOpenLogRepository;
 import com.example.jamkkaebi.box.repository.GachaPityRepository;
@@ -16,6 +7,15 @@ import com.example.jamkkaebi.friend.repository.ExhibitionSnapshotRepository;
 import com.example.jamkkaebi.friend.repository.GiftLogRepository;
 import com.example.jamkkaebi.global.security.JwtProvider;
 import com.example.jamkkaebi.purification.repository.PlaySessionRepository;
+import com.example.jamkkaebi.relic.domain.Difficulty;
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.RelicMaster;
+import com.example.jamkkaebi.relic.domain.UserRelic;
+import com.example.jamkkaebi.relic.repository.UserBuildingRepository;
+import com.example.jamkkaebi.relic.repository.UserEraCrystalRepository;
+import com.example.jamkkaebi.relic.repository.UserRelicRepository;
+import com.example.jamkkaebi.relic.service.MasterDataSeeder;
+import com.example.jamkkaebi.relic.service.RelicCatalog;
 import com.example.jamkkaebi.support.CoreLoopTestConfig;
 import com.example.jamkkaebi.support.MutableClock;
 import com.example.jamkkaebi.user.domain.User;
@@ -58,7 +58,7 @@ abstract class CoreLoopApiTestSupport {
     @Autowired
     protected UserRepository userRepository;
     @Autowired
-    protected UserArtifactRepository userArtifactRepository;
+    protected UserRelicRepository userRelicRepository;
     @Autowired
     protected UserBuildingRepository userBuildingRepository;
     @Autowired
@@ -74,7 +74,7 @@ abstract class CoreLoopApiTestSupport {
     @Autowired
     protected ExhibitionSnapshotRepository snapshotRepository;
     @Autowired
-    protected ArtifactCatalog catalog;
+    protected RelicCatalog catalog;
     @Autowired
     protected TransactionTemplate transactionTemplate;
     @Autowired
@@ -101,7 +101,7 @@ abstract class CoreLoopApiTestSupport {
         gachaPityRepository.deleteAll();
         giftLogRepository.deleteAll();
         snapshotRepository.deleteAll();
-        userArtifactRepository.deleteAll();
+        userRelicRepository.deleteAll();
         userBuildingRepository.deleteAll();
         crystalRepository.deleteAll();
         userRepository.deleteAll();
@@ -115,9 +115,9 @@ abstract class CoreLoopApiTestSupport {
     }
 
     /** 상자를 거치지 않고 유물을 쥐여 준다. 뽑기 결과에 기대지 않고 특정 유물을 다루기 위해서다. */
-    protected UserArtifact give(Player player, int artifactId) {
-        return userArtifactRepository.save(
-                UserArtifact.acquired(player.id(), artifactId, LocalDateTime.now(clock)));
+    protected UserRelic give(Player player, int relicId) {
+        return userRelicRepository.save(
+                UserRelic.acquired(player.id(), relicId, LocalDateTime.now(clock)));
     }
 
     /**
@@ -126,19 +126,19 @@ abstract class CoreLoopApiTestSupport {
      * <p>API 로 3페이즈를 돌리면 판당 요청 두 번이라 아홉 종을 채우는 데 스물일곱 판이 든다. 여기서
      * 확인하려는 것이 정화 자체가 아닐 때는 도메인의 진행 메서드를 직접 불러 같은 상태를 만든다.
      */
-    protected UserArtifact giveCompleted(Player player, int artifactId) {
+    protected UserRelic giveCompleted(Player player, int relicId) {
         LocalDateTime now = LocalDateTime.now(clock);
-        UserArtifact userArtifact = UserArtifact.acquired(player.id(), artifactId, now);
-        userArtifact.clearFirstPhase(now);
-        userArtifact.clearFirstPhase(now);
-        userArtifact.clearFirstPhase(now);
-        return userArtifactRepository.save(userArtifact);
+        UserRelic userRelic = UserRelic.acquired(player.id(), relicId, now);
+        userRelic.clearFirstPhase(now);
+        userRelic.clearFirstPhase(now);
+        userRelic.clearFirstPhase(now);
+        return userRelicRepository.save(userRelic);
     }
 
-    protected List<Integer> artifactIdsOf(Era era) {
-        return catalog.allArtifacts().stream()
-                .filter(artifact -> artifact.getEra() == era)
-                .map(ArtifactMaster::getId)
+    protected List<Integer> relicIdsOf(Era era) {
+        return catalog.allRelics().stream()
+                .filter(relic -> relic.getEra() == era)
+                .map(RelicMaster::getId)
                 .toList();
     }
 
@@ -159,7 +159,7 @@ abstract class CoreLoopApiTestSupport {
 
     protected int crystalOf(Player player, Era era) {
         return crystalRepository.findByUserIdAndEra(player.id(), era)
-                .map(com.example.jamkkaebi.artifact.domain.UserEraCrystal::getCrystal)
+                .map(com.example.jamkkaebi.relic.domain.UserEraCrystal::getCrystal)
                 .orElse(0);
     }
 
@@ -195,10 +195,10 @@ abstract class CoreLoopApiTestSupport {
     }
 
     /** 세션을 시작하고 토큰을 돌려준다. {@code difficulty} 가 {@code null} 이면 최초 정화다. */
-    protected String startPurification(Player player, int artifactId, Difficulty difficulty) throws Exception {
+    protected String startPurification(Player player, int relicId, Difficulty difficulty) throws Exception {
         String body = difficulty == null
-                ? "{\"artifactId\":%d}".formatted(artifactId)
-                : "{\"artifactId\":%d,\"difficulty\":\"%s\"}".formatted(artifactId, difficulty);
+                ? "{\"relicId\":%d}".formatted(relicId)
+                : "{\"relicId\":%d,\"difficulty\":\"%s\"}".formatted(relicId, difficulty);
         ResultActions started = post(player, "/api/purifications", body)
                 .andExpect(MockMvcResultMatchers.status().isCreated());
         return read(started, "$.data.sessionToken");
@@ -210,8 +210,8 @@ abstract class CoreLoopApiTestSupport {
      * <p>시계를 1분 밀고 보고하는 이유는, 세션을 받자마자 결과를 보내면 최소 플레이 시간에 걸려
      * 거절되기 때문이다 — 그 검사가 살아 있는지도 함께 확인하는 셈이다.
      */
-    protected ResultActions clearPhase(Player player, int artifactId, Difficulty difficulty) throws Exception {
-        String token = startPurification(player, artifactId, difficulty);
+    protected ResultActions clearPhase(Player player, int relicId, Difficulty difficulty) throws Exception {
+        String token = startPurification(player, relicId, difficulty);
         clock.advance(Duration.ofMinutes(1));
         return post(player, "/api/purifications/{token}/result", """
                 {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
@@ -220,9 +220,9 @@ abstract class CoreLoopApiTestSupport {
     }
 
     /** 최초 정화 3페이즈를 끝까지 — 유물 하나가 {@code COMPLETED} 가 된다. */
-    protected ResultActions completeFirstPurification(Player player, int artifactId) throws Exception {
-        clearPhase(player, artifactId, null);
-        clearPhase(player, artifactId, null);
-        return clearPhase(player, artifactId, null);
+    protected ResultActions completeFirstPurification(Player player, int relicId) throws Exception {
+        clearPhase(player, relicId, null);
+        clearPhase(player, relicId, null);
+        return clearPhase(player, relicId, null);
     }
 }

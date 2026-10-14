@@ -1,11 +1,11 @@
 package com.example.jamkkaebi.purification.service;
 
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Difficulty;
 import com.example.jamkkaebi.global.exception.BusinessException;
 import com.example.jamkkaebi.global.exception.ErrorCode;
 import com.example.jamkkaebi.purification.config.DifficultyParams;
 import com.example.jamkkaebi.purification.config.PurificationProperties;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Difficulty;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -30,7 +30,7 @@ public class DifficultyCatalog {
         return properties.ordered();
     }
 
-    // 이 도깨비에게 해금 됐는지. (어려움은 각성+ 에 도달해야 열림)
+    // 이 도깨비에게 해금 됐는지
     public boolean unlocked(Difficulty difficulty, AwakeningStage stage) {
         return params(difficulty).unlockedFor(stage);
     }

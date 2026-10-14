@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.workbench.dto.request;
 
-import com.example.jamkkaebi.artifact.domain.BuildingMaster;
+import com.example.jamkkaebi.relic.domain.BuildingMaster;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;

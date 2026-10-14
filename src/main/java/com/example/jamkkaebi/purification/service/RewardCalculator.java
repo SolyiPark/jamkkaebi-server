@@ -1,15 +1,15 @@
 package com.example.jamkkaebi.purification.service;
 
-import com.example.jamkkaebi.artifact.domain.EntryRoute;
 import com.example.jamkkaebi.purification.config.DifficultyParams;
 import com.example.jamkkaebi.purification.config.PurificationProperties;
+import com.example.jamkkaebi.relic.domain.EntryRoute;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 
 /**
- * 한 판의 보상을 계산한다. (임시 수치값)
+ * 한 판의 보상을 계산한다. (임시값)
  */
 @Component
 public class RewardCalculator {
@@ -55,7 +55,7 @@ public class RewardCalculator {
     /**
      * 정산된 보상.
      *
-     * @param jeongseong 범용 재화
+     * @param jeongseong
      * @param crystal    해당 시대의 결정
      * @param gauge      성장 게이지
      */

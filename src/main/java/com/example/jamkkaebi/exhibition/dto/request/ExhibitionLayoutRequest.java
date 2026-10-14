@@ -20,7 +20,7 @@ public record ExhibitionLayoutRequest(
 ) {
 
     /**
-     * @param type {@code SPIRIT} 이면 {@code id} 는 {@code artifactId}, {@code BUILDING} 이면 {@code buildingId}
+     * @param type {@code SPIRIT} 이면 {@code id} 는 {@code relicId}, {@code BUILDING} 이면 {@code buildingId}
      */
     public record Item(
 

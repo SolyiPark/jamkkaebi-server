@@ -1,7 +1,7 @@
 package com.example.jamkkaebi.codex.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.BuildingMaster;
-import com.example.jamkkaebi.artifact.domain.UserBuilding;
+import com.example.jamkkaebi.relic.domain.BuildingMaster;
+import com.example.jamkkaebi.relic.domain.UserBuilding;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**

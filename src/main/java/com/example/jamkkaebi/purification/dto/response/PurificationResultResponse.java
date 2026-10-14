@@ -1,16 +1,16 @@
 package com.example.jamkkaebi.purification.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.ArtifactStatus;
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Clarity;
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.artifact.domain.Phase;
-import com.example.jamkkaebi.artifact.domain.RevealLevel;
-import com.example.jamkkaebi.artifact.dto.response.ArtifactCard;
-import com.example.jamkkaebi.artifact.dto.response.BuildingView;
-import com.example.jamkkaebi.artifact.dto.response.GaugeView;
 import com.example.jamkkaebi.purification.domain.NextAction;
 import com.example.jamkkaebi.purification.domain.PlayResult;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Clarity;
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.Phase;
+import com.example.jamkkaebi.relic.domain.RelicStatus;
+import com.example.jamkkaebi.relic.domain.RevealLevel;
+import com.example.jamkkaebi.relic.dto.response.BuildingView;
+import com.example.jamkkaebi.relic.dto.response.GaugeView;
+import com.example.jamkkaebi.relic.dto.response.RelicCard;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.util.List;
@@ -19,8 +19,8 @@ import java.util.List;
  * 한 판의 정산 결과.
  *
  * @param perfectStreak    이 도깨비의 연속 완벽 정화 수. 최초 정화면 {@code null}
- * @param revealed         이번 판에서 <b>새로</b> 도달한 공개 단계. 변화가 없으면 {@code null}
- * @param lastClearedPhase 갱신된 복구 진행도. 선명으로 돌아왔거나 복구 중이 아니면 {@code null}
+ * @param revealed         이번 판에서 <b>새로</b> 도달한 공개 단계
+ * @param lastClearedPhase 갱신된 복구 진행도
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record PurificationResultResponse(
@@ -28,8 +28,8 @@ public record PurificationResultResponse(
         boolean perfect,
         Integer perfectStreak,
         Rewards rewards,
-        ArtifactCard artifact,
-        ArtifactStatus status,
+        RelicCard relic,
+        RelicStatus status,
         RevealLevel revealed,
         NextStep next,
         Phase lastClearedPhase,
@@ -66,7 +66,7 @@ public record PurificationResultResponse(
     }
 
     /**
-     * 정산 후 각성 현황. 정령 수호를 마친 유물에만 있다.
+     * 각성 현황. 정령 수호를 마친 유물에만 있다.
      *
      * @param growthGauge 완전각성이면 {@code null}
      */

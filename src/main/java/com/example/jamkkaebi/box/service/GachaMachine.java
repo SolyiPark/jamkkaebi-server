@@ -85,7 +85,7 @@ public class GachaMachine {
     private Map<Integer, GachaPity> loadPity(Long userId, List<Integer> unowned) {
         Map<Integer, GachaPity> stored = new HashMap<>();
         pityRepository.findAllByUserId(userId)
-                .forEach(counter -> stored.put(counter.getArtifactId(), counter));
+                .forEach(counter -> stored.put(counter.getRelicId(), counter));
 
         List<GachaPity> created = new ArrayList<>();
         for (Integer id : unowned) {
@@ -93,7 +93,7 @@ public class GachaMachine {
                 created.add(GachaPity.start(userId, id));
             }
         }
-        pityRepository.saveAll(created).forEach(counter -> stored.put(counter.getArtifactId(), counter));
+        pityRepository.saveAll(created).forEach(counter -> stored.put(counter.getRelicId(), counter));
         return stored;
     }
 

@@ -1,9 +1,9 @@
 package com.example.jamkkaebi.exhibition.dto.response;
 
-import com.example.jamkkaebi.artifact.domain.BuildingMaster;
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.artifact.domain.UserBuilding;
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
+import com.example.jamkkaebi.relic.domain.BuildingMaster;
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.UserBuilding;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 /**

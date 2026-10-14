@@ -1,10 +1,10 @@
 package com.example.jamkkaebi.coreloop;
 
-import com.example.jamkkaebi.artifact.domain.ArtifactStatus;
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Difficulty;
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Difficulty;
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.RelicStatus;
+import com.example.jamkkaebi.relic.domain.UserRelic;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -34,13 +34,13 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.code").value("BOX_OPENED"))
                 .andExpect(jsonPath("$.data.result").value("NEW"))
                 // 획득 직후는 실루엣뿐이다 — 시적 별칭은 봉인 해제를 마쳐야 공개된다 (부록 C-1).
-                .andExpect(jsonPath("$.data.artifact.revealLevel").value("SILHOUETTE"))
-                .andExpect(jsonPath("$.data.artifact.poeticAlias").doesNotExist())
-                .andExpect(jsonPath("$.data.artifact.realName").doesNotExist());
-        int artifactId = read(opened, "$.data.artifact.artifactId");
+                .andExpect(jsonPath("$.data.relic.revealLevel").value("SILHOUETTE"))
+                .andExpect(jsonPath("$.data.relic.poeticAlias").doesNotExist())
+                .andExpect(jsonPath("$.data.relic.realName").doesNotExist());
+        int relicId = read(opened, "$.data.relic.relicId");
 
         // 1페이즈 — 봉인 해제. 별칭이 열린다.
-        clearPhase(player, artifactId, null)
+        clearPhase(player, relicId, null)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.revealed").value("ALIAS"))
                 .andExpect(jsonPath("$.data.next.action").value("NEXT_PHASE"))
@@ -49,23 +49,23 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.rewards.growthGauge").value(0));
 
         // 2페이즈 — 기억 회복. 형태가 열린다.
-        clearPhase(player, artifactId, null)
+        clearPhase(player, relicId, null)
                 .andExpect(jsonPath("$.data.revealed").value("FORM"))
                 .andExpect(jsonPath("$.data.next.phase").value("GUARD"));
 
         // 3페이즈 — 정령 수호. 이름이 전부 공개되고 각성한다.
-        clearPhase(player, artifactId, null)
+        clearPhase(player, relicId, null)
                 .andExpect(jsonPath("$.data.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.data.revealed").value("NAMED"))
-                .andExpect(jsonPath("$.data.artifact.realName").isNotEmpty())
-                .andExpect(jsonPath("$.data.artifact.spiritName").isNotEmpty())
+                .andExpect(jsonPath("$.data.relic.realName").isNotEmpty())
+                .andExpect(jsonPath("$.data.relic.spiritName").isNotEmpty())
                 .andExpect(jsonPath("$.data.next.action").value("DONE"))
                 .andExpect(jsonPath("$.data.awakening.stage").value("AWAKENED"))
                 .andExpect(jsonPath("$.data.clarity").value("CLEAR"));
 
-        UserArtifact stored = userArtifactRepository
-                .findByUserIdAndArtifactId(player.id(), artifactId).orElseThrow();
-        assertThat(stored.getStatus()).isEqualTo(ArtifactStatus.COMPLETED);
+        UserRelic stored = userRelicRepository
+                .findByUserIdAndRelicId(player.id(), relicId).orElseThrow();
+        assertThat(stored.getStatus()).isEqualTo(RelicStatus.COMPLETED);
         assertThat(stored.getAwakeningStage()).isEqualTo(AwakeningStage.AWAKENED);
         assertThat(stored.getLastPurifiedAt()).isNotNull();
     }
@@ -74,7 +74,7 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
     @DisplayName("한 시대의 유물 3종을 모두 마치면 건물이 자동으로 지급된다")
     void 시대_완성_건물_지급() throws Exception {
         Player player = player("수집가");
-        List<Integer> goryeo = artifactIdsOf(Era.GORYEO);
+        List<Integer> goryeo = relicIdsOf(Era.GORYEO);
 
         completeFirstPurification(player, giveAndReturnId(player, goryeo.get(0)));
         completeFirstPurification(player, giveAndReturnId(player, goryeo.get(1)));
@@ -91,16 +91,16 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
     @DisplayName("관리 플레이로 게이지를 채우면 강화를 확정할 수 있고, 넘친 게이지는 다음 단계로 이월된다")
     void 성장_게이지_충전과_강화_확정() throws Exception {
         Player player = player("돌보미");
-        int artifactId = giveAndReturnId(player, 1);
-        completeFirstPurification(player, artifactId);
+        int relicId = giveAndReturnId(player, 1);
+        completeFirstPurification(player, relicId);
 
         // 보통 난이도 한 판 = 20 × 1.2 = 24. 각성+ 에 필요한 100 을 넘기려면 다섯 판.
         for (int i = 0; i < 5; i++) {
-            clearPhase(player, artifactId, Difficulty.NORMAL)
+            clearPhase(player, relicId, Difficulty.NORMAL)
                     .andExpect(jsonPath("$.data.rewards.growthGauge").value(24));
         }
 
-        get(player, "/api/artifacts/{id}", artifactId)
+        get(player, "/api/relics/{id}", relicId)
                 .andExpect(jsonPath("$.data.growthReady").value(true))
                 .andExpect(jsonPath("$.data.growthGauge.current").value(120))
                 .andExpect(jsonPath("$.data.growthGauge.max").value(100))
@@ -109,9 +109,9 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.nextPlay.difficulties[3].difficulty").value("HARD"))
                 .andExpect(jsonPath("$.data.nextPlay.difficulties[3].unlocked").value(false));
 
-        post(player, "/api/artifacts/{id}/awaken", """
+        post(player, "/api/relics/{id}/awaken", """
                 {"targetStage":"AWAKENED_PLUS"}
-                """, artifactId)
+                """, relicId)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.awakeningStage").value("AWAKENED_PLUS"))
                 // 넘친 20 은 버리지 않고 다음 단계로 옮긴다 (부록 C-7).
@@ -125,24 +125,24 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
     @DisplayName("같은 단계로 다시 확정 요청하면 아무것도 바뀌지 않고, 두 단계를 건너뛰면 막힌다")
     void 강화_확정_멱등과_단계_검사() throws Exception {
         Player player = player("연타왕");
-        int artifactId = giveAndReturnId(player, 1);
-        completeFirstPurification(player, artifactId);
+        int relicId = giveAndReturnId(player, 1);
+        completeFirstPurification(player, relicId);
         for (int i = 0; i < 5; i++) {
-            clearPhase(player, artifactId, Difficulty.NORMAL);
+            clearPhase(player, relicId, Difficulty.NORMAL);
         }
-        post(player, "/api/artifacts/{id}/awaken", """
+        post(player, "/api/relics/{id}/awaken", """
                 {"targetStage":"AWAKENED_PLUS"}
-                """, artifactId).andExpect(status().isOk());
+                """, relicId).andExpect(status().isOk());
 
         // 응답을 못 받고 다시 누른 경우 — 단계가 또 오르면 안 된다.
-        post(player, "/api/artifacts/{id}/awaken", """
+        post(player, "/api/relics/{id}/awaken", """
                 {"targetStage":"AWAKENED_PLUS"}
-                """, artifactId)
+                """, relicId)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.awakeningStage").value("AWAKENED_PLUS"))
                 .andExpect(jsonPath("$.data.carriedOver").value(0));
 
-        assertThat(userArtifactRepository.findByUserIdAndArtifactId(player.id(), artifactId)
+        assertThat(userRelicRepository.findByUserIdAndRelicId(player.id(), relicId)
                 .orElseThrow().getAwakeningStage()).isEqualTo(AwakeningStage.AWAKENED_PLUS);
     }
 
@@ -150,18 +150,18 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
     @DisplayName("게이지가 차지 않았는데 강화하면 W003, 각성 단계가 어긋나면 W004")
     void 강화_실패_경로() throws Exception {
         Player player = player("성급이");
-        int artifactId = giveAndReturnId(player, 1);
-        completeFirstPurification(player, artifactId);
+        int relicId = giveAndReturnId(player, 1);
+        completeFirstPurification(player, relicId);
 
-        post(player, "/api/artifacts/{id}/awaken", """
+        post(player, "/api/relics/{id}/awaken", """
                 {"targetStage":"AWAKENED_PLUS"}
-                """, artifactId)
+                """, relicId)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("W003"));
 
-        post(player, "/api/artifacts/{id}/awaken", """
+        post(player, "/api/relics/{id}/awaken", """
                 {"targetStage":"FULLY_AWAKENED"}
-                """, artifactId)
+                """, relicId)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("W004"));
     }
@@ -170,29 +170,29 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
     @DisplayName("정령 수호를 마치기 전에는 이름을 지을 수 없다")
     void 이름_짓기는_완료_후에만() throws Exception {
         Player player = player("작명가");
-        int artifactId = giveAndReturnId(player, 1);
+        int relicId = giveAndReturnId(player, 1);
 
-        patch(player, "/api/artifacts/{id}/spirit-name", """
+        patch(player, "/api/relics/{id}/spirit-name", """
                 {"name":"향로지기"}
-                """, artifactId)
+                """, relicId)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("W002"));
 
-        completeFirstPurification(player, artifactId);
+        completeFirstPurification(player, relicId);
 
-        patch(player, "/api/artifacts/{id}/spirit-name", """
+        patch(player, "/api/relics/{id}/spirit-name", """
                 {"name":"향로지기"}
-                """, artifactId)
+                """, relicId)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.artifact.spiritName").value("향로지기"));
+                .andExpect(jsonPath("$.data.relic.spiritName").value("향로지기"));
 
         // null 은 기본 이름으로 되돌린다.
-        patch(player, "/api/artifacts/{id}/spirit-name", """
+        patch(player, "/api/relics/{id}/spirit-name", """
                 {"name":null}
-                """, artifactId)
+                """, relicId)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.artifact.spiritName")
-                        .value(catalog.artifact(artifactId).getSpiritDefaultName()));
+                .andExpect(jsonPath("$.data.relic.spiritName")
+                        .value(catalog.relic(relicId).getSpiritDefaultName()));
     }
 
     @Test
@@ -200,12 +200,12 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
     void 보유하지_않은_유물() throws Exception {
         Player player = player("빈손");
 
-        get(player, "/api/artifacts/{id}", 1)
+        get(player, "/api/relics/{id}", 1)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("W001"));
 
         // 존재하지 않는 번호도 같은 응답이다 — 나누면 번호를 찍어 존재 여부를 알아낼 수 있다.
-        get(player, "/api/artifacts/{id}", 999)
+        get(player, "/api/relics/{id}", 999)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("W001"));
     }
@@ -227,19 +227,19 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
         // 1번은 16일, 2번은 8일 방치됐다.
         get(player, "/api/workbench")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.spirits[0].artifactId").value(resealed))
+                .andExpect(jsonPath("$.data.spirits[0].relicId").value(resealed))
                 .andExpect(jsonPath("$.data.spirits[0].clarity").value("RESEALED"))
-                .andExpect(jsonPath("$.data.spirits[1].artifactId").value(faded))
+                .andExpect(jsonPath("$.data.spirits[1].relicId").value(faded))
                 .andExpect(jsonPath("$.data.spirits[1].clarity").value("FADED"))
-                .andExpect(jsonPath("$.data.spirits[2].artifactId").value(clear))
+                .andExpect(jsonPath("$.data.spirits[2].relicId").value(clear))
                 .andExpect(jsonPath("$.data.spirits[2].clarity").value("CLEAR"))
                 .andExpect(jsonPath("$.data.lockedCount").value(6))
                 .andExpect(jsonPath("$.data.capacity").value(3));
     }
 
     /** 유물을 쥐여 주고 그 번호를 돌려준다. */
-    private int giveAndReturnId(Player player, int artifactId) {
-        give(player, artifactId);
-        return artifactId;
+    private int giveAndReturnId(Player player, int relicId) {
+        give(player, relicId);
+        return relicId;
     }
 }

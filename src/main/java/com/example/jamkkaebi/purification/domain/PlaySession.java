@@ -1,9 +1,9 @@
 package com.example.jamkkaebi.purification.domain;
 
-import com.example.jamkkaebi.artifact.domain.Difficulty;
-import com.example.jamkkaebi.artifact.domain.EntryRoute;
-import com.example.jamkkaebi.artifact.domain.Phase;
 import com.example.jamkkaebi.global.common.BaseTimeEntity;
+import com.example.jamkkaebi.relic.domain.Difficulty;
+import com.example.jamkkaebi.relic.domain.EntryRoute;
+import com.example.jamkkaebi.relic.domain.Phase;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -37,7 +37,7 @@ import java.time.LocalDateTime;
         uniqueConstraints = @UniqueConstraint(
                 name = "uk_play_sessions_token", columnNames = "session_token"),
         indexes = {
-                @Index(name = "idx_play_sessions_owner_artifact", columnList = "user_id, user_artifact_id"),
+                @Index(name = "idx_play_sessions_owner_relic", columnList = "user_id, user_relic_id"),
                 @Index(name = "idx_play_sessions_expires", columnList = "expires_at")
         }
 )
@@ -56,8 +56,8 @@ public class PlaySession extends BaseTimeEntity {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Column(name = "user_artifact_id", nullable = false)
-    private Long userArtifactId;
+    @Column(name = "user_relic_id", nullable = false)
+    private Long userRelicId;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -132,12 +132,12 @@ public class PlaySession extends BaseTimeEntity {
     private LocalDateTime endedAt;
 
     @Builder
-    private PlaySession(String sessionToken, Long userId, Long userArtifactId, Phase phase, Difficulty difficulty,
+    private PlaySession(String sessionToken, Long userId, Long userRelicId, Phase phase, Difficulty difficulty,
                         EntryRoute entryRoute, long boardSeed, int tapBudget, int scoutLimit,
                         LocalDateTime startedAt, LocalDateTime expiresAt) {
         this.sessionToken = sessionToken;
         this.userId = userId;
-        this.userArtifactId = userArtifactId;
+        this.userRelicId = userRelicId;
         this.phase = phase;
         this.difficulty = difficulty;
         this.entryRoute = entryRoute;

@@ -11,7 +11,7 @@ import java.util.List;
  * 숨긴 도깨비도 목록에 남는다.
  *
  * @param grid      배치 좌표 범위
- * @param spirits   정령 수호까지 마친 도깨비 전부 ({@code artifactId} 순)
+ * @param spirits   정령 수호까지 마친 도깨비 전부 ({@code relicId} 순)
  * @param buildings 받은 건물 전부 ({@code buildingId} 순)
  */
 public record ExhibitionResponse(

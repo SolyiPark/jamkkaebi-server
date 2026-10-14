@@ -1,12 +1,12 @@
 package com.example.jamkkaebi.coreloop;
 
-import com.example.jamkkaebi.artifact.domain.ArtifactMaster;
-import com.example.jamkkaebi.artifact.domain.Era;
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
-import com.example.jamkkaebi.artifact.domain.UserBuilding;
-import com.example.jamkkaebi.artifact.repository.ArtifactMasterRepository;
 import com.example.jamkkaebi.friend.domain.Friendship;
 import com.example.jamkkaebi.friend.repository.FriendshipRepository;
+import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.RelicMaster;
+import com.example.jamkkaebi.relic.domain.UserBuilding;
+import com.example.jamkkaebi.relic.domain.UserRelic;
+import com.example.jamkkaebi.relic.repository.RelicMasterRepository;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,7 +35,7 @@ class CodexTest extends CoreLoopApiTestSupport {
     private static final int MAPAE = 8;            // 마패 — 조선
 
     @Autowired
-    private ArtifactMasterRepository artifactMasterRepository;
+    private RelicMasterRepository relicMasterRepository;
     @Autowired
     private FriendshipRepository friendshipRepository;
 
@@ -59,7 +59,7 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.eras[0].completedCount").value(0))
                 .andExpect(jsonPath("$.data.eras[0].acquiredCount").value(0))
                 .andExpect(jsonPath("$.data.eras[0].buildingAcquired").value(false))
-                .andExpect(jsonPath("$.data.completedArtifacts").value(0))
+                .andExpect(jsonPath("$.data.completedRelics").value(0))
                 .andExpect(jsonPath("$.data.collectionRate").value(0))
                 .andExpect(jsonPath("$.data.buildingsAcquired").value(0));
     }
@@ -70,8 +70,8 @@ class CodexTest extends CoreLoopApiTestSupport {
         Player player = player("학예사");
         giveCompleted(player, INCENSE_BURNER);   // 삼국: 완료 1
         give(player, GEUMGWAN);                  // 삼국: 진행 중 1
-        for (int artifactId : artifactIdsOf(Era.GORYEO)) {
-            giveCompleted(player, artifactId);   // 고려: 완료 3
+        for (int relicId : relicIdsOf(Era.GORYEO)) {
+            giveCompleted(player, relicId);   // 고려: 완료 3
         }
         giveBuilding(player, Era.GORYEO);
         giveCompleted(player, MAPAE);            // 조선: 완료 1
@@ -86,7 +86,7 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.eras[1].buildingAcquired").value(true))
                 .andExpect(jsonPath("$.data.eras[2].completedCount").value(1))
                 .andExpect(jsonPath("$.data.eras[2].acquiredCount").value(1))
-                .andExpect(jsonPath("$.data.completedArtifacts").value(5))
+                .andExpect(jsonPath("$.data.completedRelics").value(5))
                 // 5 ÷ 9 = 55.5…% 를 내린다.
                 .andExpect(jsonPath("$.data.collectionRate").value(55))
                 .andExpect(jsonPath("$.data.buildingsAcquired").value(1));
@@ -104,11 +104,11 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.collectionRate").value(0))
                 .andExpect(jsonPath("$.data.buildingsAcquired").value(3));
 
-        for (int artifactId = 1; artifactId <= ArtifactMaster.TOTAL; artifactId++) {
-            giveCompleted(player, artifactId);
+        for (int relicId = 1; relicId <= RelicMaster.TOTAL; relicId++) {
+            giveCompleted(player, relicId);
         }
         get(player, "/api/codex")
-                .andExpect(jsonPath("$.data.completedArtifacts").value(9))
+                .andExpect(jsonPath("$.data.completedRelics").value(9))
                 .andExpect(jsonPath("$.data.collectionRate").value(100));
     }
 
@@ -121,7 +121,7 @@ class CodexTest extends CoreLoopApiTestSupport {
         get(player, "/api/codex")
                 .andExpect(jsonPath("$.data.eras[0].acquiredCount").value(1))
                 .andExpect(jsonPath("$.data.eras[0].completedCount").value(0))
-                .andExpect(jsonPath("$.data.completedArtifacts").value(0))
+                .andExpect(jsonPath("$.data.completedRelics").value(0))
                 .andExpect(jsonPath("$.data.collectionRate").value(0));
     }
 
@@ -141,7 +141,7 @@ class CodexTest extends CoreLoopApiTestSupport {
                 // 선명도는 카드 상태가 아니라 배지로 따로 보여 준다.
                 .andExpect(jsonPath("$.data.cards[1].clarity").value("RESEALED"))
                 .andExpect(jsonPath("$.data.cards[1].awakeningStage").value("AWAKENED"));
-        get(player, "/api/codex/artifacts/{id}", INCENSE_BURNER)
+        get(player, "/api/codex/relics/{id}", INCENSE_BURNER)
                 .andExpect(jsonPath("$.data.cardState").value("FULL_COLOR"))
                 .andExpect(jsonPath("$.data.record.story").isNotEmpty());
     }
@@ -162,26 +162,26 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.collectionRate").value(33))
                 .andExpect(jsonPath("$.data.cards.length()").value(3))
                 // 미획득 — 자리만 차지한다.
-                .andExpect(jsonPath("$.data.cards[0].artifactId").value(GEUMDONG_YEONGA))
+                .andExpect(jsonPath("$.data.cards[0].relicId").value(GEUMDONG_YEONGA))
                 .andExpect(jsonPath("$.data.cards[0].cardState").value("LOCKED"))
-                .andExpect(jsonPath("$.data.cards[0].artifact").doesNotExist())
+                .andExpect(jsonPath("$.data.cards[0].relic").doesNotExist())
                 .andExpect(jsonPath("$.data.cards[0].awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.cards[0].clarity").doesNotExist())
                 // 풀 컬러 — 이름이 전부 공개되고 배지가 붙는다.
-                .andExpect(jsonPath("$.data.cards[1].artifactId").value(INCENSE_BURNER))
+                .andExpect(jsonPath("$.data.cards[1].relicId").value(INCENSE_BURNER))
                 .andExpect(jsonPath("$.data.cards[1].cardState").value("FULL_COLOR"))
-                .andExpect(jsonPath("$.data.cards[1].artifact.revealLevel").value("NAMED"))
-                .andExpect(jsonPath("$.data.cards[1].artifact.poeticAlias").value("백제, 향이 스민 산맥"))
-                .andExpect(jsonPath("$.data.cards[1].artifact.realName").value("금동대향로"))
-                .andExpect(jsonPath("$.data.cards[1].artifact.spiritName").value("향산이"))
+                .andExpect(jsonPath("$.data.cards[1].relic.revealLevel").value("NAMED"))
+                .andExpect(jsonPath("$.data.cards[1].relic.poeticAlias").value("백제, 향이 스민 산맥"))
+                .andExpect(jsonPath("$.data.cards[1].relic.realName").value("금동대향로"))
+                .andExpect(jsonPath("$.data.cards[1].relic.spiritName").value("향산이"))
                 .andExpect(jsonPath("$.data.cards[1].awakeningStage").value("AWAKENED"))
                 .andExpect(jsonPath("$.data.cards[1].clarity").value("CLEAR"))
                 // 실루엣 — 작업대 진행 중이라 이름이 없고 배지도 없다.
-                .andExpect(jsonPath("$.data.cards[2].artifactId").value(GEUMGWAN))
+                .andExpect(jsonPath("$.data.cards[2].relicId").value(GEUMGWAN))
                 .andExpect(jsonPath("$.data.cards[2].cardState").value("SILHOUETTE"))
-                .andExpect(jsonPath("$.data.cards[2].artifact.revealLevel").value("SILHOUETTE"))
-                .andExpect(jsonPath("$.data.cards[2].artifact.poeticAlias").doesNotExist())
-                .andExpect(jsonPath("$.data.cards[2].artifact.realName").doesNotExist())
+                .andExpect(jsonPath("$.data.cards[2].relic.revealLevel").value("SILHOUETTE"))
+                .andExpect(jsonPath("$.data.cards[2].relic.poeticAlias").doesNotExist())
+                .andExpect(jsonPath("$.data.cards[2].relic.realName").doesNotExist())
                 .andExpect(jsonPath("$.data.cards[2].awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.cards[2].clarity").doesNotExist());
     }
@@ -190,16 +190,16 @@ class CodexTest extends CoreLoopApiTestSupport {
     @DisplayName("진행 중인 카드는 작업대와 같은 단계까지만 공개한다")
     void 진행_중_카드는_단계적_공개() throws Exception {
         Player player = player("학예사");
-        UserArtifact artifact = give(player, GEUMGWAN);
-        artifact.clearFirstPhase(LocalDateTime.now(clock));   // 봉인 해제 클리어 → 별칭 공개
-        userArtifactRepository.save(artifact);
+        UserRelic relic = give(player, GEUMGWAN);
+        relic.clearFirstPhase(LocalDateTime.now(clock));   // 봉인 해제 클리어 → 별칭 공개
+        userRelicRepository.save(relic);
 
         get(player, "/api/codex/eras/{era}", "THREE_KINGDOMS")
                 .andExpect(jsonPath("$.data.cards[2].cardState").value("SILHOUETTE"))
-                .andExpect(jsonPath("$.data.cards[2].artifact.revealLevel").value("ALIAS"))
-                .andExpect(jsonPath("$.data.cards[2].artifact.poeticAlias").value("신라, 머리에 인 금빛 숲"))
-                .andExpect(jsonPath("$.data.cards[2].artifact.realName").doesNotExist())
-                .andExpect(jsonPath("$.data.cards[2].artifact.spiritName").doesNotExist());
+                .andExpect(jsonPath("$.data.cards[2].relic.revealLevel").value("ALIAS"))
+                .andExpect(jsonPath("$.data.cards[2].relic.poeticAlias").value("신라, 머리에 인 금빛 숲"))
+                .andExpect(jsonPath("$.data.cards[2].relic.realName").doesNotExist())
+                .andExpect(jsonPath("$.data.cards[2].relic.spiritName").doesNotExist());
     }
 
     @Test
@@ -247,15 +247,15 @@ class CodexTest extends CoreLoopApiTestSupport {
     void 카드_상세_완료() throws Exception {
         Player player = player("학예사");
         giveCompleted(player, INCENSE_BURNER);
-        String story = catalog.artifact(INCENSE_BURNER).getRealStory();
+        String story = catalog.relic(INCENSE_BURNER).getRealStory();
 
-        get(player, "/api/codex/artifacts/{id}", INCENSE_BURNER)
+        get(player, "/api/codex/relics/{id}", INCENSE_BURNER)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("OK"))
-                .andExpect(jsonPath("$.data.artifactId").value(INCENSE_BURNER))
+                .andExpect(jsonPath("$.data.relicId").value(INCENSE_BURNER))
                 .andExpect(jsonPath("$.data.cardState").value("FULL_COLOR"))
-                .andExpect(jsonPath("$.data.artifact.revealLevel").value("NAMED"))
-                .andExpect(jsonPath("$.data.artifact.realName").value("금동대향로"))
+                .andExpect(jsonPath("$.data.relic.revealLevel").value("NAMED"))
+                .andExpect(jsonPath("$.data.relic.realName").value("금동대향로"))
                 .andExpect(jsonPath("$.data.awakeningStage").value("AWAKENED"))
                 .andExpect(jsonPath("$.data.clarity").value("CLEAR"))
                 .andExpect(jsonPath("$.data.record.story").value(story))
@@ -269,11 +269,11 @@ class CodexTest extends CoreLoopApiTestSupport {
     void 카드_상세_미획득() throws Exception {
         Player player = player("학예사");
 
-        String body = get(player, "/api/codex/artifacts/{id}", INCENSE_BURNER)
+        String body = get(player, "/api/codex/relics/{id}", INCENSE_BURNER)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.artifactId").value(INCENSE_BURNER))
+                .andExpect(jsonPath("$.data.relicId").value(INCENSE_BURNER))
                 .andExpect(jsonPath("$.data.cardState").value("LOCKED"))
-                .andExpect(jsonPath("$.data.artifact").doesNotExist())
+                .andExpect(jsonPath("$.data.relic").doesNotExist())
                 .andExpect(jsonPath("$.data.awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.clarity").doesNotExist())
                 .andExpect(jsonPath("$.data.record").doesNotExist())
@@ -288,10 +288,10 @@ class CodexTest extends CoreLoopApiTestSupport {
         Player player = player("학예사");
         give(player, INCENSE_BURNER);
 
-        String body = get(player, "/api/codex/artifacts/{id}", INCENSE_BURNER)
+        String body = get(player, "/api/codex/relics/{id}", INCENSE_BURNER)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.cardState").value("SILHOUETTE"))
-                .andExpect(jsonPath("$.data.artifact.revealLevel").value("SILHOUETTE"))
+                .andExpect(jsonPath("$.data.relic.revealLevel").value("SILHOUETTE"))
                 .andExpect(jsonPath("$.data.awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.clarity").doesNotExist())
                 .andExpect(jsonPath("$.data.record").doesNotExist())
@@ -309,11 +309,11 @@ class CodexTest extends CoreLoopApiTestSupport {
         setLinks(INCENSE_BURNER, "https://heritage.example/incense", "https://report.example/incense");
         setLinks(GEUMGWAN, "https://heritage.example/geumgwan", "https://report.example/geumgwan");
         try {
-            get(player, "/api/codex/artifacts/{id}", INCENSE_BURNER)
+            get(player, "/api/codex/relics/{id}", INCENSE_BURNER)
                     .andExpect(jsonPath("$.data.record.heritageUrl").value("https://heritage.example/incense"))
                     .andExpect(jsonPath("$.data.record.reportUrl").value("https://report.example/incense"));
 
-            String body = get(player, "/api/codex/artifacts/{id}", GEUMGWAN)
+            String body = get(player, "/api/codex/relics/{id}", GEUMGWAN)
                     .andExpect(jsonPath("$.data.record").doesNotExist())
                     .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
             assertThat(body).doesNotContain("example");
@@ -327,9 +327,9 @@ class CodexTest extends CoreLoopApiTestSupport {
     @DisplayName("실제 정화로 시대를 채우면 도감이 이어서 바뀐다 — 2종까지는 건물이 없고, 3종째에 건물이 생긴다")
     void 정화_흐름과_이어진다() throws Exception {
         Player player = player("학예사");
-        int[] goryeo = artifactIdsOf(Era.GORYEO).stream().mapToInt(Integer::intValue).toArray();
-        for (int artifactId : goryeo) {
-            give(player, artifactId);
+        int[] goryeo = relicIdsOf(Era.GORYEO).stream().mapToInt(Integer::intValue).toArray();
+        for (int relicId : goryeo) {
+            give(player, relicId);
         }
         completeFirstPurification(player, goryeo[0]);
         completeFirstPurification(player, goryeo[1]);
@@ -347,9 +347,9 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.cards[1].cardState").value("FULL_COLOR"))
                 // 기억 회복까지 마친 카드는 별칭은 보이고 이름은 아직 가려져 있다.
                 .andExpect(jsonPath("$.data.cards[2].cardState").value("SILHOUETTE"))
-                .andExpect(jsonPath("$.data.cards[2].artifact.revealLevel").value("FORM"))
-                .andExpect(jsonPath("$.data.cards[2].artifact.poeticAlias").isNotEmpty())
-                .andExpect(jsonPath("$.data.cards[2].artifact.realName").doesNotExist())
+                .andExpect(jsonPath("$.data.cards[2].relic.revealLevel").value("FORM"))
+                .andExpect(jsonPath("$.data.cards[2].relic.poeticAlias").isNotEmpty())
+                .andExpect(jsonPath("$.data.cards[2].relic.realName").doesNotExist())
                 .andExpect(jsonPath("$.data.building.acquired").value(false));
 
         clearPhase(player, goryeo[2], null);   // 정령 수호 — 시대 완성
@@ -362,7 +362,7 @@ class CodexTest extends CoreLoopApiTestSupport {
         get(player, "/api/codex/eras/{era}", "GORYEO")
                 .andExpect(jsonPath("$.data.collectionRate").value(100))
                 .andExpect(jsonPath("$.data.cards[2].cardState").value("FULL_COLOR"))
-                .andExpect(jsonPath("$.data.cards[2].artifact.realName").isNotEmpty())
+                .andExpect(jsonPath("$.data.cards[2].relic.realName").isNotEmpty())
                 .andExpect(jsonPath("$.data.cards[2].awakeningStage").value("AWAKENED"))
                 .andExpect(jsonPath("$.data.cards[2].clarity").value("CLEAR"))
                 .andExpect(jsonPath("$.data.building.acquired").value(true))
@@ -375,13 +375,13 @@ class CodexTest extends CoreLoopApiTestSupport {
     void 지어_준_이름() throws Exception {
         Player player = player("학예사");
         giveCompleted(player, INCENSE_BURNER);
-        patch(player, "/api/artifacts/{id}/spirit-name", "{\"name\":\"향로지기\"}", INCENSE_BURNER)
+        patch(player, "/api/relics/{id}/spirit-name", "{\"name\":\"향로지기\"}", INCENSE_BURNER)
                 .andExpect(status().isOk());
 
         get(player, "/api/codex/eras/{era}", "THREE_KINGDOMS")
-                .andExpect(jsonPath("$.data.cards[1].artifact.spiritName").value("향로지기"));
-        get(player, "/api/codex/artifacts/{id}", INCENSE_BURNER)
-                .andExpect(jsonPath("$.data.artifact.spiritName").value("향로지기"));
+                .andExpect(jsonPath("$.data.cards[1].relic.spiritName").value("향로지기"));
+        get(player, "/api/codex/relics/{id}", INCENSE_BURNER)
+                .andExpect(jsonPath("$.data.relic.spiritName").value("향로지기"));
     }
 
     @Test
@@ -405,14 +405,14 @@ class CodexTest extends CoreLoopApiTestSupport {
     void 없는_유물() throws Exception {
         Player player = player("학예사");
 
-        get(player, "/api/codex/artifacts/{id}", 999)
+        get(player, "/api/codex/relics/{id}", 999)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("C001"))
-                .andExpect(jsonPath("$.errors[0].field").value("artifactId"));
-        get(player, "/api/codex/artifacts/{id}", 0)
+                .andExpect(jsonPath("$.errors[0].field").value("relicId"));
+        get(player, "/api/codex/relics/{id}", 0)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("C001"));
-        get(player, "/api/codex/artifacts/{id}", "abc")
+        get(player, "/api/codex/relics/{id}", "abc")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("C001"));
     }
@@ -426,12 +426,12 @@ class CodexTest extends CoreLoopApiTestSupport {
         giveBuilding(other, Era.THREE_KINGDOMS);
 
         get(player, "/api/codex")
-                .andExpect(jsonPath("$.data.completedArtifacts").value(0))
+                .andExpect(jsonPath("$.data.completedRelics").value(0))
                 .andExpect(jsonPath("$.data.buildingsAcquired").value(0));
         get(player, "/api/codex/eras/{era}", "THREE_KINGDOMS")
                 .andExpect(jsonPath("$.data.cards[1].cardState").value("LOCKED"))
                 .andExpect(jsonPath("$.data.building.acquired").value(false));
-        get(player, "/api/codex/artifacts/{id}", INCENSE_BURNER)
+        get(player, "/api/codex/relics/{id}", INCENSE_BURNER)
                 .andExpect(jsonPath("$.data.cardState").value("LOCKED"));
     }
 
@@ -442,24 +442,24 @@ class CodexTest extends CoreLoopApiTestSupport {
 
         post(player, "/api/codex", "{}")
                 .andExpect(status().isMethodNotAllowed());
-        put(player, "/api/codex/artifacts/2", "{}")
+        put(player, "/api/codex/relics/2", "{}")
                 .andExpect(status().isMethodNotAllowed());
-        patch(player, "/api/codex/artifacts/2", "{}")
+        patch(player, "/api/codex/relics/2", "{}")
                 .andExpect(status().isMethodNotAllowed());
     }
 
     @Test
     @DisplayName("인증 없이는 도감을 볼 수 없다")
     void 인증_필요() throws Exception {
-        for (String url : new String[]{"/api/codex", "/api/codex/eras/GORYEO", "/api/codex/artifacts/2"}) {
+        for (String url : new String[]{"/api/codex", "/api/codex/eras/GORYEO", "/api/codex/relics/2"}) {
             mockMvc.perform(MockMvcRequestBuilders.get(url).contentType(MediaType.APPLICATION_JSON))
                     .andExpect(status().isUnauthorized());
         }
     }
 
     /** 가려진 카드의 응답에 이름·실화 텍스트가 한 글자도 실리지 않았는지 본다. */
-    private void assertNoSecrets(String body, int artifactId) {
-        ArtifactMaster master = catalog.artifact(artifactId);
+    private void assertNoSecrets(String body, int relicId) {
+        RelicMaster master = catalog.relic(relicId);
         assertThat(body)
                 .doesNotContain(master.getRealName())
                 .doesNotContain(master.getPoeticAlias())
@@ -475,9 +475,9 @@ class CodexTest extends CoreLoopApiTestSupport {
     }
 
     /** 링크는 시딩이 비워 두는 값이라 테스트가 직접 채운다. 시딩은 덮어쓰기라 다음 테스트에서 비워지지만 바로 되돌린다. */
-    private void setLinks(int artifactId, String heritageUrl, String reportUrl) {
+    private void setLinks(int relicId, String heritageUrl, String reportUrl) {
         transactionTemplate.executeWithoutResult(status -> {
-            ArtifactMaster master = artifactMasterRepository.findById(artifactId).orElseThrow();
+            RelicMaster master = relicMasterRepository.findById(relicId).orElseThrow();
             master.refresh(master.getSealMedium(), master.getPoeticAlias(), master.getRealName(),
                     master.getSpiritDefaultName(), master.getRealStory(), heritageUrl, reportUrl,
                     master.getDisplayOrder());

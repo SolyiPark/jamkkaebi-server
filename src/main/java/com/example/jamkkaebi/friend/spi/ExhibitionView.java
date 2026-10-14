@@ -1,7 +1,7 @@
 package com.example.jamkkaebi.friend.spi;
 
-import com.example.jamkkaebi.artifact.domain.AwakeningStage;
-import com.example.jamkkaebi.artifact.domain.Era;
+import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Era;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -36,7 +36,7 @@ public record ExhibitionView(Grid grid, List<SpiritView> spirits, List<BuildingV
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record SpiritView(
-            Integer artifactId,
+            Integer relicId,
             Era era,
             String poeticAlias,
             String realName,

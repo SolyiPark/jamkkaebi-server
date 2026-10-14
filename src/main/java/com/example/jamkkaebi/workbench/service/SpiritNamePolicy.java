@@ -1,10 +1,10 @@
 package com.example.jamkkaebi.workbench.service;
 
-import com.example.jamkkaebi.artifact.domain.UserArtifact;
 import com.example.jamkkaebi.common.policy.ForbiddenWordFilter;
 import com.example.jamkkaebi.global.exception.BusinessException;
 import com.example.jamkkaebi.global.exception.ErrorCode;
 import com.example.jamkkaebi.global.response.FieldError;
+import com.example.jamkkaebi.relic.domain.UserRelic;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -40,11 +40,11 @@ public class SpiritNamePolicy {
         }
 
         int codePoints = trimmed.codePointCount(0, trimmed.length());
-        if (codePoints < UserArtifact.SPIRIT_NAME_MIN_LENGTH) {
-            throw reject(UserArtifact.SPIRIT_NAME_MIN_LENGTH + "자 이상이어야 합니다.");
+        if (codePoints < UserRelic.SPIRIT_NAME_MIN_LENGTH) {
+            throw reject(UserRelic.SPIRIT_NAME_MIN_LENGTH + "자 이상이어야 합니다.");
         }
-        if (codePoints > UserArtifact.SPIRIT_NAME_MAX_LENGTH) {
-            throw reject(UserArtifact.SPIRIT_NAME_MAX_LENGTH + "자를 넘을 수 없습니다.");
+        if (codePoints > UserRelic.SPIRIT_NAME_MAX_LENGTH) {
+            throw reject(UserRelic.SPIRIT_NAME_MAX_LENGTH + "자를 넘을 수 없습니다.");
         }
         if (forbiddenWordFilter.containsForbiddenWord(trimmed)) {
             throw reject("사용할 수 없는 단어가 들어 있습니다.");
