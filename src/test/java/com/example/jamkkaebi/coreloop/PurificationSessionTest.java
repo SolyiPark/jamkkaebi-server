@@ -76,6 +76,45 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
+    @DisplayName("난이도마다 위협·도움·보너스·강화 타일 수를 준다")
+    void 난이도별_특수_타일_수() throws Exception {
+        Player player = player("탐색가");
+
+        get(player, "/api/difficulties")
+                .andExpect(jsonPath("$.data.difficulties[0].threatCount").value(2))
+                .andExpect(jsonPath("$.data.difficulties[0].reinforcedOnShape").value(1))
+                .andExpect(jsonPath("$.data.difficulties[0].reinforcedOnField").value(1))
+                .andExpect(jsonPath("$.data.difficulties[0].helperCount").value(1))
+                .andExpect(jsonPath("$.data.difficulties[0].bonusJeongseongCount").value(1))
+                .andExpect(jsonPath("$.data.difficulties[0].bonusCrystalCount").value(1))
+                .andExpect(jsonPath("$.data.difficulties[3].threatCount").value(8))
+                .andExpect(jsonPath("$.data.difficulties[3].reinforcedOnShape").value(2))
+                .andExpect(jsonPath("$.data.difficulties[3].reinforcedOnField").value(2))
+                .andExpect(jsonPath("$.data.difficulties[3].helperCount").value(2))
+                .andExpect(jsonPath("$.data.difficulties[3].bonusJeongseongCount").value(3))
+                .andExpect(jsonPath("$.data.difficulties[3].bonusCrystalCount").value(1));
+    }
+
+    @Test
+    @DisplayName("보드에는 목표 형상과 함께 보드 생성기 명세 §5.1 의 특수 타일 수가 실린다")
+    void 보드의_특수_타일_수() throws Exception {
+        Player player = player("발굴꾼");
+        giveCompleted(player, 1);
+
+        post(player, "/api/purifications", """
+                {"relicId":1,"difficulty":"NORMAL"}
+                """)
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.board.threatCount").value(6))
+                .andExpect(jsonPath("$.data.board.reinforcedOnShape").value(2))
+                .andExpect(jsonPath("$.data.board.reinforcedOnField").value(1))
+                .andExpect(jsonPath("$.data.board.helperCount").value(1))
+                .andExpect(jsonPath("$.data.board.bonusJeongseongCount").value(2))
+                .andExpect(jsonPath("$.data.board.bonusCrystalCount").value(1))
+                .andExpect(jsonPath("$.data.board.shapeCellTotal").value(10));
+    }
+
+    @Test
     @DisplayName("보드의 형상별 칸 수는 그 판의 시드로 정해지고, 개수와 합은 난이도를 따른다")
     void 보드의_형상별_칸_수() throws Exception {
         Player player = player("발굴꾼");
@@ -361,6 +400,45 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.rewards.jeongseong").value(46))
                 .andExpect(jsonPath("$.data.rewards.eraCrystal.amount").value(1));
+    }
+
+    @Test
+    @DisplayName("보너스 타일은 종류마다 보드에 묻힌 수보다 많이 캐냈다고 보고하면 거절한다")
+    void 보너스_타일_초과() throws Exception {
+        Player player = player("욕심꾼");
+        give(player, 1);
+        String token = startPurification(player, 1, null);
+        clock.advance(Duration.ofMinutes(1));
+
+        // 보통 보드는 정성 2 · 결정 1. 합(2)은 3을 넘지 않지만 결정이 1개를 넘는다.
+        post(player, "/api/purifications/{token}/result", """
+                {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
+                 "bonusTiles":{"jeongseong":0,"eraCrystal":2}}
+                """, token)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("P003"));
+        post(player, "/api/purifications/{token}/result", """
+                {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
+                 "bonusTiles":{"jeongseong":3,"eraCrystal":0}}
+                """, token)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("P003"));
+    }
+
+    @Test
+    @DisplayName("보너스 타일 수를 int 끝값으로 보내 합이 넘쳐도 거절한다")
+    void 보너스_타일_넘침() throws Exception {
+        Player player = player("넘침");
+        give(player, 1);
+        String token = startPurification(player, 1, null);
+        clock.advance(Duration.ofMinutes(1));
+
+        post(player, "/api/purifications/{token}/result", """
+                {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
+                 "bonusTiles":{"jeongseong":2147483647,"eraCrystal":2147483647}}
+                """, token)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("P003"));
     }
 
     @Test
