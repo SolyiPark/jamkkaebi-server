@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 /**
  * 유물 정화의 세션·검증·보상 수치(임시)
@@ -41,16 +42,19 @@ public record PurificationProperties(
         Map<Difficulty, DifficultyParams> difficulties
 ) {
 
-    // 목표 형상은 기획서 기준
+    //  - 탭·위협: 위협 3개에 실패할 때 보통 플레이어 성공률이 약 100 · 84 · 71 · 49% 로 고르게 내려가도록 맞춘 값
+    //  - 강화: 2 · 2 · 3 · 4칸 중 절반은 형상 안에.
+    //  - 도움 1칸 (어려움만 2칸)
+    //  - 보너스: 보드의 약 5%. (시대의 결정 1개+나머지는 정성)
     private static final Map<Difficulty, DifficultyParams> DEFAULT_DIFFICULTIES = Map.of(
             Difficulty.VERY_EASY, new DifficultyParams(
-                    5, 6, 3, 3, 6, 26, 3, new BigDecimal("0.8"), 2, null),
+                    5, 6, 2, 1, 1, 1, 1, 1, 3, 6, 12, 3, new BigDecimal("0.8"), null),
             Difficulty.EASY, new DifficultyParams(
-                    6, 7, 4, 3, 8, 23, 3, new BigDecimal("1.0"), 2, null),
+                    6, 7, 4, 1, 1, 1, 1, 1, 3, 8, 16, 3, new BigDecimal("1.0"), null),
             Difficulty.NORMAL, new DifficultyParams(
-                    7, 8, 6, 3, 10, 19, 3, new BigDecimal("1.2"), 3, null),
+                    7, 8, 6, 2, 1, 1, 2, 1, 3, 10, 19, 3, new BigDecimal("1.2"), null),
             Difficulty.HARD, new DifficultyParams(
-                    8, 9, 9, 4, 14, 16, 3, new BigDecimal("1.5"), 4, AwakeningStage.AWAKENED_PLUS));
+                    8, 9, 8, 2, 2, 2, 3, 1, 4, 14, 20, 3, new BigDecimal("1.5"), AwakeningStage.AWAKENED_PLUS));
 
     public PurificationProperties {
         sessionTtl = sessionTtl == null ? Duration.ofMinutes(30) : sessionTtl;
@@ -104,10 +108,25 @@ public record PurificationProperties(
             throw invalid(difficulty, "형상 %d개의 칸 수 합은 %d~%d 이어야 합니다. 현재 %d"
                     .formatted(params.shapeCount(), fewest, most, params.shapeCellTotal()));
         }
-        int occupied = params.shapeCellTotal() + params.threatCount() + params.bonusTileLimit();
-        if (occupied > params.boardCells()) {
-            throw invalid(difficulty, "형상·위협·보너스 타일 %d칸이 보드 %d칸에 들어가지 않습니다."
+        if (Stream.of(params.threatCount(), params.reinforcedOnShape(), params.reinforcedOnField(),
+                        params.helperCount(), params.bonusJeongseongCount(), params.bonusCrystalCount())
+                .anyMatch(count -> count < 0)) {
+            throw invalid(difficulty, "타일 수는 0 이상이어야 합니다.");
+        }
+        // 생성 순서: 형상 → 위협 → 도움 → 강화 → 보너스
+        int bonus = params.bonusJeongseongCount() + params.bonusCrystalCount();
+        if (bonus > params.plainCells()) {
+            int occupied = params.boardCells() - params.plainCells() + bonus;
+            throw invalid(difficulty, "형상·위협·도움·보너스 타일 %d칸이 보드 %d칸에 들어가지 않습니다."
                     .formatted(occupied, params.boardCells()));
+        }
+        if (params.reinforcedOnShape() > params.shapeCellTotal()) {
+            throw invalid(difficulty, "형상 안 강화 타일 %d칸이 형상 칸 수 %d를 넘습니다."
+                    .formatted(params.reinforcedOnShape(), params.shapeCellTotal()));
+        }
+        if (params.reinforcedOnField() > params.plainCells()) {
+            throw invalid(difficulty, "형상 밖 강화 타일 %d칸을 놓을 일반 칸이 %d칸뿐입니다."
+                    .formatted(params.reinforcedOnField(), params.plainCells()));
         }
     }
 

@@ -109,8 +109,7 @@ public class PurificationService {
     // 플레이 한 판 시작
     @Transactional
     public PurificationStartResponse start(String friendCode, PurificationStartRequest request) {
-        // 사용자 행을 이 트랜잭션의 첫 읽기로 잠근다. 같은 사용자의 시작이 동시에 두 번 오면 둘 다 "보고 안 한 세션
-        // 없음"을 보고 각자 새 세션을 넣어, 이전 세션 무효 처리(세션 쌓아두기 방지)가 뚫린다.
+        // 사용자 행을 이 트랜잭션의 첫 읽기로 잠근다.
         User user = lockUser(friendCode);
         RelicOwnership.Owned owned = ownership.require(user.getId(), request.relicId());
         LocalDateTime now = gameClock.now();
@@ -148,9 +147,11 @@ public class PurificationService {
                 plan.entryRoute().allowsPerfectBonus());
     }
 
-    // 같은 시드·같은 난이도면 같은 보드가 된다.
+    // 같은 시드·같은 난이도면 같은 보드
     private BoardView boardOf(long seed, DifficultyParams params) {
-        return new BoardView(seed, params.boardWidth(), params.boardHeight(), params.threatCount(),
+        return new BoardView(seed, params.boardWidth(), params.boardHeight(),
+                params.threatCount(), params.reinforcedOnShape(), params.reinforcedOnField(),
+                params.helperCount(), params.bonusJeongseongCount(), params.bonusCrystalCount(),
                 params.shapeCount(), params.shapeCellTotal(),
                 shapeSizePlanner.plan(seed, params.shapeCount(), params.shapeCellTotal()),
                 params.tapBudget(), params.scoutLimit());
@@ -227,10 +228,12 @@ public class PurificationService {
 
     private void validateLimits(PlaySession session, PurificationResultRequest request,
                                 int bonusJeongseong, int bonusCrystal, LocalDateTime now) {
-        int bonusLimit = difficulties.params(session.getDifficulty()).bonusTileLimit();
+        // 종류마다 따로 비교한다.
+        DifficultyParams params = difficulties.params(session.getDifficulty());
         boolean overLimit = request.tapsUsed() > session.getTapBudget()
                 || request.scoutsUsed() > session.getScoutLimit()
-                || bonusJeongseong + bonusCrystal > bonusLimit;
+                || bonusJeongseong > params.bonusJeongseongCount()
+                || bonusCrystal > params.bonusCrystalCount();
         boolean tooFast = Duration.between(session.getStartedAt(), now)
                 .compareTo(properties.minPlayDuration()) < 0;
         if (overLimit || tooFast) {
