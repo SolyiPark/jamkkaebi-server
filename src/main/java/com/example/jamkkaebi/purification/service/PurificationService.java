@@ -62,7 +62,6 @@ public class PurificationService {
     private final EraCrystalWallet crystalWallet;
     private final BuildingAwardService buildingAwardService;
     private final SessionTokens sessionTokens;
-    private final ShapeSizePlanner shapeSizePlanner;
     private final PurificationProperties properties;
     private final GameClock gameClock;
 
@@ -78,7 +77,6 @@ public class PurificationService {
                                EraCrystalWallet crystalWallet,
                                BuildingAwardService buildingAwardService,
                                SessionTokens sessionTokens,
-                               ShapeSizePlanner shapeSizePlanner,
                                PurificationProperties properties,
                                GameClock gameClock) {
         this.userRepository = userRepository;
@@ -93,7 +91,6 @@ public class PurificationService {
         this.crystalWallet = crystalWallet;
         this.buildingAwardService = buildingAwardService;
         this.sessionTokens = sessionTokens;
-        this.shapeSizePlanner = shapeSizePlanner;
         this.properties = properties;
         this.gameClock = gameClock;
     }
@@ -153,7 +150,6 @@ public class PurificationService {
                 params.threatCount(), params.reinforcedOnShape(), params.reinforcedOnField(),
                 params.helperCount(), params.bonusJeongseongCount(), params.bonusCrystalCount(),
                 params.shapeCount(), params.shapeCellTotal(),
-                shapeSizePlanner.plan(seed, params.shapeCount(), params.shapeCellTotal()),
                 params.tapBudget(), params.scoutLimit());
     }
 

@@ -1,13 +1,10 @@
 package com.example.jamkkaebi.coreloop;
 
 import com.example.jamkkaebi.purification.domain.SessionStatus;
-import com.example.jamkkaebi.purification.service.ShapeSizePlanner;
 import com.example.jamkkaebi.relic.domain.Difficulty;
 import com.example.jamkkaebi.relic.domain.UserRelic;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.test.web.servlet.ResultActions;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -39,9 +36,6 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
              "bonusTiles":{"jeongseong":0,"eraCrystal":0}}
             """;
 
-    @Autowired
-    private ShapeSizePlanner shapeSizePlanner;
-
     @Test
     @DisplayName("난이도 목록은 네 단계를 수치와 함께 준다")
     void 난이도_목록() throws Exception {
@@ -60,17 +54,17 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("난이도마다 목표 형상을 개수와 칸 수 합으로 준다 — 기획서 6-11 의 3개/6칸 · 3개/8칸 · 3개/10칸 · 4개/14칸")
+    @DisplayName("난이도마다 목표 형상을 개수와 칸 수 합으로 준다 — 2개/7칸 · 3개/10칸 · 3개/12칸 · 4개/14칸")
     void 난이도별_목표_형상() throws Exception {
         Player player = player("탐색가");
 
         get(player, "/api/difficulties")
-                .andExpect(jsonPath("$.data.difficulties[0].shapeCount").value(3))
-                .andExpect(jsonPath("$.data.difficulties[0].shapeCellTotal").value(6))
+                .andExpect(jsonPath("$.data.difficulties[0].shapeCount").value(2))
+                .andExpect(jsonPath("$.data.difficulties[0].shapeCellTotal").value(7))
                 .andExpect(jsonPath("$.data.difficulties[1].shapeCount").value(3))
-                .andExpect(jsonPath("$.data.difficulties[1].shapeCellTotal").value(8))
+                .andExpect(jsonPath("$.data.difficulties[1].shapeCellTotal").value(10))
                 .andExpect(jsonPath("$.data.difficulties[2].shapeCount").value(3))
-                .andExpect(jsonPath("$.data.difficulties[2].shapeCellTotal").value(10))
+                .andExpect(jsonPath("$.data.difficulties[2].shapeCellTotal").value(12))
                 .andExpect(jsonPath("$.data.difficulties[3].shapeCount").value(4))
                 .andExpect(jsonPath("$.data.difficulties[3].shapeCellTotal").value(14));
     }
@@ -111,28 +105,22 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.board.helperCount").value(1))
                 .andExpect(jsonPath("$.data.board.bonusJeongseongCount").value(2))
                 .andExpect(jsonPath("$.data.board.bonusCrystalCount").value(1))
-                .andExpect(jsonPath("$.data.board.shapeCellTotal").value(10));
+                .andExpect(jsonPath("$.data.board.shapeCellTotal").value(12));
     }
 
     @Test
-    @DisplayName("보드의 형상별 칸 수는 그 판의 시드로 정해지고, 개수와 합은 난이도를 따른다")
-    void 보드의_형상별_칸_수() throws Exception {
+    @DisplayName("보드에는 목표 형상의 개수와 칸 수 합만 실린다 — 모양은 클라이언트가 모양 풀에서 고른다")
+    void 보드의_목표_형상() throws Exception {
         Player player = player("발굴꾼");
         giveCompleted(player, 1);
 
-        ResultActions started = post(player, "/api/purifications", """
+        post(player, "/api/purifications", """
                 {"relicId":1,"difficulty":"EASY"}
                 """)
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.board.shapeCount").value(3))
-                .andExpect(jsonPath("$.data.board.shapeCellTotal").value(8))
-                .andExpect(jsonPath("$.data.board.shapeSizes.length()").value(3));
-
-        long seed = ((Number) read(started, "$.data.board.seed")).longValue();
-        List<Integer> sizes = read(started, "$.data.board.shapeSizes");
-        assertThat(sizes.stream().mapToInt(Integer::intValue).sum()).isEqualTo(8);
-        // 서버는 배분을 저장하지 않는다 — 시드만 있으면 같은 배분을 다시 낼 수 있어야 한다.
-        assertThat(sizes).isEqualTo(shapeSizePlanner.plan(seed, 3, 8));
+                .andExpect(jsonPath("$.data.board.shapeCellTotal").value(10))
+                .andExpect(jsonPath("$.data.board.shapeSizes").doesNotExist());
     }
 
     @Test
