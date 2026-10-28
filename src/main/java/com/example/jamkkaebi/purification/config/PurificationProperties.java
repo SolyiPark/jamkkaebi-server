@@ -48,11 +48,11 @@ public record PurificationProperties(
     //  - 보너스: 보드의 약 5%. (시대의 결정 1개+나머지는 정성)
     private static final Map<Difficulty, DifficultyParams> DEFAULT_DIFFICULTIES = Map.of(
             Difficulty.VERY_EASY, new DifficultyParams(
-                    5, 6, 2, 1, 1, 1, 1, 1, 3, 6, 12, 3, new BigDecimal("0.8"), null),
+                    5, 6, 2, 1, 1, 1, 1, 1, 2, 7, 12, 3, new BigDecimal("0.8"), null),
             Difficulty.EASY, new DifficultyParams(
-                    6, 7, 4, 1, 1, 1, 1, 1, 3, 8, 16, 3, new BigDecimal("1.0"), null),
+                    6, 7, 4, 1, 1, 1, 1, 1, 3, 10, 16, 3, new BigDecimal("1.0"), null),
             Difficulty.NORMAL, new DifficultyParams(
-                    7, 8, 6, 2, 1, 1, 2, 1, 3, 10, 19, 3, new BigDecimal("1.2"), null),
+                    7, 8, 6, 2, 1, 1, 2, 1, 3, 12, 19, 3, new BigDecimal("1.2"), null),
             Difficulty.HARD, new DifficultyParams(
                     8, 9, 8, 2, 2, 2, 3, 1, 4, 14, 20, 3, new BigDecimal("1.5"), AwakeningStage.AWAKENED_PLUS));
 

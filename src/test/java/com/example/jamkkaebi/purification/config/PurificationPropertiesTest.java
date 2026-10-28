@@ -19,13 +19,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class PurificationPropertiesTest {
 
     @Test
-    @DisplayName("목표 형상의 기본값은 기획서 6-11 의 개수/칸 수를 따른다")
+    @DisplayName("목표 형상의 기본값은 클라이언트 모양 풀에서 서로 다른 모양으로 만들 수 있는 개수/칸 수다")
     void 목표_형상_기본값() {
         PurificationProperties properties = defaults();
 
-        assertShape(properties, Difficulty.VERY_EASY, 3, 6);
-        assertShape(properties, Difficulty.EASY, 3, 8);
-        assertShape(properties, Difficulty.NORMAL, 3, 10);
+        assertShape(properties, Difficulty.VERY_EASY, 2, 7);
+        assertShape(properties, Difficulty.EASY, 3, 10);
+        assertShape(properties, Difficulty.NORMAL, 3, 12);
         assertShape(properties, Difficulty.HARD, 4, 14);
         assertThat(properties.shapeSizeMin()).isEqualTo(2);
         assertThat(properties.shapeSizeMax()).isEqualTo(5);
@@ -141,7 +141,7 @@ class PurificationPropertiesTest {
                 Map.entry("app.purification.difficulties.normal.board-height", "8"),
                 Map.entry("app.purification.difficulties.normal.threat-count", "6"),
                 Map.entry("app.purification.difficulties.normal.shape-count", "3"),
-                Map.entry("app.purification.difficulties.normal.shape-cell-total", "12"),
+                Map.entry("app.purification.difficulties.normal.shape-cell-total", "13"),
                 Map.entry("app.purification.difficulties.normal.tap-budget", "19"),
                 Map.entry("app.purification.difficulties.normal.scout-limit", "3"),
                 Map.entry("app.purification.difficulties.normal.reward-multiplier", "1.2"),
@@ -152,7 +152,7 @@ class PurificationPropertiesTest {
                 .bind("app.purification", PurificationProperties.class).get();
 
         assertThat(properties.shapeSizeMax()).isEqualTo(6);
-        assertShape(properties, Difficulty.NORMAL, 3, 12);
+        assertShape(properties, Difficulty.NORMAL, 3, 13);
         // 덮어쓰지 않은 난이도는 기본값 그대로다.
         assertShape(properties, Difficulty.HARD, 4, 14);
     }
@@ -171,7 +171,7 @@ class PurificationPropertiesTest {
                 .bind("app.purification", PurificationProperties.class).get();
 
         assertTiles(properties, Difficulty.NORMAL, 6, 3, 0, 2, 3, 2);
-        assertShape(properties, Difficulty.NORMAL, 3, 10);
+        assertShape(properties, Difficulty.NORMAL, 3, 12);
         assertTiles(properties, Difficulty.HARD, 8, 2, 2, 2, 3, 1);
     }
 
@@ -190,7 +190,7 @@ class PurificationPropertiesTest {
         assertThat(normal.boardWidth()).isEqualTo(7);
         assertThat(normal.boardHeight()).isEqualTo(8);
         assertThat(normal.threatCount()).isEqualTo(6);
-        assertShape(properties, Difficulty.NORMAL, 3, 10);
+        assertShape(properties, Difficulty.NORMAL, 3, 12);
         assertThat(normal.rewardMultiplier()).isEqualByComparingTo("1.2");
         assertThat(normal.unlockStage()).isNull();
         // 어려움을 늘 열어 두려면 해금 단계를 가장 낮은 각성으로 둔다.

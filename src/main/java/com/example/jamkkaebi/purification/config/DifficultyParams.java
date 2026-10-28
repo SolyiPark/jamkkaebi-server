@@ -10,9 +10,9 @@ import java.math.BigDecimal;
  * <p>난이도는 <b>수치만 바꾼다</b>
  *
  * <p>목표 형상은 <b>형상 개수와 칸 수 합의 쌍</b>으로 정한다.
- * 합을 형상마다 몇 칸씩 나눌지는 판마다 보드 시드로 정한다({@code ShapeSizePlanner}).
+ * 그 합에 맞는 모양은 클라이언트가 모양 풀에서 서로 다른 것으로 고른다.
  *
- * <p>특수 타일은 종류마다 개수만 정하고, 어느 칸에 놓을지는 클라이언트가 보드 시드로 정한다(보드 생성기 명세 §6).
+ * <p>특수 타일은 종류마다 개수만 정하고, 어느 칸에 놓을지는 클라이언트가 보드 시드로 정한다.
  * 위협·도움·보너스 타일은 한 칸씩 차지한다. 강화 타일은 칸의 종류를 바꾸지 않고 2회 타격 표시만 얹는다.
  *
  * <p>설정({@code app.purification.difficulties.<난이도>.*})에서 난이도만 바꾸면 나머지는
@@ -31,8 +31,7 @@ import java.math.BigDecimal;
  * @param tapBudget            탭 예산
  * @param scoutLimit           정찰 횟수
  * @param rewardMultiplier     보상 배율
- * @param unlockStage          해금에 필요한 각성 단계. 기본값이 있는 난이도(어려움)를 늘 열어 두려면
- *                             {@code AWAKENED} 로 둔다.
+ * @param unlockStage          해금에 필요한 각성 단계
  */
 public record DifficultyParams(
         Integer boardWidth,

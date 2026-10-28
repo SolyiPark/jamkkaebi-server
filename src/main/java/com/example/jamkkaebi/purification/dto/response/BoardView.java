@@ -1,9 +1,7 @@
 package com.example.jamkkaebi.purification.dto.response;
 
-import java.util.List;
-
 /**
- * 이번 판의 보드 — 보드 생성기 명세 §5.1 의 입력이다.
+ * 이번 판의 보드
  *
  * @param threatCount          숨겨진 위협 타일 수
  * @param reinforcedOnShape    목표 형상 안에 넣을 강화 타일 수
@@ -11,9 +9,8 @@ import java.util.List;
  * @param helperCount          숨겨진 도움 타일 수
  * @param bonusJeongseongCount 숨겨진 정성 보너스 타일 수
  * @param bonusCrystalCount    숨겨진 시대의 결정 보너스 타일 수
- * @param shapeCount           목표 형상 수. {@code shapeSizes} 의 길이와 같다
- * @param shapeCellTotal       목표 형상들이 차지하는 칸 수의 합. {@code shapeSizes} 의 합과 같다
- * @param shapeSizes           이번 판의 형상별 칸 수
+ * @param shapeCount           목표 형상 수
+ * @param shapeCellTotal       목표 형상들이 차지하는 칸 수의 합. 실제 모양은 클라이언트가 모양 풀에서 고른다
  */
 public record BoardView(
         long seed,
@@ -27,7 +24,6 @@ public record BoardView(
         int bonusCrystalCount,
         int shapeCount,
         int shapeCellTotal,
-        List<Integer> shapeSizes,
         int tapBudget,
         int scoutLimit
 ) {
