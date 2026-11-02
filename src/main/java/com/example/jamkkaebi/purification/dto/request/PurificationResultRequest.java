@@ -43,17 +43,13 @@ public record PurificationResultRequest(
     public record BonusTiles(
 
             @Min(value = 0, message = "0 이상이어야 합니다.")
-            Integer jeongseong,
-
-            @Min(value = 0, message = "0 이상이어야 합니다.")
-            Integer eraCrystal
+            Integer jeongseong
     ) {
 
-        public static final BonusTiles NONE = new BonusTiles(0, 0);
+        public static final BonusTiles NONE = new BonusTiles(0);
 
         public BonusTiles {
             jeongseong = jeongseong == null ? 0 : jeongseong;
-            eraCrystal = eraCrystal == null ? 0 : eraCrystal;
         }
     }
 }

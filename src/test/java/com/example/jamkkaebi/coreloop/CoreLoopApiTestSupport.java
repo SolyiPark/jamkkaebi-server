@@ -215,7 +215,7 @@ abstract class CoreLoopApiTestSupport {
         clock.advance(Duration.ofMinutes(1));
         return post(player, "/api/purifications/{token}/result", """
                 {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
-                 "bonusTiles":{"jeongseong":0,"eraCrystal":0}}
+                 "bonusTiles":{"jeongseong":0}}
                 """, token);
     }
 

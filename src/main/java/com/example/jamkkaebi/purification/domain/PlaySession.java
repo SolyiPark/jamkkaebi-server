@@ -113,17 +113,11 @@ public class PlaySession extends BaseTimeEntity {
     @Column(name = "bonus_jeongseong_tiles")
     private Integer bonusJeongseongTiles;
 
-    @Column(name = "bonus_crystal_tiles")
-    private Integer bonusCrystalTiles;
-
     @Column(name = "is_perfect")
     private Boolean perfect;
 
     @Column(name = "jeongseong_earned")
     private Integer jeongseongEarned;
-
-    @Column(name = "crystal_earned")
-    private Integer crystalEarned;
 
     @Column(name = "gauge_earned")
     private Integer gaugeEarned;
@@ -172,10 +166,8 @@ public class PlaySession extends BaseTimeEntity {
         this.scoutsUsed = settlement.scoutsUsed();
         this.damageFinal = settlement.damage();
         this.bonusJeongseongTiles = settlement.bonusJeongseongTiles();
-        this.bonusCrystalTiles = settlement.bonusCrystalTiles();
         this.perfect = settlement.perfect();
         this.jeongseongEarned = settlement.jeongseongEarned();
-        this.crystalEarned = settlement.crystalEarned();
         this.gaugeEarned = settlement.gaugeEarned();
         this.endedAt = endedAt;
     }
@@ -185,14 +177,13 @@ public class PlaySession extends BaseTimeEntity {
      * 같으면 처음 정산 결과를 그대로 돌려주고, 다르면 충돌로 막는다.
      */
     public boolean matches(PlayResult result, FailReason failReason, int tapsUsed, int scoutsUsed, int damage,
-                           int bonusJeongseongTiles, int bonusCrystalTiles) {
+                           int bonusJeongseongTiles) {
         return this.result == result
                 && this.failReason == failReason
                 && equalsInt(this.tapsUsed, tapsUsed)
                 && equalsInt(this.scoutsUsed, scoutsUsed)
                 && equalsInt(this.damageFinal, damage)
-                && equalsInt(this.bonusJeongseongTiles, bonusJeongseongTiles)
-                && equalsInt(this.bonusCrystalTiles, bonusCrystalTiles);
+                && equalsInt(this.bonusJeongseongTiles, bonusJeongseongTiles);
     }
 
     private static boolean equalsInt(Integer stored, int reported) {
@@ -208,10 +199,8 @@ public class PlaySession extends BaseTimeEntity {
             int scoutsUsed,
             int damage,
             int bonusJeongseongTiles,
-            int bonusCrystalTiles,
             boolean perfect,
             int jeongseongEarned,
-            int crystalEarned,
             int gaugeEarned
     ) {
     }

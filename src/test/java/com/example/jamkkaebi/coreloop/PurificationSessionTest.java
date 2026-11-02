@@ -33,7 +33,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
 
     private static final String SUCCESS_BODY = """
             {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
-             "bonusTiles":{"jeongseong":0,"eraCrystal":0}}
+             "bonusTiles":{"jeongseong":0}}
             """;
 
     @Test
@@ -80,13 +80,13 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.difficulties[0].reinforcedOnField").value(1))
                 .andExpect(jsonPath("$.data.difficulties[0].helperCount").value(1))
                 .andExpect(jsonPath("$.data.difficulties[0].bonusJeongseongCount").value(1))
-                .andExpect(jsonPath("$.data.difficulties[0].bonusCrystalCount").value(1))
+                .andExpect(jsonPath("$.data.difficulties[0].bonusCrystalCount").doesNotExist())
                 .andExpect(jsonPath("$.data.difficulties[3].threatCount").value(8))
                 .andExpect(jsonPath("$.data.difficulties[3].reinforcedOnShape").value(2))
                 .andExpect(jsonPath("$.data.difficulties[3].reinforcedOnField").value(2))
                 .andExpect(jsonPath("$.data.difficulties[3].helperCount").value(2))
                 .andExpect(jsonPath("$.data.difficulties[3].bonusJeongseongCount").value(3))
-                .andExpect(jsonPath("$.data.difficulties[3].bonusCrystalCount").value(1));
+                .andExpect(jsonPath("$.data.difficulties[3].bonusCrystalCount").doesNotExist());
     }
 
     @Test
@@ -104,7 +104,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.board.reinforcedOnField").value(1))
                 .andExpect(jsonPath("$.data.board.helperCount").value(1))
                 .andExpect(jsonPath("$.data.board.bonusJeongseongCount").value(2))
-                .andExpect(jsonPath("$.data.board.bonusCrystalCount").value(1))
+                .andExpect(jsonPath("$.data.board.bonusCrystalCount").doesNotExist())
                 .andExpect(jsonPath("$.data.board.shapeCellTotal").value(12));
     }
 
@@ -201,7 +201,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
 
         post(player, "/api/purifications/{token}/result", """
                 {"result":"SUCCESS","tapsUsed":999,"scoutsUsed":1,"damage":0,
-                 "bonusTiles":{"jeongseong":0,"eraCrystal":0}}
+                 "bonusTiles":{"jeongseong":0}}
                 """, token)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("P003"));
@@ -293,7 +293,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
 
         post(player, "/api/purifications/{token}/result", """
                 {"result":"SUCCESS","tapsUsed":3,"scoutsUsed":0,"damage":0,
-                 "bonusTiles":{"jeongseong":0,"eraCrystal":0}}
+                 "bonusTiles":{"jeongseong":0}}
                 """, token)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("C003"));
@@ -309,7 +309,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
 
         post(player, "/api/purifications/{token}/result", """
                 {"result":"FAILURE","failReason":"DAMAGE_FULL","tapsUsed":15,"scoutsUsed":3,"damage":100,
-                 "bonusTiles":{"jeongseong":0,"eraCrystal":0}}
+                 "bonusTiles":{"jeongseong":0}}
                 """, token)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.next.action").value("RETRY"))
@@ -335,14 +335,14 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
 
         post(player, "/api/purifications/{token}/result", """
                 {"result":"SUCCESS","failReason":"GAVE_UP","tapsUsed":10,"scoutsUsed":1,"damage":0,
-                 "bonusTiles":{"jeongseong":0,"eraCrystal":0}}
+                 "bonusTiles":{"jeongseong":0}}
                 """, token)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[0].field").value("failReason"));
 
         post(player, "/api/purifications/{token}/result", """
                 {"result":"FAILURE","tapsUsed":10,"scoutsUsed":1,"damage":100,
-                 "bonusTiles":{"jeongseong":0,"eraCrystal":0}}
+                 "bonusTiles":{"jeongseong":0}}
                 """, token)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[0].field").value("failReason"));
@@ -365,7 +365,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
         clock.advance(Duration.ofMinutes(1));
         post(player, "/api/purifications/{token}/result", """
                 {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":40,
-                 "bonusTiles":{"jeongseong":0,"eraCrystal":0}}
+                 "bonusTiles":{"jeongseong":0}}
                 """, token)
                 .andExpect(jsonPath("$.data.perfect").value(false))
                 .andExpect(jsonPath("$.data.perfectStreak").value(0))
@@ -373,48 +373,87 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("보너스 타일은 배율 없이 캐낸 만큼 준다")
-    void 보너스_타일() throws Exception {
+    @DisplayName("보너스 타일은 배율 없이 캐낸 만큼 정성만 준다 — 시대의 결정은 쌓이지 않는다")
+    void 보너스_타일은_정성만_준다() throws Exception {
         Player player = player("곡괭이");
         give(player, 1);
         String token = startPurification(player, 1, null);
         clock.advance(Duration.ofMinutes(1));
 
-        // 30 × 1.2 = 36 에 정성 타일 2개(×5) → 46, 결정 타일 1개 → 1
+        // 30 × 1.2 = 36 에 정성 타일 2개(×5) → 46
         post(player, "/api/purifications/{token}/result", """
                 {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
-                 "bonusTiles":{"jeongseong":2,"eraCrystal":1}}
+                 "bonusTiles":{"jeongseong":2}}
                 """, token)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.rewards.jeongseong").value(46))
-                .andExpect(jsonPath("$.data.rewards.eraCrystal.amount").value(1));
+                .andExpect(jsonPath("$.data.rewards.eraCrystal").doesNotExist());
+
+        assertThat(jeongseongOf(player)).isEqualTo(46);
+        assertThat(crystalRepository.findAllByUserId(player.id())).isEmpty();
     }
 
     @Test
-    @DisplayName("보너스 타일은 종류마다 보드에 묻힌 수보다 많이 캐냈다고 보고하면 거절한다")
+    @DisplayName("완벽 정화에 보너스 타일을 모두 캐내도 정성만 받는다")
+    void 완벽_정화의_보너스_타일도_정성만_준다() throws Exception {
+        Player player = player("장인");
+        giveCompleted(player, 1);
+        String token = startPurification(player, 1, Difficulty.NORMAL);
+        clock.advance(Duration.ofMinutes(1));
+
+        // 30 × 1.2 × 1.5 = 54 에 정성 타일 2개(×5) → 64
+        post(player, "/api/purifications/{token}/result", """
+                {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
+                 "bonusTiles":{"jeongseong":2}}
+                """, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.perfect").value(true))
+                .andExpect(jsonPath("$.data.rewards.jeongseong").value(64))
+                .andExpect(jsonPath("$.data.rewards.eraCrystal").doesNotExist());
+
+        assertThat(jeongseongOf(player)).isEqualTo(64);
+        assertThat(crystalRepository.findAllByUserId(player.id())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("결과 보고에 eraCrystal 을 보내도 무시한다 — 거절하지 않고 결정도 주지 않는다")
+    void 결정_타일_보고는_무시한다() throws Exception {
+        Player player = player("곡괭이");
+        give(player, 1);
+        String token = startPurification(player, 1, null);
+        clock.advance(Duration.ofMinutes(1));
+
+        post(player, "/api/purifications/{token}/result", """
+                {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
+                 "bonusTiles":{"jeongseong":0,"eraCrystal":1}}
+                """, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.rewards.jeongseong").value(36))
+                .andExpect(jsonPath("$.data.rewards.eraCrystal").doesNotExist());
+
+        assertThat(jeongseongOf(player)).isEqualTo(36);
+        assertThat(crystalRepository.findAllByUserId(player.id())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("정성 타일을 보드에 묻힌 수보다 많이 캐냈다고 보고하면 거절한다")
     void 보너스_타일_초과() throws Exception {
         Player player = player("욕심꾼");
         give(player, 1);
         String token = startPurification(player, 1, null);
         clock.advance(Duration.ofMinutes(1));
 
-        // 보통 보드는 정성 2 · 결정 1. 합(2)은 3을 넘지 않지만 결정이 1개를 넘는다.
+        // 보통 보드의 정성 타일은 2개다.
         post(player, "/api/purifications/{token}/result", """
                 {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
-                 "bonusTiles":{"jeongseong":0,"eraCrystal":2}}
-                """, token)
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("P003"));
-        post(player, "/api/purifications/{token}/result", """
-                {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
-                 "bonusTiles":{"jeongseong":3,"eraCrystal":0}}
+                 "bonusTiles":{"jeongseong":3}}
                 """, token)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("P003"));
     }
 
     @Test
-    @DisplayName("보너스 타일 수를 int 끝값으로 보내 합이 넘쳐도 거절한다")
+    @DisplayName("보너스 타일 수를 int 끝값으로 보내도 거절한다")
     void 보너스_타일_넘침() throws Exception {
         Player player = player("넘침");
         give(player, 1);
@@ -423,7 +462,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
 
         post(player, "/api/purifications/{token}/result", """
                 {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
-                 "bonusTiles":{"jeongseong":2147483647,"eraCrystal":2147483647}}
+                 "bonusTiles":{"jeongseong":2147483647}}
                 """, token)
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("P003"));
