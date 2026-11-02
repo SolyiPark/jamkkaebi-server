@@ -4,7 +4,6 @@ import com.example.jamkkaebi.purification.domain.NextAction;
 import com.example.jamkkaebi.purification.domain.PlayResult;
 import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Clarity;
-import com.example.jamkkaebi.relic.domain.Era;
 import com.example.jamkkaebi.relic.domain.Phase;
 import com.example.jamkkaebi.relic.domain.RelicStatus;
 import com.example.jamkkaebi.relic.domain.RevealLevel;
@@ -41,14 +40,8 @@ public record PurificationResultResponse(
 
     /**
      * 이번 판에서 얻은 것
-     *
-     * @param eraCrystal 보너스 타일로 캐낸 시대의 결정. 없으면 {@code null}
      */
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record Rewards(int jeongseong, EraCrystalReward eraCrystal, int growthGauge) {
-    }
-
-    public record EraCrystalReward(Era era, int amount) {
+    public record Rewards(int jeongseong, int growthGauge) {
     }
 
     /**

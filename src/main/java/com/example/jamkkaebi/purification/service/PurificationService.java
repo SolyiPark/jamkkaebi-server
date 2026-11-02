@@ -32,7 +32,6 @@ import com.example.jamkkaebi.relic.dto.response.RelicCard;
 import com.example.jamkkaebi.relic.repository.UserRelicRepository;
 import com.example.jamkkaebi.relic.service.BuildingAwardService;
 import com.example.jamkkaebi.relic.service.ClarityPolicy;
-import com.example.jamkkaebi.relic.service.EraCrystalWallet;
 import com.example.jamkkaebi.relic.service.GrowthPolicy;
 import com.example.jamkkaebi.relic.service.RelicOwnership;
 import com.example.jamkkaebi.user.domain.User;
@@ -59,7 +58,6 @@ public class PurificationService {
     private final RewardCalculator rewardCalculator;
     private final ClarityPolicy clarityPolicy;
     private final GrowthPolicy growthPolicy;
-    private final EraCrystalWallet crystalWallet;
     private final BuildingAwardService buildingAwardService;
     private final SessionTokens sessionTokens;
     private final PurificationProperties properties;
@@ -74,7 +72,6 @@ public class PurificationService {
                                RewardCalculator rewardCalculator,
                                ClarityPolicy clarityPolicy,
                                GrowthPolicy growthPolicy,
-                               EraCrystalWallet crystalWallet,
                                BuildingAwardService buildingAwardService,
                                SessionTokens sessionTokens,
                                PurificationProperties properties,
@@ -88,7 +85,6 @@ public class PurificationService {
         this.rewardCalculator = rewardCalculator;
         this.clarityPolicy = clarityPolicy;
         this.growthPolicy = growthPolicy;
-        this.crystalWallet = crystalWallet;
         this.buildingAwardService = buildingAwardService;
         this.sessionTokens = sessionTokens;
         this.properties = properties;
@@ -148,7 +144,7 @@ public class PurificationService {
     private BoardView boardOf(long seed, DifficultyParams params) {
         return new BoardView(seed, params.boardWidth(), params.boardHeight(),
                 params.threatCount(), params.reinforcedOnShape(), params.reinforcedOnField(),
-                params.helperCount(), params.bonusJeongseongCount(), params.bonusCrystalCount(),
+                params.helperCount(), params.bonusJeongseongCount(),
                 params.shapeCount(), params.shapeCellTotal(),
                 params.tapBudget(), params.scoutLimit());
     }
@@ -167,11 +163,10 @@ public class PurificationService {
         validateCombination(request);
 
         int bonusJeongseong = request.bonusTiles().jeongseong();
-        int bonusCrystal = request.bonusTiles().eraCrystal();
 
         if (session.isSettled()) {
             if (!session.matches(request.result(), request.failReason(), request.tapsUsed(),
-                    request.scoutsUsed(), request.damage(), bonusJeongseong, bonusCrystal)) {
+                    request.scoutsUsed(), request.damage(), bonusJeongseong)) {
                 throw new BusinessException(ErrorCode.CONFLICT);
             }
             return render(session, user);
@@ -181,9 +176,9 @@ public class PurificationService {
         if (!session.isReportable(now)) {
             throw new BusinessException(ErrorCode.PURIFICATION_SESSION_NOT_FOUND);
         }
-        validateLimits(session, request, bonusJeongseong, bonusCrystal, now);
+        validateLimits(session, request, bonusJeongseong, now);
 
-        return settle(session, user, request, bonusJeongseong, bonusCrystal, now);
+        return settle(session, user, request, bonusJeongseong, now);
     }
 
     // 사용자 행을 잠그고 읽는다.
@@ -223,13 +218,11 @@ public class PurificationService {
     }
 
     private void validateLimits(PlaySession session, PurificationResultRequest request,
-                                int bonusJeongseong, int bonusCrystal, LocalDateTime now) {
-        // 종류마다 따로 비교한다.
+                                int bonusJeongseong, LocalDateTime now) {
         DifficultyParams params = difficulties.params(session.getDifficulty());
         boolean overLimit = request.tapsUsed() > session.getTapBudget()
                 || request.scoutsUsed() > session.getScoutLimit()
-                || bonusJeongseong > params.bonusJeongseongCount()
-                || bonusCrystal > params.bonusCrystalCount();
+                || bonusJeongseong > params.bonusJeongseongCount();
         boolean tooFast = Duration.between(session.getStartedAt(), now)
                 .compareTo(properties.minPlayDuration()) < 0;
         if (overLimit || tooFast) {
@@ -238,7 +231,7 @@ public class PurificationService {
     }
 
     private PurificationResultResponse settle(PlaySession session, User user, PurificationResultRequest request,
-                                              int bonusJeongseong, int bonusCrystal, LocalDateTime now) {
+                                              int bonusJeongseong, LocalDateTime now) {
         UserRelic userRelic = userRelicRepository.findById(session.getUserRelicId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.RELIC_NOT_OWNED));
         RelicMaster master = ownership.require(user.getId(), userRelic.getRelicId()).master();
@@ -247,7 +240,7 @@ public class PurificationService {
         boolean perfect = success && request.damage() == 0 && session.getEntryRoute().allowsPerfectBonus();
         RewardCalculator.Reward reward = rewardCalculator.calculate(
                 difficulties.params(session.getDifficulty()), session.getEntryRoute(),
-                success, perfect, bonusJeongseong, bonusCrystal);
+                success, perfect, bonusJeongseong);
 
         boolean completedNow = false;
         if (success) {
@@ -265,9 +258,6 @@ public class PurificationService {
         if (reward.jeongseong() > 0) {
             userRepository.addJeongseong(user.getId(), reward.jeongseong());
         }
-        if (reward.crystal() > 0) {
-            crystalWallet.add(user.getId(), master.getEra(), reward.crystal());
-        }
 
         session.settle(PlaySession.Settlement.builder()
                 .result(request.result())
@@ -276,10 +266,8 @@ public class PurificationService {
                 .scoutsUsed(request.scoutsUsed())
                 .damage(request.damage())
                 .bonusJeongseongTiles(bonusJeongseong)
-                .bonusCrystalTiles(bonusCrystal)
                 .perfect(perfect)
                 .jeongseongEarned(reward.jeongseong())
-                .crystalEarned(reward.crystal())
                 .gaugeEarned(reward.gauge())
                 .build(), now);
 
@@ -307,16 +295,12 @@ public class PurificationService {
         boolean first = session.getEntryRoute() == EntryRoute.FIRST;
         Clarity clarity = clarityPolicy.clarityOf(userRelic, now);
 
-        PurificationResultResponse.EraCrystalReward crystalReward = session.getCrystalEarned() > 0
-                ? new PurificationResultResponse.EraCrystalReward(master.getEra(), session.getCrystalEarned())
-                : null;
-
         return new PurificationResultResponse(
                 session.getResult(),
                 Boolean.TRUE.equals(session.getPerfect()),
                 first ? null : userRelic.getPerfectStreak(),
                 new PurificationResultResponse.Rewards(
-                        session.getJeongseongEarned(), crystalReward, session.getGaugeEarned()),
+                        session.getJeongseongEarned(), session.getGaugeEarned()),
                 RelicCard.of(master, userRelic),
                 userRelic.getStatus(),
                 // 관리 플레이(!first)는 공개 단계가 오르지 않는다.

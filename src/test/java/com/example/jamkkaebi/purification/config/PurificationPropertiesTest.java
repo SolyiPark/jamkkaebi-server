@@ -32,14 +32,14 @@ class PurificationPropertiesTest {
     }
 
     @Test
-    @DisplayName("특수 타일 기본값 — 강화 합은 2 · 2 · 3 · 4칸이고 절반을 형상 안에, 결정 보너스는 1개")
+    @DisplayName("특수 타일 기본값 — 강화 합은 2 · 2 · 3 · 4칸이고 절반을 형상 안에, 정성 보너스는 1 · 1 · 2 · 3칸")
     void 특수_타일_기본값() {
         PurificationProperties properties = defaults();
 
-        assertTiles(properties, Difficulty.VERY_EASY, 2, 1, 1, 1, 1, 1);
-        assertTiles(properties, Difficulty.EASY, 4, 1, 1, 1, 1, 1);
-        assertTiles(properties, Difficulty.NORMAL, 6, 2, 1, 1, 2, 1);
-        assertTiles(properties, Difficulty.HARD, 8, 2, 2, 2, 3, 1);
+        assertTiles(properties, Difficulty.VERY_EASY, 2, 1, 1, 1, 1);
+        assertTiles(properties, Difficulty.EASY, 4, 1, 1, 1, 1);
+        assertTiles(properties, Difficulty.NORMAL, 6, 2, 1, 1, 2);
+        assertTiles(properties, Difficulty.HARD, 8, 2, 2, 2, 3);
     }
 
     @Test
@@ -71,9 +71,21 @@ class PurificationPropertiesTest {
     void 보드에_들어가지_않는다() {
         // 3×3 = 9칸에 형상 6칸 + 위협 3 + 보너스 2
         DifficultyParams tooSmall = new DifficultyParams(
-                3, 3, 3, 0, 0, 0, 1, 1, 3, 6, 19, 3, new BigDecimal("1.2"), null);
+                3, 3, 3, 0, 0, 0, 2, 3, 6, 19, 3, new BigDecimal("1.2"), null);
 
         assertThatThrownBy(() -> withNormal(tooSmall))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("보드");
+    }
+
+    @Test
+    @DisplayName("보너스 타일은 일반 칸 수까지 넣을 수 있다")
+    void 보너스_타일은_일반_칸_수까지() {
+        // 4×4 = 16칸에서 형상 6 · 위협 3 · 도움 1 을 뺀 일반 칸 6칸
+        PurificationProperties properties = withNormal(tiles(3, 0, 0, 1, 6));
+        assertThat(properties.paramsOf(Difficulty.NORMAL).bonusJeongseongCount()).isEqualTo(6);
+
+        assertThatThrownBy(() -> withNormal(tiles(3, 0, 0, 1, 7)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("보드");
     }
@@ -82,9 +94,9 @@ class PurificationPropertiesTest {
     @DisplayName("도움 타일도 한 칸씩 차지한다")
     void 도움_타일도_칸을_차지한다() {
         // 4×4 = 16칸에 형상 6칸 + 위협 6 + 도움 1 + 보너스 3 = 16칸 — 도움을 하나 더하면 17칸
-        withNormal(tiles(6, 0, 0, 1, 2, 1));
+        withNormal(tiles(6, 0, 0, 1, 3));
 
-        assertThatThrownBy(() -> withNormal(tiles(6, 0, 0, 2, 2, 1)))
+        assertThatThrownBy(() -> withNormal(tiles(6, 0, 0, 2, 3)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("보드");
     }
@@ -92,10 +104,10 @@ class PurificationPropertiesTest {
     @Test
     @DisplayName("형상 안 강화 타일은 형상 칸 수까지만 넣을 수 있다")
     void 형상_안_강화() {
-        PurificationProperties properties = withNormal(tiles(3, 6, 0, 1, 1, 1));
+        PurificationProperties properties = withNormal(tiles(3, 6, 0, 1, 2));
         assertThat(properties.paramsOf(Difficulty.NORMAL).reinforcedOnShape()).isEqualTo(6);
 
-        assertThatThrownBy(() -> withNormal(tiles(3, 7, 0, 1, 1, 1)))
+        assertThatThrownBy(() -> withNormal(tiles(3, 7, 0, 1, 2)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("형상 안 강화");
     }
@@ -104,10 +116,10 @@ class PurificationPropertiesTest {
     @DisplayName("형상 밖 강화 타일은 일반 칸 수까지 — 보너스 타일과는 같은 칸에 겹칠 수 있다")
     void 형상_밖_강화() {
         // 4×4 = 16칸에서 형상 6 · 위협 3 · 도움 1 을 뺀 일반 칸 6칸. 보너스 3개도 이 6칸에 놓이고 강화와 겹쳐도 된다.
-        PurificationProperties properties = withNormal(tiles(3, 0, 6, 1, 2, 1));
+        PurificationProperties properties = withNormal(tiles(3, 0, 6, 1, 3));
         assertThat(properties.paramsOf(Difficulty.NORMAL).reinforcedOnField()).isEqualTo(6);
 
-        assertThatThrownBy(() -> withNormal(tiles(3, 0, 7, 1, 2, 1)))
+        assertThatThrownBy(() -> withNormal(tiles(3, 0, 7, 1, 3)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("형상 밖 강화");
     }
@@ -115,12 +127,12 @@ class PurificationPropertiesTest {
     @Test
     @DisplayName("타일 수가 음수면 기동에서 거절한다")
     void 음수_타일_수() {
-        assertThatThrownBy(() -> withNormal(tiles(3, 0, 0, -1, 1, 1)))
+        assertThatThrownBy(() -> withNormal(tiles(3, 0, 0, -1, 2)))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("0 이상");
-        assertThatThrownBy(() -> withNormal(tiles(3, -1, 0, 1, 1, 1)))
+        assertThatThrownBy(() -> withNormal(tiles(3, -1, 0, 1, 2)))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> withNormal(tiles(3, 0, 0, 1, 2, -1)))
+        assertThatThrownBy(() -> withNormal(tiles(3, 0, 0, 1, -1)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -128,7 +140,7 @@ class PurificationPropertiesTest {
     @DisplayName("형상 크기 범위가 뒤집히면 기동에서 거절한다")
     void 형상_크기_범위() {
         assertThatThrownBy(() -> new PurificationProperties(
-                null, null, null, null, null, null, null, null, 5, 2, null))
+                null, null, null, null, null, null, null, 5, 2, null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -145,8 +157,7 @@ class PurificationPropertiesTest {
                 Map.entry("app.purification.difficulties.normal.tap-budget", "19"),
                 Map.entry("app.purification.difficulties.normal.scout-limit", "3"),
                 Map.entry("app.purification.difficulties.normal.reward-multiplier", "1.2"),
-                Map.entry("app.purification.difficulties.normal.bonus-jeongseong-count", "2"),
-                Map.entry("app.purification.difficulties.normal.bonus-crystal-count", "1")));
+                Map.entry("app.purification.difficulties.normal.bonus-jeongseong-count", "2")));
 
         PurificationProperties properties = new Binder(source)
                 .bind("app.purification", PurificationProperties.class).get();
@@ -164,15 +175,14 @@ class PurificationPropertiesTest {
                 "app.purification.difficulties.normal.reinforced-on-shape", "3",
                 "app.purification.difficulties.normal.reinforced-on-field", "0",
                 "app.purification.difficulties.normal.helper-count", "2",
-                "app.purification.difficulties.normal.bonus-jeongseong-count", "3",
-                "app.purification.difficulties.normal.bonus-crystal-count", "2"));
+                "app.purification.difficulties.normal.bonus-jeongseong-count", "3"));
 
         PurificationProperties properties = new Binder(source)
                 .bind("app.purification", PurificationProperties.class).get();
 
-        assertTiles(properties, Difficulty.NORMAL, 6, 3, 0, 2, 3, 2);
+        assertTiles(properties, Difficulty.NORMAL, 6, 3, 0, 2, 3);
         assertShape(properties, Difficulty.NORMAL, 3, 12);
-        assertTiles(properties, Difficulty.HARD, 8, 2, 2, 2, 3, 1);
+        assertTiles(properties, Difficulty.HARD, 8, 2, 2, 2, 3);
     }
 
     @Test
@@ -208,34 +218,33 @@ class PurificationPropertiesTest {
 
     private static void assertTiles(PurificationProperties properties, Difficulty difficulty, int threat,
                                     int reinforcedOnShape, int reinforcedOnField, int helper,
-                                    int bonusJeongseong, int bonusCrystal) {
+                                    int bonusJeongseong) {
         DifficultyParams params = properties.paramsOf(difficulty);
         assertThat(params.threatCount()).as("%s 위협", difficulty).isEqualTo(threat);
         assertThat(params.reinforcedOnShape()).as("%s 형상 안 강화", difficulty).isEqualTo(reinforcedOnShape);
         assertThat(params.reinforcedOnField()).as("%s 형상 밖 강화", difficulty).isEqualTo(reinforcedOnField);
         assertThat(params.helperCount()).as("%s 도움", difficulty).isEqualTo(helper);
         assertThat(params.bonusJeongseongCount()).as("%s 정성 보너스", difficulty).isEqualTo(bonusJeongseong);
-        assertThat(params.bonusCrystalCount()).as("%s 결정 보너스", difficulty).isEqualTo(bonusCrystal);
     }
 
     private static DifficultyParams params(int shapeCount, int shapeCellTotal) {
         return new DifficultyParams(
-                7, 8, 6, 2, 1, 1, 2, 1, shapeCount, shapeCellTotal, 19, 3, new BigDecimal("1.2"), null);
+                7, 8, 6, 2, 1, 1, 2, shapeCount, shapeCellTotal, 19, 3, new BigDecimal("1.2"), null);
     }
 
     // 4×4 보드에 형상 3개/6칸
     private static DifficultyParams tiles(int threat, int reinforcedOnShape, int reinforcedOnField,
-                                          int helper, int bonusJeongseong, int bonusCrystal) {
+                                          int helper, int bonusJeongseong) {
         return new DifficultyParams(4, 4, threat, reinforcedOnShape, reinforcedOnField, helper,
-                bonusJeongseong, bonusCrystal, 3, 6, 19, 3, new BigDecimal("1.2"), null);
+                bonusJeongseong, 3, 6, 19, 3, new BigDecimal("1.2"), null);
     }
 
     private static PurificationProperties withNormal(DifficultyParams normal) {
         return new PurificationProperties(
-                null, null, null, null, null, null, null, null, null, null, Map.of(Difficulty.NORMAL, normal));
+                null, null, null, null, null, null, null, null, null, Map.of(Difficulty.NORMAL, normal));
     }
 
     private static PurificationProperties defaults() {
-        return new PurificationProperties(null, null, null, null, null, null, null, null, null, null, null);
+        return new PurificationProperties(null, null, null, null, null, null, null, null, null, null);
     }
 }

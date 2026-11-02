@@ -24,7 +24,7 @@ public class RewardCalculator {
      * @param perfect 손상 0으로 클리어 + 보너스 대상 경로인가
      */
     public Reward calculate(DifficultyParams params, EntryRoute entryRoute, boolean success, boolean perfect,
-                            int bonusJeongseongTiles, int bonusCrystalTiles) {
+                            int bonusJeongseongTiles) {
         if (!success) {
             return Reward.NONE;
         }
@@ -39,13 +39,11 @@ public class RewardCalculator {
                 .multiply(perfectFactor))
                 + bonusJeongseongTiles * properties.bonusTileJeongseong();
 
-        int crystal = bonusCrystalTiles * properties.bonusTileCrystal();
-
         int gauge = entryRoute == EntryRoute.CARE
                 ? round(BigDecimal.valueOf(properties.growthGaugePerClear()).multiply(multiplier))
                 : 0;
 
-        return new Reward(jeongseong, crystal, gauge);
+        return new Reward(jeongseong, gauge);
     }
 
     private static int round(BigDecimal value) {
@@ -56,11 +54,10 @@ public class RewardCalculator {
      * 정산된 보상.
      *
      * @param jeongseong
-     * @param crystal    해당 시대의 결정
      * @param gauge      성장 게이지
      */
-    public record Reward(int jeongseong, int crystal, int gauge) {
+    public record Reward(int jeongseong, int gauge) {
 
-        public static final Reward NONE = new Reward(0, 0, 0);
+        public static final Reward NONE = new Reward(0, 0);
     }
 }

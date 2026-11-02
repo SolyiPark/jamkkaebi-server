@@ -25,7 +25,6 @@ import java.math.BigDecimal;
  * @param reinforcedOnField    형상 밖 일반 칸에 넣을 강화 타일 수
  * @param helperCount          숨겨진 도움 타일 수
  * @param bonusJeongseongCount 숨겨진 정성 보너스 타일 수
- * @param bonusCrystalCount    숨겨진 시대의 결정 보너스 타일 수
  * @param shapeCount           찾아야 할 목표 형상 수
  * @param shapeCellTotal       목표 형상들이 차지하는 칸 수의 합
  * @param tapBudget            탭 예산
@@ -41,7 +40,6 @@ public record DifficultyParams(
         Integer reinforcedOnField,
         Integer helperCount,
         Integer bonusJeongseongCount,
-        Integer bonusCrystalCount,
         Integer shapeCount,
         Integer shapeCellTotal,
         Integer tapBudget,
@@ -73,7 +71,6 @@ public record DifficultyParams(
                 orDefault(reinforcedOnField, defaults.reinforcedOnField),
                 orDefault(helperCount, defaults.helperCount),
                 orDefault(bonusJeongseongCount, defaults.bonusJeongseongCount),
-                orDefault(bonusCrystalCount, defaults.bonusCrystalCount),
                 orDefault(shapeCount, defaults.shapeCount),
                 orDefault(shapeCellTotal, defaults.shapeCellTotal),
                 orDefault(tapBudget, defaults.tapBudget),
@@ -86,7 +83,7 @@ public record DifficultyParams(
     boolean complete() {
         return boardWidth != null && boardHeight != null && threatCount != null
                 && reinforcedOnShape != null && reinforcedOnField != null && helperCount != null
-                && bonusJeongseongCount != null && bonusCrystalCount != null && shapeCount != null
+                && bonusJeongseongCount != null && shapeCount != null
                 && shapeCellTotal != null && tapBudget != null && scoutLimit != null
                 && rewardMultiplier != null;
     }

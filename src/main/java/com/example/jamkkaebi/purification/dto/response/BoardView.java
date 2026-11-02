@@ -8,7 +8,6 @@ package com.example.jamkkaebi.purification.dto.response;
  * @param reinforcedOnField    형상 밖 일반 칸에 넣을 강화 타일 수
  * @param helperCount          숨겨진 도움 타일 수
  * @param bonusJeongseongCount 숨겨진 정성 보너스 타일 수
- * @param bonusCrystalCount    숨겨진 시대의 결정 보너스 타일 수
  * @param shapeCount           목표 형상 수
  * @param shapeCellTotal       목표 형상들이 차지하는 칸 수의 합. 실제 모양은 클라이언트가 모양 풀에서 고른다
  */
@@ -21,7 +20,6 @@ public record BoardView(
         int reinforcedOnField,
         int helperCount,
         int bonusJeongseongCount,
-        int bonusCrystalCount,
         int shapeCount,
         int shapeCellTotal,
         int tapBudget,
