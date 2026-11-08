@@ -16,6 +16,9 @@ public interface VisitLogRepository extends JpaRepository<VisitLog, Long> {
 
     Optional<VisitLog> findByVisitorIdAndHostIdAndVisitDate(Long visitorId, Long hostId, LocalDate visitDate);
 
+    // 행 수가 곧 방문한 날 수
+    long countByVisitorIdAndHostIdAndVisitDateGreaterThanEqual(Long visitorId, Long hostId, LocalDate from);
+
     @Query("SELECT v.hostId FROM VisitLog v WHERE v.visitorId = :visitorId AND v.visitDate = :visitDate")
     List<Long> findHostIdsVisited(@Param("visitorId") Long visitorId, @Param("visitDate") LocalDate visitDate);
 
