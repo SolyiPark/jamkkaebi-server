@@ -468,7 +468,7 @@ LM Studio 서버를 켜 두었다면 실제 모델로도 돌려 볼 수 있다. 
 
 **이 방법으로 확인하지 못하는 것**
 - `NpcContentLoader`(JsonUtility로 읽기). Unity가 있어야 한다. Unity에 넣은 뒤 `FromResources<DefaultLineCatalog>("Npc/default_lines")` 가 도깨비 5 + fallback 을, `PersonaCatalog` 가 5종과 각 `stories` 3개를, `ForbiddenCatalog` 가 묶음 5개를 읽는지 한 번 확인한다.
-- LLMUnity 연결부(`Unity/LlmUnityRuntime.cs`)와 실기기 시험 장면(`Unity/NpcDeviceTestRunner.cs`). Unity 와 LLMUnity 가 있어야 컴파일되어 여기서는 확인하지 못했다. 핵심 동작(`LlmUnityModelBackend`)은 가짜 LLMUnity 로 확인했다. 실제 기기 결과는 [DEVICE_TEST.md](DEVICE_TEST.md) 순서로 잰다.
+- LLMUnity 연결부(`Unity/LlmUnityRuntime.cs`)와 실기기 시험 장면(`Unity/NpcDeviceTestRunner.cs`). Unity 와 LLMUnity 가 있어야 컴파일되어 여기서는 확인하지 못한다. Unity 2022.3 + LLMUnity 3.0.3 에서 `JAMKKAEBI_LLMUNITY` 를 켜고 컴파일되는 것(오류 0)은 따로 확인했다. 핵심 동작(`LlmUnityModelBackend`)은 가짜 LLMUnity 로 확인했다. 모델이 실제로 올라가는지와 기기 결과는 [DEVICE_TEST.md](DEVICE_TEST.md) 순서로 잰다.
 - 기기 안에서 도는 모델의 속도·메모리·발열. PC의 LM Studio(Gemma 4 E2B)로는 `--live` 로 18장면을 끝까지 돌려 확인했다: SLM 대사 17/18, 1건(S20)은 79자라 출력 검사에서 걸러져 같은 실화의 기본 대사로 대신, 생각 토큰 0, PC 응답 중앙값 4.2초.
 - `SlmTimeout` 기본값(3초)이 맞는지. 실기기에서 첫 응답·전체 생성 시간을 재서 정한다.
 - `Grammar`(GBNF)가 실제 llama.cpp에서 받아들여지는지. 모양은 llama.cpp 문법 규칙에 맞췄지만, 런타임에 넣어 보지는 못했다.

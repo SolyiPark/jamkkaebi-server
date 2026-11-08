@@ -17,6 +17,7 @@ CSV로 저장한다. 말투·상황 반영 점수는 사람이 CSV에서 채운�
 
 import argparse
 import csv
+import http.client
 import json
 import re
 import statistics
@@ -409,14 +410,29 @@ def chat(args, model, system, user, schema, seed=None):
 
 
 def request_json(args, path, body=None):
+    """서버에 JSON 을 보내고 JSON 응답을 받는다.
+
+    연결부터 못 하면(서버가 꺼짐) URLError 를 그대로 올려 '서버에 연결하지 못했다'로 안내하게 하고,
+    연결한 뒤의 실패(HTTP 오류, 응답을 읽다 시간 초과·연결 끊김, JSON 이 아닌 응답)는 BackendError 로 바꿔
+    그 한 건만 실패로 적고 다음 장면으로 넘어가게 한다.
+    """
     data = None if body is None else json.dumps(body).encode("utf-8")
     req = urllib.request.Request(f"{args.host}{path}", data=data, headers={"Content-Type": "application/json"})
     started = time.perf_counter()
     try:
         with urllib.request.urlopen(req, timeout=args.timeout) as res:
-            result = json.loads(res.read().decode("utf-8"))
+            raw = res.read()
     except urllib.error.HTTPError as e:
         raise BackendError(f"HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:300]}") from e
+    except urllib.error.URLError:
+        raise
+    except (TimeoutError, ConnectionError, http.client.HTTPException) as e:
+        # 응답을 읽는 중의 시간 초과, 서버가 연결을 끊음(ConnectionResetError · RemoteDisconnected) 등
+        raise BackendError(f"응답을 읽지 못했다 ({type(e).__name__}): {e}") from e
+    try:
+        result = json.loads(raw.decode("utf-8"))
+    except ValueError as e:  # UnicodeDecodeError · JSONDecodeError
+        raise BackendError(f"JSON 이 아닌 응답: {raw[:300].decode('utf-8', 'replace')}") from e
     return result, (time.perf_counter() - started) * 1000
 
 

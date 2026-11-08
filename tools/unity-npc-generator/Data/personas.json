@@ -1,5 +1,5 @@
 {
-  "contentVersion": "test-7",
+  "contentVersion": "test-8",
   "examplePolicy": "예시 대사는 말투만 보여 주도록, 시험 장면(인사, 관리 감사, 끌려감 등)과 겹치지 않는 일상 상황으로 쓴다. 작은 모델은 장면과 비슷한 예시를 그대로 옮긴다.",
   "attachmentPolicy": "대화의 목적은 플레이어가 상호작용을 통해 도깨비에게 정이 들게 하는 것이다. 무뚝뚝하거나 장난스러운 성격도 상대를 밀어내거나 깎아내리지 않는다. 투덜대도 부탁하듯 말하고, 반가움이나 고마움이 묻어나게 쓴다.",
   "storyPolicy": "stories 는 잠깨비의 목적(문화재에 대한 애착, 관심이 문화재를 지켰다는 이야기, 실제 유물을 찾아가게 하기)에 맞춰 고른 실화다. 도깨비마다 그 유물만의 특징과, 발견·반출·환수·지켜 낸 사람·지금 있는 곳 이야기를 섞었다. 서버 realStory 와, 공식 기록·백과사전·주요 언론으로 확인한 사실만 쓰고 바꾸거나 보태지 않는다. sources 에 확인한 곳을 적는다. topic 은 대화 기억 요약('주인에게 {topic} 이야기를 들려줬다')에 쓰는 짧은 이름이다. unity-npc-generator/Data/default_lines.json 의 stories 와 같은 순서로 둔다.",
@@ -257,12 +257,11 @@
           ]
         },
         {
-          "topic": "민화",
-          "fact": "나는 조선 초기 한국적 영모화의 전통을 계승했다", 
+          "topic": "영모화 전통",
+          "fact": "나는 조선 초기 한국적 영모화의 전통을 계승했다",
           "sources": [
-            "https://encykorea.aks.ac.kr/Article/E0022927",
             "https://encykorea.aks.ac.kr/Article/E0018880",
-            "https://encykorea.aks.ac.kr/Article/E0020370"
+            "https://encykorea.aks.ac.kr/Article/E0037378"
           ]
         }
       ],

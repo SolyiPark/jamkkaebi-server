@@ -81,14 +81,24 @@ namespace Jamkkaebi.Npc
         private void OnDestroy()
         {
             stopping.Cancel();
+            ReleaseBackend();
+        }
+
+        // 앞 판의 요청을 멈추고 모델을 내린다. 내린 것이 있으면 true
+        private bool ReleaseBackend()
+        {
+            bool released = manager != null || model != null;
             if (manager != null)
             {
                 manager.CancelAll();
+                manager = null;
             }
             if (model != null)
             {
                 model.Unload();
+                model = null;
             }
+            return released;
         }
 
         public async void Run()
@@ -131,6 +141,13 @@ namespace Jamkkaebi.Npc
             List<NpcTestScene> sceneList = NpcTestScenes.Parse(Text(scenes, "Npc/scenes"));
             Say("데이터: 페르소나 " + personaCatalog.personas.Count + ", 행동 " + actionCatalog.actions.Count
                 + ", 기본 대사 도깨비 " + lineCatalog.spirits.Count + ", 장면 " + sceneList.Count);
+
+            // 다시 돌리기: 앞 판의 모델(3GB 넘음)을 먼저 내린다. 그대로 두면 모델이 두 벌 올라가
+            // 8GB 폰에서는 앱이 꺼지고, 살아남아도 이번 판의 메모리 값이 부풀려진다.
+            if (ReleaseBackend())
+            {
+                await Task.Yield(); // 모델을 붙인 오브젝트는 프레임 끝에 지워진다. 다음 프레임에 새로 올린다
+            }
 
             var rule = new RuleBasedReactionGenerator(lineCatalog);
             SlmReactionGenerator slm = null;
