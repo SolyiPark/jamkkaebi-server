@@ -29,9 +29,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 class CodexTest extends CoreLoopApiTestSupport {
 
-    private static final int GEUMDONG_YEONGA = 1;  // 금동연가7년명여래입상 — 삼국
+    private static final int TURTLE_DROPPER = 1;   // 거북이 모양 연적 — 삼국
     private static final int INCENSE_BURNER = 2;   // 금동대향로 — 삼국
-    private static final int GEUMGWAN = 3;         // 금관총 금관 — 삼국
+    private static final int FROG_FIGURINE = 3;    // 개구리 모양 토우 — 삼국
     private static final int MAPAE = 8;            // 마패 — 조선
 
     @Autowired
@@ -69,7 +69,7 @@ class CodexTest extends CoreLoopApiTestSupport {
     void 요약_집계() throws Exception {
         Player player = player("학예사");
         giveCompleted(player, INCENSE_BURNER);   // 삼국: 완료 1
-        give(player, GEUMGWAN);                  // 삼국: 진행 중 1
+        give(player, FROG_FIGURINE);                  // 삼국: 진행 중 1
         for (int relicId : relicIdsOf(Era.GORYEO)) {
             giveCompleted(player, relicId);   // 고려: 완료 3
         }
@@ -116,7 +116,7 @@ class CodexTest extends CoreLoopApiTestSupport {
     @DisplayName("진행 중인 유물은 획득으로만 세고, 완료로는 세지 않는다")
     void 진행_중은_획득만() throws Exception {
         Player player = player("학예사");
-        give(player, GEUMDONG_YEONGA);
+        give(player, TURTLE_DROPPER);
 
         get(player, "/api/codex")
                 .andExpect(jsonPath("$.data.eras[0].acquiredCount").value(1))
@@ -151,8 +151,8 @@ class CodexTest extends CoreLoopApiTestSupport {
     void 시대_상세() throws Exception {
         Player player = player("학예사");
         giveCompleted(player, INCENSE_BURNER);   // 풀 컬러
-        give(player, GEUMGWAN);                  // 실루엣
-        // GEUMDONG_YEONGA 는 미획득
+        give(player, FROG_FIGURINE);                  // 실루엣
+        // TURTLE_DROPPER 는 미획득
 
         get(player, "/api/codex/eras/{era}", "THREE_KINGDOMS")
                 .andExpect(status().isOk())
@@ -162,7 +162,7 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.collectionRate").value(33))
                 .andExpect(jsonPath("$.data.cards.length()").value(3))
                 // 미획득 — 자리만 차지한다.
-                .andExpect(jsonPath("$.data.cards[0].relicId").value(GEUMDONG_YEONGA))
+                .andExpect(jsonPath("$.data.cards[0].relicId").value(TURTLE_DROPPER))
                 .andExpect(jsonPath("$.data.cards[0].cardState").value("LOCKED"))
                 .andExpect(jsonPath("$.data.cards[0].relic").doesNotExist())
                 .andExpect(jsonPath("$.data.cards[0].awakeningStage").doesNotExist())
@@ -177,7 +177,7 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.cards[1].awakeningStage").value("AWAKENED"))
                 .andExpect(jsonPath("$.data.cards[1].clarity").value("CLEAR"))
                 // 실루엣 — 작업대 진행 중이라 이름이 없고 배지도 없다.
-                .andExpect(jsonPath("$.data.cards[2].relicId").value(GEUMGWAN))
+                .andExpect(jsonPath("$.data.cards[2].relicId").value(FROG_FIGURINE))
                 .andExpect(jsonPath("$.data.cards[2].cardState").value("SILHOUETTE"))
                 .andExpect(jsonPath("$.data.cards[2].relic.revealLevel").value("SILHOUETTE"))
                 .andExpect(jsonPath("$.data.cards[2].relic.poeticAlias").doesNotExist())
@@ -190,14 +190,14 @@ class CodexTest extends CoreLoopApiTestSupport {
     @DisplayName("진행 중인 카드는 작업대와 같은 단계까지만 공개한다")
     void 진행_중_카드는_단계적_공개() throws Exception {
         Player player = player("학예사");
-        UserRelic relic = give(player, GEUMGWAN);
+        UserRelic relic = give(player, FROG_FIGURINE);
         relic.clearFirstPhase(LocalDateTime.now(clock));   // 봉인 해제 클리어 → 별칭 공개
         userRelicRepository.save(relic);
 
         get(player, "/api/codex/eras/{era}", "THREE_KINGDOMS")
                 .andExpect(jsonPath("$.data.cards[2].cardState").value("SILHOUETTE"))
                 .andExpect(jsonPath("$.data.cards[2].relic.revealLevel").value("ALIAS"))
-                .andExpect(jsonPath("$.data.cards[2].relic.poeticAlias").value("신라, 머리에 인 금빛 숲"))
+                .andExpect(jsonPath("$.data.cards[2].relic.poeticAlias").value("신라, 흙에서 깨어난 개구리"))
                 .andExpect(jsonPath("$.data.cards[2].relic.realName").doesNotExist())
                 .andExpect(jsonPath("$.data.cards[2].relic.spiritName").doesNotExist());
     }
@@ -305,21 +305,21 @@ class CodexTest extends CoreLoopApiTestSupport {
     void 링크는_완료한_카드에만() throws Exception {
         Player player = player("학예사");
         giveCompleted(player, INCENSE_BURNER);
-        give(player, GEUMGWAN);
+        give(player, FROG_FIGURINE);
         setLinks(INCENSE_BURNER, "https://heritage.example/incense", "https://report.example/incense");
-        setLinks(GEUMGWAN, "https://heritage.example/geumgwan", "https://report.example/geumgwan");
+        setLinks(FROG_FIGURINE, "https://heritage.example/geumgwan", "https://report.example/geumgwan");
         try {
             get(player, "/api/codex/relics/{id}", INCENSE_BURNER)
                     .andExpect(jsonPath("$.data.record.heritageUrl").value("https://heritage.example/incense"))
                     .andExpect(jsonPath("$.data.record.reportUrl").value("https://report.example/incense"));
 
-            String body = get(player, "/api/codex/relics/{id}", GEUMGWAN)
+            String body = get(player, "/api/codex/relics/{id}", FROG_FIGURINE)
                     .andExpect(jsonPath("$.data.record").doesNotExist())
                     .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
             assertThat(body).doesNotContain("example");
         } finally {
             setLinks(INCENSE_BURNER, null, null);
-            setLinks(GEUMGWAN, null, null);
+            setLinks(FROG_FIGURINE, null, null);
         }
     }
 
@@ -392,7 +392,7 @@ class CodexTest extends CoreLoopApiTestSupport {
         friendshipRepository.save(Friendship.between(owner.id(), visitor.id()));
         giveCompleted(owner, INCENSE_BURNER);
         giveCompleted(owner, MAPAE);
-        give(owner, GEUMGWAN);   // 진행 중은 세지 않는다
+        give(owner, FROG_FIGURINE);   // 진행 중은 세지 않는다
 
         int rate = read(get(owner, "/api/codex"), "$.data.collectionRate");
         assertThat(rate).isEqualTo(22);

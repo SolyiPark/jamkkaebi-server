@@ -6,6 +6,7 @@ import com.example.jamkkaebi.friend.repository.FriendshipRepository;
 import com.example.jamkkaebi.friend.service.ExhibitionSnapshotService;
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
 import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Difficulty;
 import com.example.jamkkaebi.relic.domain.Era;
 import com.example.jamkkaebi.relic.domain.UserBuilding;
 import com.example.jamkkaebi.relic.domain.UserRelic;
@@ -36,6 +37,7 @@ import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -47,7 +49,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class ExhibitionTest extends CoreLoopApiTestSupport {
 
     private static final int INCENSE_BURNER = 2;  // 금동대향로 — 삼국
-    private static final int GEUMGWAN = 3;        // 금관총 금관 — 삼국
+    private static final int FROG_FIGURINE = 3;   // 개구리 모양 토우 — 삼국
     private static final int MAPAE = 8;           // 마패 — 조선
 
     @Autowired
@@ -77,7 +79,22 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.grid.width").value(7))
                 .andExpect(jsonPath("$.data.grid.height").value(7))
                 .andExpect(jsonPath("$.data.spirits").isEmpty())
-                .andExpect(jsonPath("$.data.buildings").isEmpty());
+                .andExpect(jsonPath("$.data.buildings").isEmpty())
+                .andExpect(jsonPath("$.data.today").value("2026-09-12"));
+    }
+
+    @Test
+    @DisplayName("오늘 날짜(today)는 게임 시계를 따라 KST 자정에 바뀐다")
+    void 오늘_날짜() throws Exception {
+        Player player = player("신입");
+
+        clock.set(LocalDateTime.of(2026, 9, 12, 23, 59));
+        get(player, "/api/exhibition")
+                .andExpect(jsonPath("$.data.today").value("2026-09-12"));
+
+        clock.advance(Duration.ofMinutes(1));
+        get(player, "/api/exhibition")
+                .andExpect(jsonPath("$.data.today").value("2026-09-13"));
     }
 
     @Test
@@ -86,7 +103,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         Player player = player("학예사");
         giveCompleted(player, INCENSE_BURNER);
         giveCompleted(player, MAPAE);
-        give(player, GEUMGWAN); // 작업 중 — 전시관 대상이 아니다
+        give(player, FROG_FIGURINE); // 작업 중 — 전시관 대상이 아니다
         int buildingId = giveBuilding(player, Era.GORYEO);
 
         get(player, "/api/exhibition")
@@ -100,6 +117,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.spirits[0].spiritName").value("향산이"))
                 .andExpect(jsonPath("$.data.spirits[0].awakeningStage").value("AWAKENED"))
                 .andExpect(jsonPath("$.data.spirits[0].clarity").value("CLEAR"))
+                .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").value(startsWith("2026-09-12T10:00")))
                 .andExpect(jsonPath("$.data.spirits[0].displayed").value(false))
                 .andExpect(jsonPath("$.data.spirits[0].hidden").value(false))
                 .andExpect(jsonPath("$.data.spirits[0].position").doesNotExist())
@@ -129,9 +147,29 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
 
         clock.advance(Duration.ofDays(7));
         get(player, "/api/exhibition")
+                .andExpect(jsonPath("$.data.today").value("2026-09-27"))
                 .andExpect(jsonPath("$.data.spirits[0].clarity").value("RESEALED"))
                 // 재봉인돼도 공개 단계는 내려가지 않는다 — 실루엣 연출은 클라이언트가 clarity 로 한다.
                 .andExpect(jsonPath("$.data.spirits[0].revealLevel").value("NAMED"));
+    }
+
+    @Test
+    @DisplayName("마지막 정화 시각은 시간이 지나도 그대로이고, 관리 순서를 끝까지 마쳤을 때만 바뀐다")
+    void 마지막_정화_시각() throws Exception {
+        Player player = player("돌보미");
+        giveCompleted(player, INCENSE_BURNER);
+
+        // 흐려짐 — 기억 회복부터 두 판을 다시 한다. 한 판만 하면 아직 회복된 게 아니다.
+        clock.advance(Duration.ofDays(8));
+        clearPhase(player, INCENSE_BURNER, Difficulty.NORMAL).andExpect(status().isOk());
+        get(player, "/api/exhibition")
+                .andExpect(jsonPath("$.data.spirits[0].clarity").value("FADED"))
+                .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").value(startsWith("2026-09-12T10:00")));
+
+        clearPhase(player, INCENSE_BURNER, Difficulty.NORMAL).andExpect(status().isOk());
+        get(player, "/api/exhibition")
+                .andExpect(jsonPath("$.data.spirits[0].clarity").value("CLEAR"))
+                .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").value(startsWith("2026-09-20T10:02")));
     }
 
     @Test
@@ -237,13 +275,13 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     void 둘_수_없는_항목() throws Exception {
         Player player = player("학예사");
         giveCompleted(player, INCENSE_BURNER);
-        give(player, GEUMGWAN);           // 작업 중
+        give(player, FROG_FIGURINE);           // 작업 중
         int unownedBuilding = catalog.buildingOf(Era.JOSEON).orElseThrow().getId();
 
         // 둘 수 있는 대향로가 앞에 있어도 함께 거절된다.
         put(player, "/api/exhibition/layout", layout(
                 item("SPIRIT", INCENSE_BURNER, 1, 1),
-                item("SPIRIT", GEUMGWAN, 2, 2),
+                item("SPIRIT", FROG_FIGURINE, 2, 2),
                 item("SPIRIT", MAPAE, 3, 3),
                 item("BUILDING", unownedBuilding, 4, 4)))
                 .andExpect(status().isConflict())
@@ -402,7 +440,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     @DisplayName("숨기기는 보유하지 않은 유물이면 W001, 정령 수호 전이면 W002 다")
     void 숨기기_실패() throws Exception {
         Player player = player("학예사");
-        give(player, GEUMGWAN);
+        give(player, FROG_FIGURINE);
 
         patch(player, "/api/exhibition/spirits/{id}/visibility", "{\"hidden\":true}", MAPAE)
                 .andExpect(status().isNotFound())
@@ -410,7 +448,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         patch(player, "/api/exhibition/spirits/{id}/visibility", "{\"hidden\":true}", 999)
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("W001"));
-        patch(player, "/api/exhibition/spirits/{id}/visibility", "{\"hidden\":true}", GEUMGWAN)
+        patch(player, "/api/exhibition/spirits/{id}/visibility", "{\"hidden\":true}", FROG_FIGURINE)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("W002"));
         // 값이 빠지면 숨김이 풀리는 사고가 나지 않게 거절한다.
@@ -427,7 +465,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         Player visitor = player("방문객");
         friendshipRepository.save(Friendship.between(owner.id(), visitor.id()));
         giveCompleted(owner, INCENSE_BURNER);
-        giveCompleted(owner, GEUMGWAN);   // 배치하지 않는다
+        giveCompleted(owner, FROG_FIGURINE);   // 배치하지 않는다
         giveCompleted(owner, MAPAE);      // 배치하고 숨긴다
         int buildingId = giveBuilding(owner, Era.GORYEO);
         patch(owner, "/api/relics/{id}/spirit-name", "{\"name\":\"향로지기\"}", INCENSE_BURNER)

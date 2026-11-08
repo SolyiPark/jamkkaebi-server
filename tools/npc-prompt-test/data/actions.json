@@ -1,0 +1,35 @@
+{
+  "contentVersion": "test-7",
+  "animations": ["Idle", "Walking", "Positive", "Struggle"],
+  "animationNotes": {
+    "Idle": "기본 대기, 반응 대기, 말풍선만 띄우는 조용한 대사",
+    "Walking": "배회, 이동 후 복귀. 손님은 도깨비를 건드릴 수 없어서, 손님이 보는 동안에는 짧은 말풍선을 띄운 채 걸어 다닌다",
+    "Positive": "감사, 만족, 기쁨",
+    "Struggle": "끌어당길 때 버둥거리는 몸짓. Talk 는 아트의 w자 입 모양을 살리기 어려워 빼고 이것으로 대체했다"
+  },
+  "removedAnimations": {
+    "Talk": "아트의 w자 입 모양을 살리기 어려워 뺐다. 말하는 행동은 Idle 에 말풍선으로 표현한다",
+    "Negative": "손님은 도깨비를 건드릴 수 없고 주인은 언제든 관리할 수 있어 거절할 상황이 없어 뺐다. 불편함은 대사로 드러낸다"
+  },
+  "mergedActions": {
+    "answer_status": "tell_status(상태 말하기) · recall(지난 일 떠올리기) · ask_favor(관리 부탁)를 합쳤다. 셋 다 Idle 이라 화면 차이가 없고, Gemma 4 E2B 가 상태를 보고 셋 중 맞는 것을 고르지 못했다. 대사 내용으로 평가한다"
+  },
+  "actions": [
+    { "id": "greet", "meaning": "짧게 인사한다", "animation": "Idle", "inputs": ["tap"] },
+    { "id": "answer_status",
+      "meaning": "안부에 답한다. '알고 있는 것'에 적힌 지금 상태를 말하고, 흐려졌다고 적혀 있을 때만 관리해(닦아) 달라고 정중히 부탁하고, 최근 관리나 '최근 이 상대와 있었던 일'이 있으면 그 일을 떠올려 언급한다. 흐려졌다고 적혀 있지 않으면 관리 이야기를 꺼내지 않고, 주인에게 무엇을 하라고 시키지 않는다",
+      "animation": "Idle", "inputs": ["ask_status"] },
+    { "id": "recall_talk",
+      "meaning": "'최근 이 상대와 있었던 일'을 화제로 꺼내, 그 일을 떠올리는 말을 한다",
+      "animation": "Idle", "inputs": ["ask_status"],
+      "condition": "대화 기억이 있어 게임이 그 이야기를 꺼내기로 정했을 때만 후보에 넣는다 (AI가 고르지 않는다)" },
+    { "id": "wander_greet", "meaning": "걸어 다니며, 처음 본 손님에게 환영하는 짧은 말풍선을 띄운다", "animation": "Walking", "inputs": ["visit"] },
+    { "id": "wander_recall", "meaning": "걸어 다니며, 여러 번 와 준 손님을 알아보고 또 와서 반갑다는 짧은 말풍선을 띄운다", "animation": "Walking", "inputs": ["visit"],
+      "condition": "손님의 방문 기록이 있을 때만 후보에 넣는다" },
+    { "id": "thank_joyful", "meaning": "기뻐하며 고마움을 표현한다", "animation": "Positive", "inputs": ["care"] },
+    { "id": "thank_calm", "meaning": "담담한 말투로, 그래도 고맙다는 뜻은 분명히 담아 감사한다", "animation": "Idle", "inputs": ["care"] },
+    { "id": "tell_story", "meaning": "자기 몸(문화재)에 얽힌 사실을 '나'의 이야기처럼 풀어 들려준다", "animation": "Idle", "inputs": ["listen_story"] },
+    { "id": "struggle_protest", "meaning": "버둥거리며, 살살 다뤄 달라거나 내려 달라고 부탁한다", "animation": "Struggle", "inputs": ["drag"] },
+    { "id": "struggle_play", "meaning": "놀이처럼 즐거워하며 버둥거린다", "animation": "Struggle", "inputs": ["drag"] }
+  ]
+}

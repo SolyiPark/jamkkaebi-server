@@ -2,17 +2,23 @@ package com.example.jamkkaebi.friend;
 
 import com.example.jamkkaebi.friend.domain.Block;
 import com.example.jamkkaebi.friend.domain.FriendRecommendation;
+import com.example.jamkkaebi.friend.service.FriendCleanupScheduler;
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
 import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Era;
 import com.example.jamkkaebi.support.FakeExhibitionViewReader;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
@@ -21,11 +27,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 하루 단위 규칙(자정 리셋) — 상자 선물 · 방문 보상 · 오늘의 추천 — 과 접속 시점 전시관 스냅샷을 확인한다.
+ * 하루 단위 규칙(자정 리셋) — 상자 선물 · 방문 기록과 방문 보상 · 오늘의 추천 — 과 접속 시점 전시관 스냅샷을 확인한다.
  */
 class FriendDailyFlowTest extends FriendApiTestSupport {
 
     private static final LocalDateTime NEXT_DAY = LocalDateTime.of(2026, 9, 13, 0, 0, 1);
+
+    @Autowired
+    private FriendCleanupScheduler cleanupScheduler;
 
     @Test
     @DisplayName("선물은 하루에 친구 한 명에게만 — 자정이 지나면 다시 보낼 수 있고 받은 상자권은 사라진다")
@@ -154,6 +163,136 @@ class FriendDailyFlowTest extends FriendApiTestSupport {
         get(visitor, "/api/friends/{code}/exhibition", owner.code())
                 .andExpect(jsonPath("$.data.spirits[0].spiritName").value("달리미"))
                 .andExpect(jsonPath("$.data.capturedAt").value(startsWith("2026-09-12T10:05")));
+    }
+
+    @Test
+    @DisplayName("친구 전시관을 열면 그날 방문으로 남는다 — 최근 30일 방문한 날 수에 지금 열람도 들어가고, 같은 날은 한 번만 센다")
+    void exhibitionCountsMyRecentVisitDays() throws Exception {
+        Player owner = player("주인");
+        Player visitor = player("방문객");
+        Player other = player("다른친구");
+        makeFriends(owner, visitor);
+        makeFriends(other, visitor);
+
+        get(visitor, "/api/friends/{code}/exhibition", owner.code())
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
+        // 같은 날 다시 열어도, 다른 친구 전시관을 열어도 이 친구의 날 수는 늘지 않는다.
+        get(visitor, "/api/friends/{code}/exhibition", other.code()).andExpect(status().isOk());
+        get(visitor, "/api/friends/{code}/exhibition", owner.code())
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
+        // 보상을 받지 않아도 친구 목록에서 오늘 방문한 것으로 나온다. 다만 방문 보상은 아직 받지 않은 상태다.
+        get(visitor, "/api/friends")
+                .andExpect(jsonPath("$.data.friends[?(@.friendCode == '%s')].visitedToday".formatted(owner.code()))
+                        .value(hasItem(true)))
+                .andExpect(jsonPath("$.data.today.visitRewardClaimed").value(false));
+
+        clock.set(NEXT_DAY);
+        get(visitor, "/api/friends/{code}/exhibition", owner.code())
+                .andExpect(jsonPath("$.data.recentVisitDays").value(2));
+        // 방향이 있다 — 주인이 방문객의 전시관을 처음 열면 주인 쪽은 1이다.
+        get(owner, "/api/friends/{code}/exhibition", visitor.code())
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
+
+        // 10월 12일에 열면 30일(오늘 포함)은 9월 13일부터다 — 9월 12일은 빠지고 9월 13일과 오늘이 남는다.
+        // 오래된 기록 정리가 먼저 돌아도 30일 안의 기록은 지우지 않는다 (보관 기간이 세는 기간보다 짧으면 9월 13일이 사라진다).
+        clock.set(LocalDateTime.of(2026, 10, 12, 9, 0));
+        cleanupScheduler.purgeExpired();
+        get(visitor, "/api/friends/{code}/exhibition", owner.code())
+                .andExpect(jsonPath("$.data.recentVisitDays").value(2));
+    }
+
+    @Test
+    @DisplayName("전시관을 열기만 해서는 방문 보상이 소모되지 않고, 연 뒤에 보상을 요청하면 그날 첫 보상을 받는다")
+    void viewingDoesNotConsumeVisitReward() throws Exception {
+        Player alice = player("앨리스");
+        Player bob = player("밥이");
+        Player carol = player("캐럴");
+        makeFriends(alice, bob);
+        makeFriends(alice, carol);
+
+        get(alice, "/api/friends/{code}/exhibition", bob.code())
+                .andExpect(jsonPath("$.data.visitRewardAvailable").value(true));
+        get(alice, "/api/friends/{code}/exhibition", carol.code())
+                .andExpect(jsonPath("$.data.visitRewardAvailable").value(true));
+        assertThat(jeongseongOf(alice)).isZero();
+
+        post(alice, "/api/friends/{code}/visit-reward", bob.code())
+                .andExpect(jsonPath("$.data.jeongseongGained").value(5));
+        // 보상은 열람 때 남긴 오늘의 방문 행에 붙는다 — 방문한 날이 두 번 세지지 않는다.
+        get(alice, "/api/friends/{code}/exhibition", bob.code())
+                .andExpect(jsonPath("$.data.visitRewardAvailable").value(false))
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
+        get(alice, "/api/friends/{code}/exhibition", carol.code())
+                .andExpect(jsonPath("$.data.visitRewardAvailable").value(false));
+        post(alice, "/api/friends/{code}/visit-reward", carol.code())
+                .andExpect(jsonPath("$.data.jeongseongGained").value(0));
+        assertThat(jeongseongOf(alice)).isEqualTo(5);
+        assertThat(visitLogRepository.count()).as("오늘 방문한 친구마다 한 행").isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("전시관을 먼저 열고 보상을 받든, 보상을 먼저 받고 전시관을 열든 결과가 같다")
+    void viewAndRewardOrderDoesNotMatter() throws Exception {
+        Player viewFirst = player("먼저구경");
+        Player rewardFirst = player("먼저보상");
+        Player host = player("주인");
+        makeFriends(viewFirst, host);
+        makeFriends(rewardFirst, host);
+
+        get(viewFirst, "/api/friends/{code}/exhibition", host.code())
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
+        post(viewFirst, "/api/friends/{code}/visit-reward", host.code())
+                .andExpect(jsonPath("$.data.jeongseongGained").value(5));
+
+        // 열지 않고 보상부터 받아도 그날 방문으로 남는다.
+        post(rewardFirst, "/api/friends/{code}/visit-reward", host.code())
+                .andExpect(jsonPath("$.data.jeongseongGained").value(5));
+        get(rewardFirst, "/api/friends/{code}/exhibition", host.code())
+                .andExpect(jsonPath("$.data.visitRewardAvailable").value(false))
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
+
+        get(viewFirst, "/api/friends/{code}/exhibition", host.code())
+                .andExpect(jsonPath("$.data.visitRewardAvailable").value(false))
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
+        assertThat(jeongseongOf(viewFirst)).isEqualTo(5);
+        assertThat(jeongseongOf(rewardFirst)).isEqualTo(5);
+        assertThat(visitLogRepository.count()).as("사람마다 오늘 한 행").isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("전시관 열람과 방문 보상 요청이 동시에 와도 방문은 하루 한 행이고 보상은 하루 한 번이다")
+    void concurrentViewAndRewardKeepOneVisitPerDay() throws Exception {
+        Player visitor = player("방문객");
+        Player host = player("주인");
+        makeFriends(visitor, host);
+        int days = 10;
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            for (int day = 0; day < days; day++) {
+                clock.set(START.plusDays(day));
+                CountDownLatch go = new CountDownLatch(1);
+                Future<Integer> view = pool.submit(() -> {
+                    go.await();
+                    return get(visitor, "/api/friends/{code}/exhibition", host.code()).andReturn().getResponse().getStatus();
+                });
+                Future<Integer> reward = pool.submit(() -> {
+                    go.await();
+                    return post(visitor, "/api/friends/{code}/visit-reward", host.code()).andReturn().getResponse().getStatus();
+                });
+                go.countDown();
+
+                assertThat(view.get()).as("%d일째 열람", day + 1).isEqualTo(200);
+                assertThat(reward.get()).as("%d일째 보상 요청", day + 1).isEqualTo(200);
+                assertThat(visitLogRepository.count()).as("%d일째까지 방문 행", day + 1).isEqualTo(day + 1);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertThat(jeongseongOf(visitor)).isEqualTo(5 * days);
+        get(visitor, "/api/friends/{code}/exhibition", host.code())
+                .andExpect(jsonPath("$.data.recentVisitDays").value(days));
     }
 
     @Test

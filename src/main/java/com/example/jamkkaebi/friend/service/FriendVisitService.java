@@ -23,6 +23,8 @@ import java.util.List;
 @Service
 public class FriendVisitService {
 
+    private static final int RECENT_VISIT_DAYS = 30; //방문 기록은 최대 30일
+
     private final FriendUsers friendUsers;
     private final SocialGraph socialGraph;
     private final VisitLogRepository visitLogRepository;
@@ -54,15 +56,17 @@ public class FriendVisitService {
     }
 
     /**
-     * 친구 전시관 스냅샷.
+     * 친구 전시관 스냅샷. 열면 오늘 이 친구를 방문한 것으로 남긴다 (같은 날은 한 번). 보상은 주지 않는다.
      *
      * 아무것도 놓이지 않은 전시관은 오류가 아니라 <b>기본 빈 전시관</b>이다. (그리드만 싣는다)
      */
-    @Transactional(readOnly = true)
+    @Transactional
     public FriendExhibitionResponse exhibition(String myFriendCode, String rawFriendCode) {
         User me = friendUsers.me(myFriendCode);
         User friend = requireFriend(me, rawFriendCode);
+        friendUsers.lock(me.getId());
         LocalDate today = gameClock.today();
+        recordVisit(me.getId(), friend.getId(), today);
         ExhibitionSnapshotService.Snapshot snapshot = snapshotService.findOrEmpty(friend.getId());
 
         return new FriendExhibitionResponse(
@@ -72,10 +76,17 @@ public class FriendVisitService {
                 snapshot.view().buildings(),
                 snapshot.capturedAt(),
                 giftService.giftStates(me.getId(), List.of(friend.getId()), today).get(friend.getId()),
-                !visitLogRepository.existsByVisitorIdAndVisitDateAndRewardedTrue(me.getId(), today));
+                !visitLogRepository.existsByVisitorIdAndVisitDateAndRewardedTrue(me.getId(), today),
+                (int) visitLogRepository.countByVisitorIdAndHostIdAndVisitDateGreaterThanEqual(
+                        me.getId(), friend.getId(), today.minusDays(RECENT_VISIT_DAYS - 1)));
     }
 
-    // 방문을 기록하고, 오늘 첫 보상이면 정성을 준다
+    /**
+     * 오늘 아직 방문 보상을 받지 않았으면 정성을 준다. 보상은 몇 명을 방문하든 하루 1회다.
+     *
+     * <p>먼저 오늘의 방문 행을 확보하고(열람 때 이미 남았으면 그 행을 쓴다) 그 뒤에 보상을 판단한다.
+     * 열람과 보상 요청이 동시에 와도 사용자 행 잠금으로 하나씩 처리되고, 어느 쪽이 먼저 와도 결과가 같다.
+     */
     @Transactional
     public VisitRewardResponse claimReward(String myFriendCode, String rawFriendCode) {
         User me = friendUsers.me(myFriendCode);
@@ -83,18 +94,25 @@ public class FriendVisitService {
         friendUsers.lock(me.getId());
         LocalDate today = gameClock.today();
 
-        if (visitLogRepository.findByVisitorIdAndHostIdAndVisitDate(me.getId(), friend.getId(), today).isPresent()) {
-            return new VisitRewardResponse(0, true);
-        }
+        VisitLog visit = recordVisit(me.getId(), friend.getId(), today);
         if (visitLogRepository.existsByVisitorIdAndVisitDateAndRewardedTrue(me.getId(), today)) {
-            visitLogRepository.save(VisitLog.withoutReward(me.getId(), friend.getId(), today));
             return new VisitRewardResponse(0, true);
         }
 
         int reward = properties.visitRewardJeongseong();
-        visitLogRepository.save(VisitLog.rewarded(me.getId(), friend.getId(), today, reward));
+        visit.markRewarded(reward);
         userRepository.addJeongseong(me.getId(), reward);
         return new VisitRewardResponse(reward, true);
+    }
+
+    /**
+     * 오늘의 방문 행을 찾고, 없으면 보상 없이 만든다.
+     *
+     * <p><b>사용자 행을 잠근 뒤에 부른다.</b> 같은 사용자의 열람과 보상 요청이 겹쳐도 행이 두 번 만들어지지 않는다.
+     */
+    private VisitLog recordVisit(Long visitorId, Long hostId, LocalDate today) {
+        return visitLogRepository.findByVisitorIdAndHostIdAndVisitDate(visitorId, hostId, today)
+                .orElseGet(() -> visitLogRepository.save(VisitLog.withoutReward(visitorId, hostId, today)));
     }
 
     // 친구가 아니면 없는 코드. 차단 관계와 구분하지 않는다

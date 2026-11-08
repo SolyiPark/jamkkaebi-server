@@ -229,7 +229,8 @@ public class ExhibitionService {
                 .map(building -> ExhibitBuildingView.of(buildingMasters.get(building.getBuildingId()), building))
                 .toList();
 
-        return new ExhibitionResponse(properties.grid(), spirits, buildingViews);
+        // 선명도와 같은 시각에서 날짜를 떼어, 자정 무렵에도 선명도와 날짜가 서로 어긋나지 않게 한다
+        return new ExhibitionResponse(properties.grid(), spirits, buildingViews, now.toLocalDate());
     }
 
     private record Slot(ExhibitItemType type, Integer id) {

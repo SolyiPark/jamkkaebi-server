@@ -14,9 +14,10 @@ import java.util.List;
  * @param grid                 배치 좌표 범위
  * @param spirits              배치되고 숨기지 않은 도깨비
  * @param buildings            배치된 건물
- * @param capturedAt           스냅샷을 찍은 시각(마지막 접속)
+ * @param capturedAt           마지막 접속 시각
  * @param giftState            선물 버튼 상태
  * @param visitRewardAvailable 오늘 방문 보상을 아직 받지 않았는지
+ * @param recentVisitDays      최근 30일 동안 내가 이 친구 전시관을 방문한 날 수
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record FriendExhibitionResponse(
@@ -26,6 +27,7 @@ public record FriendExhibitionResponse(
         List<ExhibitionView.BuildingView> buildings,
         LocalDateTime capturedAt,
         GiftState giftState,
-        boolean visitRewardAvailable
+        boolean visitRewardAvailable,
+        int recentVisitDays
 ) {
 }

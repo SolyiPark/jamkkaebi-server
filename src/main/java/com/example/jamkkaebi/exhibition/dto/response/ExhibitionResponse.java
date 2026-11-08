@@ -2,6 +2,7 @@ package com.example.jamkkaebi.exhibition.dto.response;
 
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -13,10 +14,14 @@ import java.util.List;
  * @param grid      배치 좌표 범위
  * @param spirits   정령 수호까지 마친 도깨비 전부 ({@code relicId} 순)
  * @param buildings 받은 건물 전부 ({@code buildingId} 순)
+ * @param today     오늘 게임 일자 ({@link com.example.jamkkaebi.global.time.GameClock}, KST 자정에 바뀐다).
+ *                  선명도를 계산한 시각과 같은 날이다. 클라이언트는 도깨비 대화의 "며칠 전에 닦아 줬다"
+ *                  같은 날짜 계산을 기기 시계 대신 이 값으로 한다
  */
 public record ExhibitionResponse(
         ExhibitionView.Grid grid,
         List<ExhibitSpiritView> spirits,
-        List<ExhibitBuildingView> buildings
+        List<ExhibitBuildingView> buildings,
+        LocalDate today
 ) {
 }

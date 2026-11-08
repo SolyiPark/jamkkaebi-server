@@ -18,7 +18,8 @@ import java.time.LocalDate;
 /**
  * 친구 전시관 방문 기록. 하루에 같은 친구는 한 행이다.
  *
- * <p>방문 보상은 <b>몇 명을 방문하든 하루 1회</b>
+ * <p>전시관을 열면 보상 없이 남기고, 그날 방문 보상을 받으면 그 행에 보상을 붙인다.
+ * 방문 보상은 <b>몇 명을 방문하든 하루 1회</b>
  */
 @Entity
 @Table(
@@ -58,11 +59,12 @@ public class VisitLog extends BaseTimeEntity {
         this.jeongseongGained = jeongseongGained;
     }
 
-    public static VisitLog rewarded(Long visitorId, Long hostId, LocalDate visitDate, int jeongseong) {
-        return new VisitLog(visitorId, hostId, visitDate, true, jeongseong);
-    }
-
     public static VisitLog withoutReward(Long visitorId, Long hostId, LocalDate visitDate) {
         return new VisitLog(visitorId, hostId, visitDate, false, 0);
+    }
+
+    public void markRewarded(int jeongseong) {
+        this.rewarded = true;
+        this.jeongseongGained = jeongseong;
     }
 }

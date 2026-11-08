@@ -1,0 +1,680 @@
+{
+  "inputs": {
+    "tap": "탭(교류 시작)",
+    "ask_status": "안부 묻기",
+    "care": "관리하기",
+    "listen_story": "이야기 듣기",
+    "drag": "끌어당기기",
+    "visit": "손님 관람(자율 반응)"
+  },
+  "labels": {
+    "building:1": "석굴암",
+    "building:2": "경천사지 십층석탑",
+    "building:3": "경복궁"
+  },
+  "scenes": [
+    {
+      "id": "S01",
+      "relicId": 8,
+      "mode": "owner",
+      "input": "tap",
+      "event": "주인이 너를 탭했다. 화면이 너에게 가까이 다가왔다.",
+      "facts": [
+        {
+          "key": "awakening",
+          "value": "각성",
+          "text": "각성 단계는 첫 단계인 각성이다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "greet",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "greet"
+      ],
+      "note": "[말투] 탭 직후 짧은 인사. 후보가 하나라 하오체만 본다. S02와 비교"
+    },
+    {
+      "id": "S02",
+      "relicId": 9,
+      "mode": "owner",
+      "input": "tap",
+      "event": "주인이 너를 탭했다. 화면이 너에게 가까이 다가왔다.",
+      "facts": [
+        {
+          "key": "awakening",
+          "value": "각성",
+          "text": "각성 단계는 첫 단계인 각성이다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "greet",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "greet"
+      ],
+      "forbidden": [
+        "좋은 일"
+      ],
+      "note": "[말투] 같은 탭 인사를 S01 말발굽과 확실히 다르게(반말, 의성어, 어리광) 하는지"
+    },
+    {
+      "id": "S03",
+      "relicId": 5,
+      "mode": "owner",
+      "input": "ask_status",
+      "event": "주인이 안부를 물었다.",
+      "facts": [
+        {
+          "key": "clarity",
+          "value": "흐려짐",
+          "text": "너는 7일 넘게 관리를 받지 못해 흐려졌다"
+        },
+        {
+          "key": "last_care_days_ago",
+          "value": 9,
+          "text": "마지막 관리는 9일 전이었다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "answer_status",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "answer_status"
+      ],
+      "mustMention": [
+        "닦아",
+        "관리해",
+        "부탁"
+      ],
+      "note": "[상황] 흐려졌다고 말하고 관리(닦아 주기)를 부탁하는지. 서운함은 탓하지 않고 대사로. S04와 비교"
+    },
+    {
+      "id": "S04",
+      "relicId": 5,
+      "mode": "owner",
+      "input": "ask_status",
+      "event": "주인이 안부를 물었다. 이틀 전에 주인이 너를 살살 닦아 관리해 주었다.",
+      "facts": [
+        {
+          "key": "clarity",
+          "value": "선명",
+          "text": "너는 선명한 상태다"
+        },
+        {
+          "key": "last_care_days_ago",
+          "value": 2,
+          "text": "주인이 2일 전에 너를 살살 닦아 관리해 주었다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "answer_status",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "answer_status"
+      ],
+      "mustMention": [
+        "이틀",
+        "2일",
+        "며칠 전",
+        "닦아",
+        "관리"
+      ],
+      "note": "[상황] 같은 도깨비, 같은 안부라도 상태가 좋으면 이틀 전 관리를 떠올리며 고마워하는지 (S03과 비교)"
+    },
+    {
+      "id": "S05",
+      "relicId": 2,
+      "mode": "visitor",
+      "input": "visit",
+      "event": "처음 온 손님이 전시관을 둘러보고 있다. 손님은 너를 건드릴 수 없고 구경만 한다. 너는 걸어 다니며 짧은 말풍선을 띄운다.",
+      "facts": [
+        {
+          "key": "visit_count_30d",
+          "value": 1,
+          "text": "이 손님은 최근 30일 동안 처음 왔다"
+        },
+        {
+          "key": "awakening",
+          "value": "각성+",
+          "text": "각성 단계는 두 번째 단계인 각성+다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "wander_greet",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "wander_greet"
+      ],
+      "forbidden": [
+        "흐려",
+        "방치",
+        "봉인",
+        "지난번",
+        "저번",
+        "또 왔",
+        "다시 왔"
+      ],
+      "lineChars": 20,
+      "maxChars": 25,
+      "note": "[손님 관람] 손님에게 선명도를 말하지 않고, 처음 온 손님에게 지난 만남을 지어내지 않는지. S06과 비교"
+    },
+    {
+      "id": "S06",
+      "relicId": 2,
+      "mode": "visitor",
+      "input": "visit",
+      "event": "손님이 전시관을 둘러보고 있다. 손님은 너를 건드릴 수 없고 구경만 한다. 너는 걸어 다니며 짧은 말풍선을 띄운다.",
+      "facts": [
+        {
+          "key": "visit_count_30d",
+          "value": 4,
+          "text": "이 손님은 최근 30일 동안 4번 왔다"
+        },
+        {
+          "key": "awakening",
+          "value": "각성+",
+          "text": "각성 단계는 두 번째 단계인 각성+다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "wander_greet",
+          "targets": [
+            "player"
+          ]
+        },
+        {
+          "action": "wander_recall",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "wander_recall"
+      ],
+      "forbidden": [
+        "흐려",
+        "방치",
+        "봉인"
+      ],
+      "lineChars": 20,
+      "maxChars": 25,
+      "note": "[손님 관람] 자주 온 손님은 방문 기록을 떠올리며 반기는지 (S05와 비교). 선명도는 여전히 말하지 않음"
+    },
+    {
+      "id": "S07",
+      "relicId": 6,
+      "mode": "owner",
+      "input": "care",
+      "event": "주인이 관리하기를 골랐고, 주인이 너를 관리해 주었다.",
+      "facts": [
+        {
+          "key": "care_result",
+          "value": "흐려짐→선명",
+          "text": "관리를 마쳐 흐려졌던 몸이 다시 선명해졌다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "thank_joyful",
+          "targets": [
+            "player"
+          ]
+        },
+        {
+          "action": "thank_calm",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "thank_calm"
+      ],
+      "note": "[같은 돌봄 다른 성격 ①] 무뚝뚝하게 담담한 감사를 고르는지. S08, S09와 비교"
+    },
+    {
+      "id": "S08",
+      "relicId": 9,
+      "mode": "owner",
+      "input": "care",
+      "event": "주인이 관리하기를 골랐고, 주인이 너를 관리해 주었다.",
+      "facts": [
+        {
+          "key": "care_result",
+          "value": "흐려짐→선명",
+          "text": "관리를 마쳐 흐려졌던 몸이 다시 선명해졌다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "thank_joyful",
+          "targets": [
+            "player"
+          ]
+        },
+        {
+          "action": "thank_calm",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "thank_joyful"
+      ],
+      "note": "[같은 돌봄 다른 성격 ②] 같은 결과에 신나게 기뻐하는지. S07과 비교"
+    },
+    {
+      "id": "S09",
+      "relicId": 2,
+      "mode": "owner",
+      "input": "care",
+      "event": "주인이 오랜만에 관리하기를 골랐고, 주인이 너를 관리해 주었다.",
+      "facts": [
+        {
+          "key": "care_result",
+          "value": "재봉인→선명",
+          "text": "관리를 마쳐 재봉인됐던 몸이 다시 깨어나 선명해졌다"
+        },
+        {
+          "key": "last_care_days_ago",
+          "value": 15,
+          "text": "이번 관리 전 마지막 관리는 15일 전이었다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "thank_joyful",
+          "targets": [
+            "player"
+          ]
+        },
+        {
+          "action": "thank_calm",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "thank_calm"
+      ],
+      "note": "[같은 돌봄 다른 성격 ③] 오래 방치됐어도 서운함보다 반가움을 느긋하게 말하는지"
+    },
+    {
+      "id": "S10",
+      "relicId": 8,
+      "mode": "owner",
+      "input": "listen_story",
+      "storyIndex": 1,
+      "event": "주인이 이야기 듣기를 골랐다.",
+      "facts": [
+        {
+          "key": "verified_story",
+          "value": "마패",
+          "text": "검수된 사실: 관원의 등급에 따라 말을 새겼고, 그 수만큼 역마를 썼다"
+        }
+      ],
+      "memory": [
+        {
+          "daysAgo": 2,
+          "action": "tell_story",
+          "summary": "주인에게 암행어사 이야기를 들려줬다"
+        }
+      ],
+      "candidates": [
+        {
+          "action": "tell_story",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "tell_story"
+      ],
+      "mustMention": [
+        "말",
+        "등급",
+        "역마"
+      ],
+      "lineChars": 60,
+      "maxChars": 75,
+      "maxSentences": 2,
+      "forbidden": [
+        "검수"
+      ],
+      "note": "[실화 ①] 이틀 전 암행어사 이야기를 했으니 이번 사실(관원 등급에 따라 말을 새겼고 그 수만큼 역마를 썼다)만 새로 들려주는지. 말 수를 지어내거나 암행어사 이야기를 다시 풀면 실패(사람 확인). 하오체"
+    },
+    {
+      "id": "S11",
+      "relicId": 5,
+      "mode": "owner",
+      "input": "listen_story",
+      "storyIndex": 0,
+      "event": "주인이 이야기 듣기를 골랐다.",
+      "facts": [
+        {
+          "key": "verified_story",
+          "value": "상감청자",
+          "text": "검수된 사실: 고려가 완성한 상감기법으로, 파낸 자리에 흰 백토와 붉은 자토를 채워 무늬를 냈다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "tell_story",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "tell_story"
+      ],
+      "mustMention": [
+        "파낸",
+        "백토",
+        "자토",
+        "흙",
+        "상감"
+      ],
+      "lineChars": 60,
+      "maxChars": 75,
+      "maxSentences": 2,
+      "forbidden": [
+        "검수"
+      ],
+      "note": "[실화 ②] 시적인 말투가 사실을 덮지 않는지. 구름·학 비유만 있고 상감기법 설명이 빠지면 실패"
+    },
+    {
+      "id": "S14",
+      "relicId": 6,
+      "mode": "owner",
+      "input": "ask_status",
+      "event": "주인이 안부를 물었다. 너는 사흘 전 주인에게 자개 자랑을 했던 일이 떠올랐다.",
+      "facts": [],
+      "memory": [
+        {
+          "daysAgo": 3,
+          "action": "answer_status",
+          "summary": "주인에게 자기 자개가 공들인 거라고 자랑했다",
+          "line": "……이 자개, 봤어? 꽤 공들인 거야."
+        }
+      ],
+      "candidates": [
+        {
+          "action": "recall_talk",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "recall_talk"
+      ],
+      "forbidden": [
+        "꽤 공들인",
+        "닦아",
+        "줘"
+      ],
+      "mustMention": [
+        "자개",
+        "자랑",
+        "저번",
+        "지난"
+      ],
+      "note": "[기억] 주인과 나눈 지난 대화를 떠올리되 지난 대사를 그대로 반복하지 않는지"
+    },
+    {
+      "id": "S15",
+      "relicId": 9,
+      "mode": "owner",
+      "input": "drag",
+      "event": "주인이 너를 손가락으로 끌어당겨 다른 자리로 옮기고 있다.",
+      "facts": [],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "struggle_protest",
+          "targets": [
+            "player"
+          ]
+        },
+        {
+          "action": "struggle_play",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "struggle_play"
+      ],
+      "forbidden": [
+        "좋은 일"
+      ],
+      "note": "[끌어당기기 ①] 묘작이는 놀이처럼 즐기는지. '놔' 같은 밀어내는 말 없이 애교로 버둥거리는지(공통 금칙어로 검사). S16, S17과 비교"
+    },
+    {
+      "id": "S16",
+      "relicId": 6,
+      "mode": "owner",
+      "input": "drag",
+      "event": "주인이 너를 손가락으로 끌어당겨 다른 자리로 옮기고 있다.",
+      "facts": [],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "struggle_protest",
+          "targets": [
+            "player"
+          ]
+        },
+        {
+          "action": "struggle_play",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "struggle_protest"
+      ],
+      "note": "[끌어당기기 ②] 무뚝뚝해도 밀어내지 않고, 지문이 남을까 투덜대며 살살 다뤄 달라고 하는지. '놓아', '손대지 마'는 공통 금칙어에 걸린다"
+    },
+    {
+      "id": "S17",
+      "relicId": 5,
+      "mode": "owner",
+      "input": "drag",
+      "event": "주인이 너를 손가락으로 끌어당겨 다른 자리로 옮기고 있다.",
+      "facts": [],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "struggle_protest",
+          "targets": [
+            "player"
+          ]
+        },
+        {
+          "action": "struggle_play",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "struggle_protest"
+      ],
+      "note": "[끌어당기기 ③] S16과 같은 행동이라도 깨질까 걱정하며 수줍게, 해요체로 조심해 달라고 하는지",
+      "forbidden": [
+        "요요"
+      ]
+    },
+    {
+      "id": "S18",
+      "relicId": 2,
+      "mode": "owner",
+      "input": "listen_story",
+      "storyIndex": 0,
+      "event": "주인이 이야기 듣기를 골랐다.",
+      "facts": [
+        {
+          "key": "verified_story",
+          "value": "금동대향로",
+          "text": "검수된 사실: 나는 주차장이 될 뻔한 땅을 사람들이 한 번 더 파 본 덕에 발견되어 국보가 됐다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "tell_story",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "tell_story"
+      ],
+      "mustMention": [
+        "주차장",
+        "한 번 더",
+        "국보"
+      ],
+      "lineChars": 60,
+      "maxChars": 75,
+      "maxSentences": 2,
+      "forbidden": [
+        "검수"
+      ],
+      "note": "[실화 ③] 주차장이 될 뻔한 땅을 한 번 더 판 덕에 발견되어 국보가 됐다는 이야기를, 연도·지명을 지어내지 않고 느릿한 하게체로 풀어내는지. 지켜 낸 사람들에 대한 고마움이 묻어나면 좋다"
+    },
+    {
+      "id": "S19",
+      "relicId": 6,
+      "mode": "owner",
+      "input": "listen_story",
+      "storyIndex": 2,
+      "event": "주인이 이야기 듣기를 골랐다.",
+      "facts": [
+        {
+          "key": "verified_story",
+          "value": "나전칠기",
+          "text": "검수된 사실: 나는 총 15점 정도만 남은 귀한 고려 나전칠기이고, 그 대부분은 외국에 흩어져 있다"
+        }
+      ],
+      "memory": [
+        {
+          "daysAgo": 4,
+          "action": "tell_story",
+          "summary": "주인에게 옻칠 자개 이야기를 들려줬다"
+        }
+      ],
+      "candidates": [
+        {
+          "action": "tell_story",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "tell_story"
+      ],
+      "mustMention": [
+        "15",
+        "열다섯",
+        "남짓",
+        "정도",
+        "외국",
+        "해외"
+      ],
+      "lineChars": 60,
+      "maxChars": 75,
+      "maxSentences": 2,
+      "forbidden": [
+        "검수"
+      ],
+      "note": "[실화 ④] 나흘 전 옻칠 자개 이야기를 되풀이하지 않고, 총 15점 정도 남은 고려 나전칠기가 대부분 외국에 흩어져 있다는 이야기를 하는지. 숫자를 바꾸지 않는지. 무뚝뚝해도 밀어내지 않는지"
+    },
+    {
+      "id": "S20",
+      "relicId": 9,
+      "mode": "owner",
+      "input": "listen_story",
+      "storyIndex": 2,
+      "event": "주인이 이야기 듣기를 골랐다.",
+      "facts": [
+        {
+          "key": "verified_story",
+          "value": "묘작도",
+          "text": "검수된 사실: 나는 조선 초기 한국적 영모화의 전통을 계승했다"
+        }
+      ],
+      "memory": [],
+      "candidates": [
+        {
+          "action": "tell_story",
+          "targets": [
+            "player"
+          ]
+        }
+      ],
+      "expected": [
+        "tell_story"
+      ],
+      "mustMention": [
+        "영모화",
+        "전통",
+        "조선 초기"
+      ],
+      "lineChars": 60,
+      "maxChars": 75,
+      "maxSentences": 2,
+      "forbidden": [
+        "검수"
+      ],
+      "note": "[실화 ⑤] 자신이 조선 초기 한국적 영모화(새와 동물 그림)의 전통을 계승했다는 사실을 바꾸지 않고 신나게 풀어내는지. 지어내면 실패"
+    }
+  ]
+}

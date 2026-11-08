@@ -30,12 +30,13 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 class SocialFlowTest extends CoreLoopApiTestSupport {
 
-    private static final int INCENSE_BURNER = 2;  // 금동대향로 — 삼국
-    private static final int GEUMGWAN = 3;        // 금관총 금관 — 삼국
-    private static final int MAITREYA = 4;        // 관촉사 석조미륵보살입상 — 고려
-    private static final int CELADON = 5;         // 상감청자 — 고려
-    private static final int ROYAL_SEAL = 7;      // 유서지보 — 조선
-    private static final int MAPAE = 8;           // 마패 — 조선
+    private static final int TURTLE_DROPPER = 1;       // 거북이 모양 연적 — 삼국
+    private static final int INCENSE_BURNER = 2;       // 금동대향로 — 삼국
+    private static final int FROG_FIGURINE = 3;        // 개구리 모양 토우 — 삼국
+    private static final int POMEGRANATE_DROPPER = 4;  // 청자 석류 모양 연적 — 고려
+    private static final int CELADON = 5;              // 상감 청자 매병 — 고려
+    private static final int PHOENIX_HAIRPIN = 7;      // 봉 뒤꽂이 — 조선
+    private static final int MAPAE = 8;                // 마패 — 조선
 
     @Autowired
     private FriendshipRepository friendshipRepository;
@@ -74,7 +75,7 @@ class SocialFlowTest extends CoreLoopApiTestSupport {
         patch(me, "/api/users/me/avatar", "{\"spiritId\":%d}".formatted(CELADON))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("U002"));
-        patch(me, "/api/users/me/avatar", "{\"spiritId\":%d}".formatted(GEUMGWAN))
+        patch(me, "/api/users/me/avatar", "{\"spiritId\":%d}".formatted(FROG_FIGURINE))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("U002"));
         patch(me, "/api/users/me/avatar", "{\"spiritId\":99}")
@@ -102,11 +103,11 @@ class SocialFlowTest extends CoreLoopApiTestSupport {
         Player collector = player("수집가");
         Player beginner = player("새내기");
         Player newcomer = player("빈손");
-        giveCompleted(collector, 1);
+        giveCompleted(collector, TURTLE_DROPPER);
         giveCompleted(collector, INCENSE_BURNER);
-        giveCompleted(collector, MAITREYA);
+        giveCompleted(collector, POMEGRANATE_DROPPER);
         give(collector, MAPAE); // 진행 중인 유물은 수집률에 들어가지 않는다
-        giveCompleted(beginner, ROYAL_SEAL);
+        giveCompleted(beginner, PHOENIX_HAIRPIN);
         patch(collector, "/api/users/me/avatar", "{\"spiritId\":%d}".formatted(INCENSE_BURNER))
                 .andExpect(status().isOk());
 
@@ -178,18 +179,27 @@ class SocialFlowTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.spirits[0].awakeningStage").value("AWAKENED"))
                 .andExpect(jsonPath("$.data.spirits[0].position.x").value(3))
                 .andExpect(jsonPath("$.data.spirits[0].clarity").doesNotExist())
+                .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").doesNotExist())
                 .andExpect(jsonPath("$.data.buildings.length()").value(1))
                 .andExpect(jsonPath("$.data.buildings[0].buildingId").value(buildingId))
                 .andExpect(jsonPath("$.data.buildings[0].name").value("경천사지 십층석탑"))
                 .andExpect(jsonPath("$.data.buildings[0].level").value(1))
                 .andExpect(jsonPath("$.data.buildings[0].position.x").value(5))
-                .andExpect(jsonPath("$.data.visitRewardAvailable").value(true));
+                .andExpect(jsonPath("$.data.visitRewardAvailable").value(true))
+                // 지금 이 열람이 첫 방문으로 남는다.
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
 
         post(visitor, "/api/friends/{code}/visit-reward", "", owner.code())
                 .andExpect(jsonPath("$.data.jeongseongGained").value(5));
+        // 보상은 열람 때 남은 방문에 붙는다 — 다시 열어도 방문한 날은 하루다.
+        get(visitor, "/api/friends/{code}/exhibition", owner.code())
+                .andExpect(jsonPath("$.data.visitRewardAvailable").value(false))
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
+        // 친구가 아니면 볼 수 없고, 방문 기록도 남지 않는다.
         get(stranger, "/api/friends/{code}/exhibition", owner.code())
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("F008"));
+        assertThat(visitLogRepository.count()).isEqualTo(1);
     }
 
     @Test
@@ -208,7 +218,8 @@ class SocialFlowTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.spirits").isEmpty())
                 .andExpect(jsonPath("$.data.buildings").isEmpty())
                 .andExpect(jsonPath("$.data.capturedAt").doesNotExist())
-                .andExpect(jsonPath("$.data.visitRewardAvailable").value(true));
+                .andExpect(jsonPath("$.data.visitRewardAvailable").value(true))
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
 
         // 접속은 했지만 깨운 도깨비를 아직 전시관에 놓지 않은 친구 — 접속 때 찍힌 빈 스냅샷이 보인다.
         giveCompleted(owner, INCENSE_BURNER);
@@ -219,7 +230,9 @@ class SocialFlowTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.grid.width").value(7))
                 .andExpect(jsonPath("$.data.spirits").isEmpty())
                 .andExpect(jsonPath("$.data.buildings").isEmpty())
-                .andExpect(jsonPath("$.data.capturedAt").exists());
+                .andExpect(jsonPath("$.data.capturedAt").exists())
+                // 같은 날 다시 열었으니 방문한 날은 그대로 하루다.
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
         // 빈 전시관이어도 방문 보상은 그대로 받는다.
         post(visitor, "/api/friends/{code}/visit-reward", "", owner.code())
                 .andExpect(status().isOk())

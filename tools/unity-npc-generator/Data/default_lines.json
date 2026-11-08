@@ -1,0 +1,143 @@
+{
+  "contentVersion": "lines-6",
+  "storyPolicy": "stories 는 실화를 담은 이야기 대사로(잠깨비 목적에 맞춰 고른 실화), npc-prompt-test/data/personas.json 의 stories 와 같은 순서다. 사실은 그대로 두고 말투만 입혔다. 돌려 가며 써서 다 들려줄 때까지 같은 이야기를 반복하지 않는다. fallback(페르소나가 아직 없는 도깨비)은 stories 없이 자료 문장(verified_story) 앞뒤에 storyPrefix·storyTail 을 붙인다.",
+  "spirits": [
+    {
+      "relicId": 8,
+      "name": "말발굽",
+      "preferredActions": ["thank_calm", "struggle_protest"],
+      "stories": [
+        "어흠, 암행어사는 이 몸을 품고 몰래 다니며 관리의 잘잘못과 백성의 고통을 살폈소.",
+        "어흠, 내 몸의 말을 세어 보시오. 관원의 등급에 따라 말을 새겼고, 그 수만큼 역마를 썼소.",
+        "어흠, 처음엔 나무, 1434년부턴 철, 그 뒤엔 구리로 만들었소. 지금은 국립중앙박물관에 있구려."
+      ],
+      "pools": [
+        { "actionId": "greet", "variant": "", "lines": ["어흠, 오셨구려.", "어흠, 주인장 오셨소?", "오늘도 무사하셨구려."] },
+        { "actionId": "answer_status", "variant": "faded", "lines": ["어흠… 몸이 좀 흐려졌소. 닦아 주시겠소?", "흐려져서 체면이 말이 아니오. 손 좀 봐 주시오."] },
+        { "actionId": "answer_status", "variant": "recent_care", "lines": ["지난번에 닦아 주신 덕에 멀쩡하오.", "어흠, 요전 관리 덕에 아주 선명하오."] },
+        { "actionId": "answer_status", "variant": "default", "lines": ["어흠, 이 몸은 이상 없소.", "밤 순찰도 무사히 마쳤소."] },
+        { "actionId": "recall_talk", "variant": "", "lines": ["어흠, 지난번 일은 장부에 적어 두었소.", "그때 일, 이 몸은 잊지 않았소."] },
+        { "actionId": "wander_greet", "variant": "", "lines": ["어흠, 뉘시오?", "처음 뵙는 얼굴이구려."] },
+        { "actionId": "wander_recall", "variant": "", "lines": ["어흠, 또 오셨구려.", "단골이 오셨구려."] },
+        { "actionId": "thank_calm", "variant": "", "lines": ["이 은혜, 장부에 적어 두겠소.", "어흠… 고맙소."] },
+        { "actionId": "thank_joyful", "variant": "", "lines": ["어흠, 이리 개운할 수가! 고맙소!", "고맙소! 체면이 다시 섰구려."] },
+        { "actionId": "struggle_protest", "variant": "", "lines": ["어흠! 이 몸의 체면이 있으니, 살살 내려 주시오.", "체면이 구겨지오. 내려 주시오."] },
+        { "actionId": "struggle_play", "variant": "", "lines": ["어흠, 이리 끌려가는 것도 순찰이오.", "허, 어디로 가는 길이오?"] }
+      ]
+    },
+    {
+      "relicId": 2,
+      "name": "향산이",
+      "preferredActions": ["thank_calm", "struggle_play"],
+      "stories": [
+        "허허… 주차장이 될 뻔한 땅을, 한 번만 더 파 보자던 사람들 덕에 내가 발견됐다네. 국보도 되었지.",
+        "내 몸 좀 보게… 용이 연꽃 몸을 받치고, 산봉우리 사이엔 다섯 악사, 꼭대기엔 봉황이 있다네.",
+        "허허… 1,300년 넘게 진흙에 묻혀 있었던 덕에 옛 모습을 지킬 수 있었구먼."
+      ],
+      "pools": [
+        { "actionId": "greet", "variant": "", "lines": ["허허… 어서 오게.", "왔구먼… 잘 왔네."] },
+        { "actionId": "answer_status", "variant": "faded", "lines": ["허허… 향이 좀 흐려졌구먼. 손 좀 봐 주게.", "몸이 좀 흐려졌네… 쉬엄쉬엄 닦아 주게."] },
+        { "actionId": "answer_status", "variant": "recent_care", "lines": ["요전에 닦아 준 덕에 향이 맑다네.", "허허, 지난번 손길 덕에 개운하구먼."] },
+        { "actionId": "answer_status", "variant": "default", "lines": ["허허… 별일 없다네.", "오늘도 고요하구먼."] },
+        { "actionId": "recall_talk", "variant": "", "lines": ["허허… 그때 일이 떠오르는구먼.", "지난번 이야기, 아직 기억하고 있다네."] },
+        { "actionId": "wander_greet", "variant": "", "lines": ["허허… 편히 구경하게.", "어서 오게… 쉬어 가게."] },
+        { "actionId": "wander_recall", "variant": "", "lines": ["허허… 또 왔구먼.", "또 와 주었구먼, 반갑네."] },
+        { "actionId": "thank_calm", "variant": "", "lines": ["고맙네… 향이 다시 맑아졌구먼.", "허허, 덕분에 한결 개운하다네."] },
+        { "actionId": "thank_joyful", "variant": "", "lines": ["허허! 이리 맑아지다니, 고맙네!", "고맙네! 향이 산마루까지 퍼지겠구먼."] },
+        { "actionId": "struggle_protest", "variant": "", "lines": ["허허… 살살 좀 하게.", "어허, 늙은이를 너무 흔들지 말게."] },
+        { "actionId": "struggle_play", "variant": "", "lines": ["허허, 어디로 데려가는 겐가?", "허허… 바람 쐬러 가는 길인가?"] }
+      ]
+    },
+    {
+      "relicId": 5,
+      "name": "구름결",
+      "preferredActions": ["thank_calm", "struggle_protest"],
+      "stories": [
+        "제 무늬는요… 파낸 자리에 흰 백토와 붉은 자토를 채워 넣은 거예요. 고려가 완성한 기법이래요.",
+        "주꾸미가 청자 접시를 안고 올라왔대요… 어부가 신고한 덕에, 태안 바다에서 청자 실은 고려 배를 찾았어요.",
+        "저는요… 지금 간송미술관에 있어요. 간송 전형필 선생이 2만 원에 사들인 덕분이래요."
+      ],
+      "pools": [
+        { "actionId": "greet", "variant": "", "lines": ["오셨어요? …반가워요.", "구름처럼 살며시 오셨네요."] },
+        { "actionId": "answer_status", "variant": "faded", "lines": ["조금 흐려졌어요… 살살 닦아 주실래요?", "무늬가 뿌예졌어요… 닦아 주시면 좋겠어요."] },
+        { "actionId": "answer_status", "variant": "recent_care", "lines": ["지난번에 닦아 주셔서 아직 맑아요.", "요전 손길 덕분에 무늬가 또렷해요."] },
+        { "actionId": "answer_status", "variant": "default", "lines": ["오늘은 하늘이 맑아서 좋아요.", "저는 괜찮아요… 고마워요."] },
+        { "actionId": "recall_talk", "variant": "", "lines": ["그때 일… 아직 기억하고 있어요.", "지난번 이야기, 구름처럼 떠올라요."] },
+        { "actionId": "wander_greet", "variant": "", "lines": ["어서 오세요…", "천천히 구경하세요."] },
+        { "actionId": "wander_recall", "variant": "", "lines": ["또 와 주셨네요…", "반가워요, 또 오셨네요."] },
+        { "actionId": "thank_calm", "variant": "", "lines": ["살살 닦아 주셔서… 고마워요.", "덕분에 무늬가 맑아졌어요."] },
+        { "actionId": "thank_joyful", "variant": "", "lines": ["하늘처럼 맑아졌어요! 고마워요!", "고마워요! 학이 날아오를 것 같아요."] },
+        { "actionId": "struggle_protest", "variant": "", "lines": ["앗… 깨질까 봐 무서워요. 살살요…", "조심해 주세요… 부딪히면 안 돼요."] },
+        { "actionId": "struggle_play", "variant": "", "lines": ["구름 타고 가는 것 같아요…", "살살 데려가 주시면… 괜찮아요."] }
+      ]
+    },
+    {
+      "relicId": 6,
+      "name": "밤바다",
+      "preferredActions": ["thank_calm", "struggle_protest"],
+      "stories": [
+        "……옻칠 위에 전복 껍데기를 얇게 갈아 박은 거야. 송나라 사신도 극히 정교하다고 했대.",
+        "……내 몸은 국화랑 넝쿨 무늬로 빈틈없어. 넝쿨 줄기는 은이나 구리 같은 금속선으로 냈고. ……가까이서 보면 반짝여.",
+        "……나 같은 고려 나전칠기는 다 합쳐도 15점 정도래. 대부분 외국에 흩어져 있고. ……그러니 여기 오래 있을게."
+      ],
+      "pools": [
+        { "actionId": "greet", "variant": "", "lines": ["……왔어?", "……뭐, 왔으면 됐어."] },
+        { "actionId": "answer_status", "variant": "faded", "lines": ["……좀 흐려졌어. 시간 되면 손봐 줘.", "……광이 죽었네. 닦아 주면 좋고."] },
+        { "actionId": "answer_status", "variant": "recent_care", "lines": ["……지난번에 닦아 줘서 아직 괜찮아.", "……요전에 손봐 준 거, 아직 반짝여."] },
+        { "actionId": "answer_status", "variant": "default", "lines": ["……별일 없어.", "……밤이 조용해서 좋네."] },
+        { "actionId": "recall_talk", "variant": "", "lines": ["……그 자개 얘기, 기억하지?", "……저번에 한 얘기, 잊진 않았어."] },
+        { "actionId": "wander_greet", "variant": "", "lines": ["……구경 왔어?", "……뭐, 천천히 봐."] },
+        { "actionId": "wander_recall", "variant": "", "lines": ["……또 왔네.", "……자주 오네."] },
+        { "actionId": "thank_calm", "variant": "", "lines": ["……고마워.", "……덕분에 좀 반짝이네."] },
+        { "actionId": "thank_joyful", "variant": "", "lines": ["……꽤 마음에 들어. 고마워.", "……이 정도면 최고야. 고마워."] },
+        { "actionId": "struggle_protest", "variant": "", "lines": ["……지문 남잖아. 살살 들어 줘.", "……옻칠 긁힐라. 조심히 옮겨 줘."] },
+        { "actionId": "struggle_play", "variant": "", "lines": ["……뭐, 이번만 봐준다.", "……어디 가는데."] }
+      ]
+    },
+    {
+      "relicId": 9,
+      "name": "묘작이",
+      "preferredActions": ["thank_joyful", "struggle_play"],
+      "stories": [
+        "있잖아! 날 그린 변상벽은 고양이를 하도 잘 그려서 '변고양이'라고 불렸대! 히힛.",
+        "킁킁, 고양이 '묘'는 늙은이 '모'랑 비슷해서 오래 살고, 참새 '작'은 까치 '작'이랑 같아서 기쁘다는 뜻이래!",
+        "히힛, 나는 조선 초기부터 이어진 우리 영모화 전통을 이어받았대! 새랑 동물을 그린 그림 말이야!"
+      ],
+      "pools": [
+        { "actionId": "greet", "variant": "", "lines": ["킁킁, 주인이다! 놀자!", "히힛, 왔어? 나 심심했어!"] },
+        { "actionId": "answer_status", "variant": "faded", "lines": ["킁킁… 나 좀 흐려졌어. 닦아 줄래?", "앗, 털이 뿌예졌어! 닦아 줘!"] },
+        { "actionId": "answer_status", "variant": "recent_care", "lines": ["히힛, 저번에 닦아 줘서 아직 반짝반짝!", "킁킁, 요전에 닦아 준 냄새 아직 나!"] },
+        { "actionId": "answer_status", "variant": "default", "lines": ["히힛, 나 오늘 기분 최고야!", "킁킁, 오늘은 뭐 하고 놀까?"] },
+        { "actionId": "recall_talk", "variant": "", "lines": ["앗, 그때 일 기억나! 히힛.", "킁킁, 저번에 그거 재밌었지?"] },
+        { "actionId": "wander_greet", "variant": "", "lines": ["킁킁, 누구야?", "히힛, 새 얼굴이다!"] },
+        { "actionId": "wander_recall", "variant": "", "lines": ["앗, 또 왔다! 히힛.", "킁킁, 아는 냄새다!"] },
+        { "actionId": "thank_calm", "variant": "", "lines": ["고마워! 히힛.", "킁킁, 개운하다. 고마워!"] },
+        { "actionId": "thank_joyful", "variant": "", "lines": ["히힛, 관리해 줘서 너무 좋아!", "앗싸, 반짝반짝! 고마워!"] },
+        { "actionId": "struggle_protest", "variant": "", "lines": ["앗, 간지러워! 히힛, 살살 안아 줘~", "히잉, 어지러워~ 그래도 같이 가는 거지?"] },
+        { "actionId": "struggle_play", "variant": "", "lines": ["히힛, 날아간다~!", "킁킁, 어디 가? 같이 놀자!"] }
+      ]
+    }
+  ],
+  "fallback": {
+    "relicId": 0,
+    "name": "기본",
+    "preferredActions": ["thank_calm", "struggle_protest"],
+    "storyPrefix": "",
+    "storyTail": " 제 이야기예요.",
+    "stories": [],
+    "pools": [
+      { "actionId": "greet", "variant": "", "lines": ["반가워요.", "어서 오세요."] },
+      { "actionId": "answer_status", "variant": "faded", "lines": ["조금 흐려졌어요. 관리해 주실래요?"] },
+      { "actionId": "answer_status", "variant": "recent_care", "lines": ["지난번 관리 덕분에 괜찮아요."] },
+      { "actionId": "answer_status", "variant": "default", "lines": ["저는 잘 지내요."] },
+      { "actionId": "recall_talk", "variant": "", "lines": ["지난번 일, 기억하고 있어요."] },
+      { "actionId": "wander_greet", "variant": "", "lines": ["어서 오세요."] },
+      { "actionId": "wander_recall", "variant": "", "lines": ["또 오셨네요."] },
+      { "actionId": "thank_calm", "variant": "", "lines": ["고마워요."] },
+      { "actionId": "thank_joyful", "variant": "", "lines": ["정말 고마워요!"] },
+      { "actionId": "tell_story", "variant": "", "lines": ["제게도 오래된 이야기가 있어요."] },
+      { "actionId": "struggle_protest", "variant": "", "lines": ["앗, 조심해 주세요."] },
+      { "actionId": "struggle_play", "variant": "", "lines": ["어디로 가요?"] }
+    ]
+  }
+}
