@@ -66,7 +66,7 @@ namespace Jamkkaebi.Npc
     [Serializable]
     public sealed class StoryPiece
     {
-        /// <summary>대화 기억 요약에 쓰는 짧은 이름. 예: "역참 증표".</summary>
+        /// <summary>대화 기억 요약에 쓰는 짧은 이름. 예: "암행어사".</summary>
         public string topic;
 
         /// <summary>이야기할 사실 한 문장. verified_story 사실의 값으로 넣는다.</summary>

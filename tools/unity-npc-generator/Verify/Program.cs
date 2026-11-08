@@ -232,7 +232,7 @@ public static class Program
         rotation.Restore(8, new[] { 0, 0, -1, 5 });
         Check(rotation.Next(8, 3) == 1, "겹치거나 음수인 기록은 버리고, 범위 밖 번호는 건너뜀");
 
-        Check(new StoryPiece { topic = "역참 증표" }.MemorySummary() == "주인에게 역참 증표 이야기를 들려줬다", "기억 요약 모양이 장면과 같음");
+        Check(new StoryPiece { topic = "암행어사" }.MemorySummary() == "주인에게 암행어사 이야기를 들려줬다", "기억 요약 모양이 장면과 같음");
     }
 
     // ---------- 공통 금칙어 ----------
@@ -248,7 +248,7 @@ public static class Program
             "닥쳐, 귀찮아.", "저리 가.", "관심 없어.", "쳇, 됐거든.", "바보 같아.", "시끄러워, 저리 비켜.", "씨발", "개 새 끼",
             // 정상 문장에도 나오는 말은 patterns 로 욕으로 쓰인 꼴만 찾는다
             "시발", "씨바 진짜", "닥쳐!", "입 닥쳐", "꺼져!", "당장 꺼져", "미친놈", "너 미쳤어?", "미쳤냐?", "이 새끼야",
-            "저 새끼.", "졸라 짜증나", "등신 같은", "니미 뭐야"
+            "저 새끼.", "졸라 짜증나", "등신 같은", "니미 뭐야", "염병하네", "죽여버린다", "너 죽여", "다 죽인다"
         };
         foreach (string line in blocked)
         {
@@ -261,7 +261,8 @@ public static class Program
             // 욕과 글자가 겹치지만 정상인 문장 (실화·문화재 이야기에 나올 만한 꼴)
             "영향을 미친 유물이야", "큰 영향을 미쳤다네", "위기가 닥치는 날", "어려움이 닥쳐도 괜찮아", "불이 꺼져 있구먼",
             "등신불처럼 앉아 있구려", "이곳이 시발점이었지", "꽃씨 바구니", "할머니 미소가 따뜻해", "이 새끼 참새 좀 봐!",
-            "저 새끼 고양이", "아직 새끼야!", "주인을 졸라서 놀았어"
+            "저 새끼 고양이", "아직 새끼야!", "주인을 졸라서 놀았어", "전염병이 돌던 때에도 버텼다네", "숨죽여 기다렸어",
+            "숨을 죽여 봐", "목소리를 죽여서 말해 주오", "발소리를 죽여 다가왔지", "숨죽인다네", "기척을 죽여 숨었지"
         };
         foreach (string line in allowed)
         {
@@ -1271,7 +1272,7 @@ public static class Program
             new KeyValuePair<string, NpcContextInput>("구름결 안부·흐려짐", Owner(5, NpcInputs.AskStatus, "FADED", 9)),
             new KeyValuePair<string, NpcContextInput>("구름결 안부·이틀 전 관리", Owner(5, NpcInputs.AskStatus, "CLEAR", 2)),
             new KeyValuePair<string, NpcContextInput>("밤바다 안부·지난 이야기", Owner(6, NpcInputs.AskStatus, "CLEAR", 5,
-                    new MemoryEntry(3, NpcActions.TellStory, "주인에게 자개 박기 이야기를 들려줬다"))),
+                    new MemoryEntry(3, NpcActions.TellStory, "주인에게 옻칠 자개 이야기를 들려줬다"))),
             new KeyValuePair<string, NpcContextInput>("향산이 안부·재봉인", Owner(2, NpcInputs.AskStatus, "RESEALED", 16)),
             new KeyValuePair<string, NpcContextInput>("묘작이 관리·오랜만", Owner(9, NpcInputs.Care, "FADED", 10)),
             new KeyValuePair<string, NpcContextInput>("밤바다 관리", Owner(6, NpcInputs.Care, "CLEAR", 3)),
@@ -1318,10 +1319,10 @@ public static class Program
         Check(builder.Build(Owner(5, NpcInputs.AskStatus, "CLEAR", 4)).KeyFact == "none", "나흘 전 관리는 '최근'이 아님 (3일 기준)");
 
         // ③ 지난 대화
-        var told = new MemoryEntry(3, NpcActions.TellStory, "주인에게 자개 박기 이야기를 들려줬다");
+        var told = new MemoryEntry(3, NpcActions.TellStory, "주인에게 옻칠 자개 이야기를 들려줬다");
         NpcContext recall = builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, new MemoryEntry(6, NpcActions.TellStory, "주인에게 해외 소장 이야기를 들려줬다"), told));
         Check(recall.KeyFact == "recall" && Acts(recall) == "recall_talk"
-                && recall.Request.Situation == "주인이 안부를 물었다. 너는 사흘 전 주인에게 자개 박기 이야기를 들려줬던 일이 떠올랐다."
+                && recall.Request.Situation == "주인이 안부를 물었다. 너는 사흘 전 주인에게 옻칠 자개 이야기를 들려줬던 일이 떠올랐다."
                 && recall.Request.Facts.Count == 0 && recall.Request.Memory.Count == 1 && recall.Request.Memory[0] == told,
                 "안부·지난 대화: 가장 최근 기억 하나, 상관없는 상태는 뺌 ← " + recall.Request.Situation);
         Check(recall.MemoryToSave != null && recall.MemoryToSave.ActionId == NpcActions.RecallTalk, "꺼낸 뒤 '지난 대화를 꺼냈다'를 기억에 남김");

@@ -273,16 +273,22 @@ def rule_line(chars, sentences=None):
     return f"- 대사는 한국어로, {limit}, 줄바꿈 없이 쓴다."
 
 
-def line_rules(args, scene, with_examples):
-    """대사에 걸리는 규칙. 예시를 싣지 않으면 예시 규칙도 뺀다."""
+def line_rules(args, scene, with_examples, with_memory=True):
+    """대사에 걸리는 규칙. 예시를 싣지 않으면 예시 규칙도, 대화 기억을 싣지 않으면 기억 규칙도 뺀다.
+
+    기억 규칙(RULE_STORY_NEW · RULE_NO_REPEAT)은 '최근 이 상대와 있었던 일' 칸을 가리킨다. no_memory 방식은
+    그 칸을 빼므로 규칙도 함께 빼야, 기억 필드가 있고 없음의 차이만 비교된다 (C# PromptAssembler 도
+    기억이 있을 때만 이 두 규칙과 칸을 함께 넣는다).
+    """
+    has_memory = with_memory and bool(scene.get("memory"))
     rules = [RULE_BOND, RULE_FACTS, RULE_EMOTION]
     if with_examples:
         rules.append(RULE_EXAMPLES)
     if scene["input"] == "listen_story":
         rules.append(RULE_STORY)
-        if scene.get("memory"):
+        if has_memory:
             rules.append(RULE_STORY_NEW)
-    if scene.get("memory"):
+    if has_memory:
         rules.append(RULE_NO_REPEAT)
     rules.append(rule_line(line_chars(args, scene), scene.get("maxSentences")))
     return rules
@@ -375,9 +381,10 @@ SCHEMA_LINE = {"type": "object", "properties": {"line": {"type": "string"}}, "re
 
 def build_prompts(args, variant, scene, persona, content):
     """(시스템, 사용자, 스키마, 상황) 을 돌려준다. two_step 의 둘째 단계는 첫 결과가 있어야 만든다."""
+    with_memory = variant != "no_memory"
     situation = situation_block(scene, content,
                                 facts_as_sentence=variant == "facts_sentence",
-                                with_memory=variant != "no_memory")
+                                with_memory=with_memory)
     candidates = candidates_block(scene, content)
     with_examples = variant != "no_examples"
     persona_text = persona_block(persona, with_examples, scene["mode"], scene["input"])
@@ -386,7 +393,7 @@ def build_prompts(args, variant, scene, persona, content):
         user = f"{situation}\n\n{candidates}\n\n{FORMAT_CHOICE}"
         return system, user, schema_choice(scene, with_line=False), situation
     system = "\n".join([persona_text, "", "규칙:", RULE_CHOOSE, RULE_MEANING,
-                        *line_rules(args, scene, with_examples), RULE_DATA, RULE_JSON])
+                        *line_rules(args, scene, with_examples, with_memory), RULE_DATA, RULE_JSON])
     user = f"{situation}\n\n{candidates}\n\n{FORMAT_SINGLE}"
     return system, user, schema_choice(scene, with_line=True), situation
 

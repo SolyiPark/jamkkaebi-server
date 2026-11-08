@@ -7,7 +7,7 @@ AI 반응 생성기의 클라이언트 쪽 코드다. 생성기 두 가지와 �
   - 나중에는 SLM이 시간 초과·실패했을 때, 저사양 기기에서 AI를 껐을 때 대신 쓴다.
 - **컨텍스트 구성기:** 게임 상태(서버 응답 + 기기의 대화 기억)를 반응 요청으로 바꾼다. 후보를 정하고, **가장 중요한 사실 하나를 상황 문장에 적고**, 관련 있는 사실·기억만 넣고, 실화를 돌려 가며 고른다.
 - **요청 관리자:** 반응 요청을 받아 SLM 으로 만들어 보고, 안 되면(시간 초과·저사양 기기·모델 미준비·검사 실패 등) 기본 대사로 대신한다. 화면 종료·NPC 전환·새 요청으로 밀린 결과는 버린다. **게임 코드는 이것만 부르면 된다.**
-- **SLM 생성기:** 프롬프트 조립 → 모델 호출 → 출력 검사를 하고, 검사를 통과한 반응만 돌려준다. 모델 런타임은 `INpcModelBackend` 로 감싸 끼운다(구현은 아직 없음).
+- **SLM 생성기:** 프롬프트 조립 → 모델 호출 → 출력 검사를 하고, 검사를 통과한 반응만 돌려준다. 모델 런타임은 `INpcModelBackend` 로 감싸 끼운다 — 폰은 `LlmUnityModelBackend`, 에디터·개발은 `LmStudioModelBackend`.
 - **LLMUnity 백엔드 (출시용):** 폰 안에서 모델을 돌리는 `INpcModelBackend`. LLMUnity(llama.cpp)로 모델을 올리고 내리며, 모든 LLMUnity 호출을 Unity 메인 스레드에서 한다. 실기기 시험 순서는 [DEVICE_TEST.md](DEVICE_TEST.md).
 - **LM Studio 백엔드 (개발용):** PC의 LM Studio 서버에 HTTP로 붙는 `INpcModelBackend`. Unity 에디터에서 진짜 모델(Gemma 4 E2B)로 흐름 전체를 돌려 볼 때 쓴다.
 - **출력 검사기:** 모델 출력의 JSON, 후보 포함 여부, 대사 길이, 줄바꿈, 금칙어를 확인한다. 통과하지 못하면 `Failed(InvalidOutput)`.
@@ -136,7 +136,7 @@ if (response.ShouldShow)
 |---|---|---|---|---|
 | 안부 묻기 | ① | 흐려짐 · 재봉인 | "주인이 안부를 물었다. 너는 9일 동안 관리를 받지 못해 흐려졌다." | 안부 답하기 · 선명도, 마지막 관리 |
 | | ② | 3일 안에 관리 받음 | "… 이틀 전에 주인이 너를 닦아 관리해 주었다." | 안부 답하기 · 선명도, 마지막 관리 |
-| | ③ | 7일 안의 대화 기억 (바로 전에 꺼낸 적 없음) | "… 너는 사흘 전 주인에게 자개 박기 이야기를 들려줬던 일이 떠올랐다." | 지난 대화 꺼내기 · 사실 없음 · 그 기억 하나 |
+| | ③ | 7일 안의 대화 기억 (바로 전에 꺼낸 적 없음) | "… 너는 사흘 전 주인에게 옻칠 자개 이야기를 들려줬던 일이 떠올랐다." | 지난 대화 꺼내기 · 사실 없음 · 그 기억 하나 |
 | | ④ | 그 밖 | "주인이 안부를 물었다." | 안부 답하기 · 선명도, 마지막 관리 |
 | 관리하기 | ① | 관리 전 7일 넘게 지남 (흐려짐·재봉인) | "주인이 오랜만에 관리하기를 골랐고, 주인이 너를 관리해 주었다." | 감사 둘 · 관리 결과(흐려짐→선명), 마지막 관리 |
 | | ② | 그 밖 | "주인이 관리하기를 골랐고, 주인이 너를 관리해 주었다." | 감사 둘 · 관리 결과 |
@@ -185,7 +185,7 @@ SLM 대사는 출력 검사기(`NpcOutputValidator`)가 이 필터로 거르므�
 ```csharp
 var filter = new NpcLineFilter(NpcContentLoader.FromResources<ForbiddenCatalog>("Npc/forbidden"));
 var slm = new SlmReactionGenerator(
-        backend,                                   // INpcModelBackend 구현 (런타임마다 하나, 아직 없음). 모델 없는 빌드면 slm 대신 null
+        backend,                                   // INpcModelBackend: 폰은 LlmUnityModelBackend, 에디터·개발은 LmStudioModelBackend. 모델 없는 빌드면 slm 대신 null
         new PromptAssembler(personas, actions),
         new NpcOutputValidator(filter));
 var manager = new NpcRequestManager(slm, new RuleBasedReactionGenerator(lines))

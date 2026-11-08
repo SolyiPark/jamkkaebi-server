@@ -5,8 +5,9 @@ using System.Threading.Tasks;
 namespace Jamkkaebi.Npc
 {
     /// <summary>
-    /// 모델 런타임(LLMUnity, LiteRT-LM 등)을 감싸는 자리. 런타임마다 하나씩 구현한다 — 이 패키지에는 구현이 없다
-    /// ("모델 런타임 연결" 작업). 무거운 일은 백그라운드 스레드에서 하고, 결과만 Task 로 돌려준다.
+    /// 모델 런타임(LLMUnity, LiteRT-LM 등)을 감싸는 자리. 런타임마다 하나씩 구현한다 — 이 패키지에는
+    /// <see cref="LlmUnityModelBackend"/>(폰, LLMUnity)와 <see cref="LmStudioModelBackend"/>(에디터·개발용, PC 의 LM Studio)가 있다.
+    /// 무거운 일은 백그라운드 스레드에서 하고, 결과만 Task 로 돌려준다.
     /// </summary>
     public interface INpcModelBackend
     {

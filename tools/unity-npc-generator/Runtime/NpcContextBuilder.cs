@@ -376,7 +376,7 @@ namespace Jamkkaebi.Npc
             return null;
         }
 
-        // "주인에게 역참 증표 이야기를 들려줬다" → "너는 이틀 전 주인에게 역참 증표 이야기를 들려줬던 일이 떠올랐다."
+        // "주인에게 암행어사 이야기를 들려줬다" → "너는 이틀 전 주인에게 암행어사 이야기를 들려줬던 일이 떠올랐다."
         private static string RecallSentence(MemoryEntry memory)
         {
             string summary = memory.Summary.Trim().TrimEnd('.');
