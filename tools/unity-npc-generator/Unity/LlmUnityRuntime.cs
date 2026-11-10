@@ -65,28 +65,33 @@ namespace Jamkkaebi.Npc
                 }
             });
 
+            bool ready;
             try
             {
                 holder.SetActive(true); // Awake: 첫 실행이면 모델을 내려받고(Download on Start), 이어서 모델을 올린다
-                if (!await setup)
+                ready = await setup;
+                if (ready)
                 {
-                    throw new InvalidOperationException("모델 파일을 준비하지 못했다 (내려받기 실패 · 저장 공간 부족 · 모델 관리자에 등록 안 됨)");
+                    // 실패하면 failed 를 돌려주지 않고 LLMUnityException 을 던진다 (LLMUnity 3.0.3)
+                    await llm.WaitUntilReady();
+                    // reasoning 은 모델이 올라온 뒤에 넣는다. LLMUnity 3.0.3 의 setter 는 값을 저장하지 않고
+                    // 바로 llmService.EnableReasoning 을 부르는데, 시작 전에는 llmService 가 null 이라 NullReferenceException 이 난다
+                    llm.reasoning = !options.DisableThinking;
                 }
-                // 실패하면 failed 를 돌려주지 않고 예외를 던진다 (LLMUnity 3.0.3)
-                await llm.WaitUntilReady();
-                // reasoning 은 모델이 올라온 뒤에 넣는다. LLMUnity 3.0.3 의 setter 는 값을 저장하지 않고
-                // 바로 llmService.EnableReasoning 을 부르는데, 시작 전에는 llmService 가 null 이라 NullReferenceException 이 난다
-                llm.reasoning = !options.DisableThinking;
             }
             catch (Exception e)
             {
+                // 예외 종류와 상관없이 모델 이름과 기기 로그 안내를 붙이고, 원래 예외는 InnerException 으로 남긴다
                 Object.Destroy(holder);
-                if (e is InvalidOperationException)
-                {
-                    throw;
-                }
                 throw new InvalidOperationException("LLM 이 모델 '" + options.Model + "' 를 올리지 못했다. "
                         + "메모리가 부족하거나, 이 LLMUnity 의 llama.cpp 가 모델 구조를 모를 수 있다 (예: gemma4). 기기 로그를 본다", e);
+            }
+
+            if (!ready)
+            {
+                Object.Destroy(holder);
+                throw new InvalidOperationException("모델 파일 '" + options.Model + "' 을 준비하지 못했다 "
+                        + "(내려받기 실패 · 저장 공간 부족 · 모델 관리자에 등록 안 됨)");
             }
             return new Session(holder, agent);
         }
