@@ -102,6 +102,7 @@
 3. **adb**: Unity가 함께 깐 것을 쓴다.
    - Windows: `<Unity 에디터 폴더>\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe`
    - Mac: `/Applications/Unity/Hub/Editor/<버전>/PlaybackEngines/AndroidPlayer/SDK/platform-tools/adb`
+   - 경로가 다르면 Unity Hub → Installs → 에디터의 ⚙ → **Show in Finder/Explorer** 로 설치 폴더를 열어 `PlaybackEngines/AndroidPlayer/SDK/platform-tools` 를 찾는다.
    - `adb devices` 로 폰이 `device` 로 보이면 된다. `unauthorized` 면 폰에서 허용을 누른다.
 4. **빌드 설정**: Android 플랫폼으로 전환(Switch Platform). Player Settings → Other Settings 에서
    - Scripting Backend: **IL2CPP**
@@ -136,7 +137,7 @@
 
 | 정할 것 | 어떻게 |
 |---|---|
-| **어디가 느린가** | CSV의 **첫응답ms** = 프롬프트를 읽는 시간, **전체ms − 첫응답ms** = 대사를 쓰는 시간. S22에서는 앞쪽이 대부분이었다 (아래 참고). |
+| **어디가 느린가** | 출처가 `SLM` 이고 첫응답ms 가 0 이상인 행에서만 나눠 본다: **첫응답ms** = 프롬프트를 읽는 시간, **전체ms − 첫응답ms** = 대사를 쓰는 시간. 출처가 `기본` 인 행(시간 초과·검사 실패)은 첫응답ms 가 `-1` 이라 이렇게 나눌 수 없고, 전체ms 는 기본 대사로 넘어가기까지 기다린 시간이다. S22에서는 프롬프트 읽기가 대부분이었다 (아래 참고). |
 | 시간 초과(`SlmTimeout`, 게임 기본 3초) | 요약의 "SLM 전체 시간 90%" 값을 본다. 3초 안팎이면 그 값에 여유를 조금 더한다. 훨씬 길면 그 기기는 SLM을 끈다. |
 | SLM 을 끌 기기(`SlmEnabled`) | 모델을 못 올렸거나, 앱이 꺼졌거나(메모리), 90% 값이 너무 긴 기기. 기기 RAM(`SystemInfo.systemMemorySize`) 같은 기준으로 묶는다. |
 | 형식 제약(Grammar) | "기본 대사로 대신" 이유에 `InvalidOutput NotJson` 이 많으면 Grammar 를 `JsonSchema`, 그다음 `None` 으로 바꿔 다시 잰다. |
@@ -159,7 +160,7 @@
 - 실패했으면 그때의 로그 (`adb logcat -s Unity` 출력, 에디터면 콘솔 로그)
 
 **참고: S22 결과에서 본 것**
-- 대사를 만든 장면은 첫 응답까지 72~111초, 그 뒤 대사를 쓰는 데 6~11초였다. **느린 원인은 프롬프트 읽기**다.
+- 대사를 만든 장면(출처 `SLM` 4개)은 첫 응답까지 72~111초, 그 뒤 대사를 쓰는 데 6~11초였다. **느린 원인은 프롬프트 읽기**다.
 - 같은 도깨비가 연달아 나온 장면(S03→S04, S05→S06)은 뒤 장면이 43~50초로 절반쯤 빨랐다. 앞 장면에서 읽은 시스템 프롬프트를 다시 쓴 것으로 보인다.
 - 이야기 장면(S10, S11, S18~S20)은 모두 120초 안에 끝나지 않았다.
 

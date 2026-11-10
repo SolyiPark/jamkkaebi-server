@@ -39,15 +39,14 @@ namespace Jamkkaebi.Npc
                 throw new InvalidOperationException("LlmUnityOptions.Model 에 GGUF 파일 이름을 적는다");
             }
 
-            // 진행률 콜백은 내려받기가 시작되기 전에 등록해 둔다. 대기 자체는 LLM.Awake 가 완료 표시를 켠 뒤에 끝난다
+            // 진행률 콜백은 내려받기(LLMManager.Setup)가 시작되기 전에 직접 등록하고, 끝나면 finally 에서 뗀다.
+            // LLM.WaitUntilModelSetup(콜백) 으로 등록하면 대기도 함께 시작되는데, LLM.Awake 까지 가지 못하고 실패하면
+            // 그 대기가 끝나지 않고 콜백도 정적 목록에 남는다
             Action<float> progress = options.DownloadProgress;
-            Task<bool> setup = LLM.WaitUntilModelSetup(p =>
+            if (progress != null)
             {
-                if (progress != null)
-                {
-                    progress(p);
-                }
-            });
+                LLMManager.downloadProgressCallbacks.Add(progress);
+            }
 
             GameObject holder = null;
             LLMAgent agent = null;
@@ -80,9 +79,9 @@ namespace Jamkkaebi.Npc
                     agent = holder.AddComponent<LLMAgent>();
                     agent.llm = llm;
 
-                    // 모델 준비 완료 표시(LLM.modelSetupComplete)는 LLM.Awake 안에서만 켜진다. 켠 뒤에 기다려야 끝난다
+                    // 모델 준비 완료 표시(LLM.modelSetupComplete)는 LLM.Awake 안에서만 켜진다. 그래서 켠 뒤에만 기다린다
                     holder.SetActive(true);
-                    ready = await setup;
+                    ready = await LLM.WaitUntilModelSetup();
                     if (ready)
                     {
                         // 실패하면 failed 를 돌려주지 않고 LLMUnityException 을 던진다 (LLMUnity 3.0.3)
@@ -102,6 +101,13 @@ namespace Jamkkaebi.Npc
                 }
                 throw new InvalidOperationException("LLM 이 모델 '" + options.Model + "' 를 올리지 못했다. "
                         + "메모리가 부족하거나, 이 LLMUnity 의 llama.cpp 가 모델 구조를 모를 수 있다 (예: gemma4). 기기 로그를 본다", e);
+            }
+            finally
+            {
+                if (progress != null)
+                {
+                    LLMManager.downloadProgressCallbacks.Remove(progress);
+                }
             }
 
             if (!ready)
