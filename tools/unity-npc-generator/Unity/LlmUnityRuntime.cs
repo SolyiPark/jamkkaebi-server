@@ -39,20 +39,6 @@ namespace Jamkkaebi.Npc
                 throw new InvalidOperationException("LlmUnityOptions.Model 에 GGUF 파일 이름을 적는다");
             }
 
-            // 첫 실행이면 여기서 모델을 내려받는다 (Download on Build). 이미 있으면 바로 끝난다
-            Action<float> progress = options.DownloadProgress;
-            bool ready = await LLM.WaitUntilModelSetup(p =>
-            {
-                if (progress != null)
-                {
-                    progress(p);
-                }
-            });
-            if (!ready)
-            {
-                throw new InvalidOperationException("모델 파일을 준비하지 못했다 (내려받기 실패 · 저장 공간 부족 · 모델 관리자에 등록 안 됨)");
-            }
-
             var holder = new GameObject("NpcLLM");
             holder.transform.SetParent(host.transform, false);
             holder.SetActive(false); // 설정을 마치기 전에 LLM 이 시작하지 않게 꺼 둔다 (LLMUnity README 의 방법)
@@ -62,19 +48,50 @@ namespace Jamkkaebi.Npc
             llm.numGPULayers = options.NumGpuLayers;
             llm.numThreads = options.NumThreads;
             llm.contextSize = options.ContextSize;
-            llm.reasoning = !options.DisableThinking;
             llm.dontDestroyOnLoad = false;
 
             LLMAgent agent = holder.AddComponent<LLMAgent>();
             agent.llm = llm;
 
-            holder.SetActive(true);
-            await llm.WaitUntilReady();
-            if (llm.failed)
+            // 모델 준비 완료 표시(LLM.modelSetupComplete)는 LLM.Awake 안에서만 켜진다.
+            // 그래서 LLM 을 켜기 전에 기다리기 시작만 해 두고(진행률 콜백을 Awake 보다 먼저 등록), 켠 뒤에 await 한다.
+            // LLM 을 켜기 전에 await 하면 아무도 표시를 켜 주지 않아 영원히 기다린다.
+            Action<float> progress = options.DownloadProgress;
+            Task<bool> setup = LLM.WaitUntilModelSetup(p =>
             {
+                if (progress != null)
+                {
+                    progress(p);
+                }
+            });
+
+            bool ready;
+            try
+            {
+                holder.SetActive(true); // Awake: 첫 실행이면 모델을 내려받고(Download on Start), 이어서 모델을 올린다
+                ready = await setup;
+                if (ready)
+                {
+                    // 실패하면 failed 를 돌려주지 않고 LLMUnityException 을 던진다 (LLMUnity 3.0.3)
+                    await llm.WaitUntilReady();
+                    // reasoning 은 모델이 올라온 뒤에 넣는다. LLMUnity 3.0.3 의 setter 는 값을 저장하지 않고
+                    // 바로 llmService.EnableReasoning 을 부르는데, 시작 전에는 llmService 가 null 이라 NullReferenceException 이 난다
+                    llm.reasoning = !options.DisableThinking;
+                }
+            }
+            catch (Exception e)
+            {
+                // 예외 종류와 상관없이 모델 이름과 기기 로그 안내를 붙이고, 원래 예외는 InnerException 으로 남긴다
                 Object.Destroy(holder);
                 throw new InvalidOperationException("LLM 이 모델 '" + options.Model + "' 를 올리지 못했다. "
-                        + "메모리가 부족하거나, 이 LLMUnity 의 llama.cpp 가 모델 구조를 모를 수 있다 (예: gemma4). 기기 로그를 본다");
+                        + "메모리가 부족하거나, 이 LLMUnity 의 llama.cpp 가 모델 구조를 모를 수 있다 (예: gemma4). 기기 로그를 본다", e);
+            }
+
+            if (!ready)
+            {
+                Object.Destroy(holder);
+                throw new InvalidOperationException("모델 파일 '" + options.Model + "' 을 준비하지 못했다 "
+                        + "(내려받기 실패 · 저장 공간 부족 · 모델 관리자에 등록 안 됨)");
             }
             return new Session(holder, agent);
         }
