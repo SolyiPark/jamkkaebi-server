@@ -1,19 +1,19 @@
 # 실기기 시험 (LLMUnity)
 
-폰 안에서 Gemma가 도깨비 대사를 만들 수 있는지, 얼마나 빠른지, 메모리와 발열은 괜찮은지 재는 순서다.
+폰 안에서 **Kanana 1.5 2.1B**가 도깨비 대사를 만들 수 있는지, 얼마나 빠른지, 메모리와 발열은 괜찮은지 재는 순서다.
 시험 장면(`NpcDeviceTestRunner`)이 프롬프트 시험의 18장면을 폰에서 하나씩 돌려, 결과를 화면에 보여 주고 CSV로 저장한다.
-안드로이드 기준으로 썼다. iPhone은 5단계를 본다.
+안드로이드 기준으로 썼다. 
 
 ## 0. 시작 전에 알아 둘 것
 
 | 항목 | 내용 |
 |---|---|
-| **Gemma 4를 읽을 수 있나** | LLMUnity 최신판(v3.0.3, 2026년 3월)에 들어 있는 llama.cpp(b8209)는 Gemma 4(2026년 4월 출시)보다 먼저 나왔다. **Gemma 4 E2B를 못 올릴 가능성이 높다.** 3단계에서 에디터로 먼저 확인하고, 안 되면 폰으로 넘어가지 말고 결과를 알린다. |
-| 안 되면 | ① LLMUnity 새 버전이 나왔는지 확인한다. ② LLMUnity가 지원하는 작은 모델(예: Qwen 3.5 2B)로 흐름과 속도를 먼저 재고, 그 모델로 `run.py` 품질 시험을 다시 한다. ③ 런타임(LiteRT-LM 등)을 다시 검토한다. |
-| 모델 파일 | `gemma-4-E2B-it-Q4_K_M.gguf` (3,427,880,384바이트, 약 3.4GB)<br>주소: `https://huggingface.co/lmstudio-community/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf`<br>같은 폴더의 `mmproj-…gguf`(그림 읽기용)는 받지 않는다. |
-| 기기 | RAM 8GB 이상 기기부터 시험한다. 여유 저장 공간 **4GB 이상**, 첫 실행은 **Wi-Fi**에서 (모델 3.4GB를 받는다). LLMUnity는 모바일에 1~2B 모델을 권한다. |
+| 모델 | **Kanana 1.5 2.1B Instruct** (카카오, Apache 2.0). 구조가 Llama 라 LLMUnity 3.0.3 의 llama.cpp(b8209)로 올라간다. Gemma 4 E2B 는 이 llama.cpp 가 구조를 몰라 뺐다. |
+| 모델 파일 | `kanana-1.5-2.1b-instruct-2505-q4_k_m.gguf` (약 1.5GB). PC 시험(LM Studio)에 쓴 것과 같은 파일이다.<br>주소: `https://huggingface.co/TaeyoungLeeJack/kanana-1.5-2.1b-instruct-2505-Q4_K_M-GGUF/resolve/main/kanana-1.5-2.1b-instruct-2505-q4_k_m.gguf` (공식 GGUF 가 없어 변환본이다. 받기 전에 저장소 페이지에서 파일 이름을 확인한다) |
+| 프롬프트 | `PromptAssembler` 가 `run.py` 와 같은 프롬프트를 만든다(2026-11-11 판, `tools/npc-prompt-test/PROMPT_CHANGES.md`). 출력 검사 전에 어미를 말투에 맞게 고치는 단계가 켜져 있다(`NpcOutputValidator.NormalizeSpeech`). |
+| 안 되면 | ① 콘솔 로그(`unknown model architecture` 등)를 저장해 알린다. ② 같은 구조인 Mi:dm 2.0 Mini 로 흐름을 먼저 본다. ③ 런타임(LiteRT-LM 등)을 다시 검토한다. |
+| 기기 | RAM 6GB 이상 기기부터(8GB 권장). 여유 저장 공간 **2GB 이상**, 첫 실행은 **Wi-Fi**에서 (모델 1.5GB를 받는다). |
 | Unity 버전 | 2022.3.16f1 이상 (LLMUnity 3.0.3 요구) |
-| iOS | **Mac과 Xcode가 있어야 한다.** Windows만으로는 iOS 빌드를 못 한다. |
 
 ## 1. 코드 받기
 
@@ -38,7 +38,7 @@
 
    | 가져올 것 | 넣을 곳 |
    |---|---|
-   | `unity-npc-generator/Runtime/*.cs` (15개) | `Assets/Scripts/Npc/` |
+   | `unity-npc-generator/Runtime/*.cs` (16개, `NpcLineChecks.cs` 포함) | `Assets/Scripts/Npc/` |
    | `unity-npc-generator/Unity/*.cs` (2개) | `Assets/Scripts/Npc/Unity/` |
    | `unity-npc-generator/Data/*.json` (4개) + `npc-prompt-test/data/scenes.json` | `Assets/Resources/Npc/` |
 
@@ -57,8 +57,8 @@
    - 심볼이 정말 켜졌는지: `Assets/Scripts/Npc/Unity/LlmUnityRuntime.cs` 9번째 줄 `{` 아래에 `이건_일부러_넣은_오류;` 를 넣고 Ctrl + R → **빨간 줄이 생기면 켜진 것**이다. 확인 뒤 그 줄을 지우고 다시 0개인지 본다.
 7. **모델 등록**
    - 빌드에 넣지 않을 장면(예: `ModelSetup`)을 하나 만들고, 빈 게임 오브젝트에 LLM 컴포넌트를 붙인다.
-   - LLM 컴포넌트의 모델 관리자에서 **Download model** → 0단계의 모델 주소를 넣는다. 에디터 시험에 쓰려고 PC에도 3.4GB를 받는다. 등록된 파일 이름(`gemma-4-E2B-it-Q4_K_M.gguf`)을 확인한다.
-   - **Download on Build** 를 켠다. 3.4GB를 앱에 넣지 않고 폰에서 첫 실행 때 받는다. 주소로 등록해야 이 기능이 쓸 주소를 안다.
+   - LLM 컴포넌트의 모델 관리자에서 **Download model** → 0단계의 모델 주소를 넣는다. 에디터 시험에 쓰려고 PC에도 1.5GB를 받는다(LM Studio 폴더의 같은 파일을 Load model 로 골라도 된다). 등록된 파일 이름(`kanana-1.5-2.1b-instruct-2505-q4_k_m.gguf`)을 확인한다.
+   - **Download on Build** 를 켠다. 1.5GB를 앱에 넣지 않고 폰에서 첫 실행 때 받는다. 주소로 등록해야 이 기능이 쓸 주소를 안다.
 8. **시험 장면 만들기**
    - 새 장면 `NpcDeviceTest` → 빈 게임 오브젝트 → `NpcDeviceTestRunner` 컴포넌트를 붙인다.
    - Inspector 값:
@@ -66,12 +66,13 @@
      | 칸 | 값 | 설명 |
      |---|---|---|
      | Backend | `LlmUnity` | 폰 안 모델 |
-     | Model File | `gemma-4-E2B-it-Q4_K_M.gguf` | 7번에서 등록한 이름 그대로 |
+     | Model File | `kanana-1.5-2.1b-instruct-2505-q4_k_m.gguf` | 7번에서 등록한 이름 그대로 |
      | Gpu Layers | `-1` | 자동 (안드로이드는 0 = CPU, iOS는 99) |
      | Threads | `-1` | 모든 코어. 느리면 4로 바꿔 비교 |
-     | Grammar | `Gbnf` | 형식 오류가 많으면 `JsonSchema` → `None` |
+     | Grammar | `Gbnf` | 형식 오류가 많으면 `JsonSchema` → `None`. Kanana 는 LM Studio 에서 JSON 스키마 형식 제약을 켜면 오류가 났다(PC 시험은 `--no-format`). LLMUnity 의 GBNF 는 다른 경로라 여기서 처음 확인한다 |
      | Slm Timeout Seconds | `30` | 처음엔 넉넉히 둬서 실제 걸리는 시간을 잰다. 3초로 두면 다 기본 대사로 넘어가 시간을 못 잰다 |
-     | Repeat | `1` | 장면마다 반복 횟수 |
+     | Repeat | `4` | 장면마다 반복 횟수. 반복마다 곁들일 거리가 바뀐다(거리 4개). PC 시험과 같게 4 |
+     | Prepare System Prompt | 켬 | 장면마다 요청 전에 그 도깨비의 시스템 프롬프트를 미리 읽힌다(게임에서 탭해 확대할 때처럼). 미리 읽기 시간은 따로 재고, 요청 시간에는 사용자 메시지 읽기와 대사 쓰기만 남는다. 끄면 예전처럼 요청 시간에 섞인다 |
      | Auto Start | 켬 | 켜지자마자 시험 시작 |
      | 데이터 칸 5개 | 비움 | 비우면 `Resources/Npc/` 에서 읽는다 |
 
@@ -81,8 +82,11 @@
 
 1. `NpcDeviceTest` 장면에서 Play 를 누른다.
 2. 화면에 "모델 올림 …ms" 가 나오고 장면별 대사가 이어지면 성공이다. 끝나면 "=== 요약 ==="과 CSV 경로가 나온다.
-3. **"모델 올리기 실패"** 가 나오면 콘솔 로그를 본다. `unknown model architecture: 'gemma4'` 같은 말이 있으면 0단계의 "Gemma 4를 읽을 수 있나" 문제다. **폰으로 넘어가지 말고** 콘솔 로그를 저장해 알린다.
-4. 비교하고 싶으면 Backend 를 `LmStudio` 로 바꿔 PC의 LM Studio 결과와 나란히 본다.
+   - 이야기 듣기 5장면(S10 · S11 · S18 · S19 · S20)은 AI 를 쓰지 않고 정해진 이야기 대사가 나온다(출처 "정해진"). 그래서 SLM 대사는 13장면 중 몇 개인지로 센다.
+   - 장면 줄의 "미리 읽기 …ms" 가 시스템 프롬프트를 읽는 시간이다. 같은 도깨비가 이어지는 장면(S03→S04, S05→S06 등)은 0 에 가까워야 한다.
+3. **"모델 올리기 실패"** 가 나오면 콘솔 로그를 본다. `unknown model architecture` 같은 말이 있으면 0단계의 "안 되면"으로 간다. **폰으로 넘어가지 말고** 콘솔 로그를 저장해 알린다.
+4. 비교하고 싶으면 Backend 를 `LmStudio`(Lm Studio Model = `kanana-1.5-2.1b-instruct-2505`)로 바꿔 PC의 LM Studio 결과와 나란히 본다.
+5. 장면 줄 끝의 메모에 "어미를 말투에 맞게 고침 ('…')"이 붙으면 모델이 쓴 대사를 고친 것이다. 요약에 "어미 고침 n건"으로 센다.
 
 ## 4. 안드로이드 폰
 
@@ -100,7 +104,7 @@
    - Package Name: 적어 둔다 (예: `com.DefaultCompany.NpcTest`). CSV를 가져올 때 쓴다.
    - Scripting Define Symbols(Android 탭)에 `JAMKKAEBI_LLMUNITY` 가 있는지 다시 본다.
 4. **Build And Run** 을 누른다. 앱이 폰에 깔리고 켜진다.
-5. **첫 실행**: 모델을 내려받는다(약 3.4GB, Wi-Fi에서). 화면에 "모델 내려받는 중 n%"가 나온다. 받는 동안 화면이 꺼지지 않게 둔다. 두 번째 실행부터는 받지 않는다.
+5. **첫 실행**: 모델을 내려받는다(약 1.5GB, Wi-Fi에서). 화면에 "모델 내려받는 중 n%"가 나온다. 받는 동안 화면이 꺼지지 않게 둔다. 두 번째 실행부터는 받지 않는다.
 6. **결과 보기**
    - 폰 화면에 장면별 결과와 요약이 나온다.
    - PC에서 실시간 로그:
@@ -121,30 +125,18 @@
 9. **설정을 바꿔 다시 재기**: 6단계 표를 보고 Threads(4), Grammar(`JsonSchema` → `None`)를 바꿔 다시 빌드해 비교한다. 바꾼 값은 기록표 비고에 적는다.
 10. **(선택) LLMUnity로 모델이 안 뜰 때 흐름만 보기**: 폰이 PC의 LM Studio를 쓰게 해서 화면·요청 흐름을 먼저 확인할 수 있다. **이때 잰 속도는 PC 속도라 폰 성능 기록으로 쓰지 않는다.**
     - PC의 LM Studio에서 서버를 켜고 "Serve on Local Network"를 켠다. 폰과 PC는 같은 Wi-Fi에 둔다.
-    - `NpcDeviceTestRunner` 의 Backend = `LmStudio`, Lm Studio Url = `http://<PC 내부 IP>:1234`, Lm Studio Model = `google/gemma-4-e2b`.
+    - `NpcDeviceTestRunner` 의 Backend = `LmStudio`, Lm Studio Url = `http://<PC 내부 IP>:1234`, Lm Studio Model = `kanana-1.5-2.1b-instruct-2505`. LM Studio 에서 형식 제약 오류가 나면 Grammar 를 `None` 으로 둔다.
     - 연결이 막히면 Player Settings → Other Settings → Allow downloads over HTTP 를 Always allowed 로 바꿔 본다.
 
-## 5. iPhone (Mac 필요)
-
-1. **Mac 준비**: Xcode 설치, Xcode → Settings → Accounts 에 Apple ID 로그인. 무료 계정도 7일짜리 개발 서명으로 폰에 깔 수 있다.
-2. **빌드**: Unity → File → Build Settings → iOS → Switch Platform → Build. Xcode 프로젝트 폴더가 생긴다. Scripting Define Symbols의 iOS 탭에도 `JAMKKAEBI_LLMUNITY` 를 넣는다.
-3. **Xcode 설정**: 생긴 `.xcodeproj` 를 연다 → Unity-iPhone 타깃 → Signing & Capabilities
-   - Team 을 고른다.
-   - `+ Capability` → **Increased Memory Limit** 를 추가한다. 모델이 3.4GB라 기본 메모리 한도를 넘을 수 있다.
-4. **폰 준비**: iPhone 을 USB로 연결 → 설정 → 개인정보 보호 및 보안 → **개발자 모드** 켜기(재시동). 처음 실행 때 설정 → 일반 → VPN 및 기기 관리에서 개발자 앱을 신뢰한다.
-5. **Run(▶)** 을 누른다.
-6. **결과 보기**
-   - 폰 화면, 그리고 Xcode 아래 콘솔의 `[NPC시험]` 줄.
-   - **메모리**: Xcode 왼쪽 Debug navigator(⌘7)의 Memory 게이지. 화면의 메모리 숫자는 iOS에서는 모델을 빼고 잰 값이라 이 게이지를 적는다.
-   - **발열**: 같은 곳의 Energy Impact, 그리고 폰이 뜨거워지는지 손으로도.
-   - **CSV**: Xcode → Window → Devices and Simulators → 기기 → 앱 → ⚙ → Download Container.
-7. GPU 층은 `-1`(자동 → iOS는 99, Metal GPU)로 시작한다.
 
 ## 6. 결과로 정할 것
 
 | 정할 것 | 어떻게 |
 |---|---|
-| 시간 초과(`SlmTimeout`, 지금 3초) | 요약의 "SLM 전체 시간 90%" 값을 본다. 대사가 늦게 뜨면 어색하므로, 90% 값이 3초 안팎이면 그 값에 여유를 조금 더한다. 훨씬 길면 그 기기는 SLM을 끈다. |
+| 시간 초과(`SlmTimeout`, 지금 3초) | 요약의 "SLM 전체 시간 90%" 값을 본다(미리 읽기를 켰으면 시스템 프롬프트는 이미 읽힌 뒤의 시간이다). 대사가 늦게 뜨면 어색하므로, 90% 값이 3초 안팎이면 그 값에 여유를 조금 더한다. 훨씬 길면 그 기기는 SLM을 끈다. |
+| 미리 읽기가 먹히는지 | 요약의 "시스템 프롬프트 미리 읽기" 와, 같은 도깨비가 이어진 장면의 미리 읽기 시간이 0 에 가까운지 본다. 이어진 장면도 오래 걸리면 LLMUnity 가 앞부분을 다시 쓰지 않는 것이다. Prepare System Prompt 를 끄고 같은 장면의 전체 시간과도 비교한다. |
+| 어미 고침 | 요약의 "어미 고침 n건"과 CSV 메모의 고치기 전 대사를 본다. 고친 대사가 어색하면(예: "…드리오") 그 예를 알린다. 고쳐도 남은 어미는 "기본 대사로 대신: … SpeechMismatch"로 나온다. |
+| 문장 자르기 | 요약의 "문장 잘라 씀 n건" 과 CSV 메모의 "긴 대사를 문장 단위로 잘라 씀 / 토큰 한도에서 끊긴 대사" 를 본다. 끊긴 대사가 많으면 `MaxTokens`(64)를 조금 늘린다. |
 | SLM 을 끌 기기(`SlmEnabled`) | 모델을 못 올렸거나, 앱이 꺼졌거나(메모리), 90% 값이 너무 긴 기기. 기기 RAM(`SystemInfo.systemMemorySize`) 같은 기준으로 묶는다. |
 | 형식 제약(Grammar) | "기본 대사로 대신" 이유에 `InvalidOutput NotJson` 이 많으면 GBNF 가 기기 llama.cpp 에서 안 먹는 것이다. Grammar 를 `JsonSchema`, 그다음 `None` 으로 바꿔 다시 잰다. |
 | 스레드 수 | 안드로이드가 느리면 Threads 를 4로 바꿔 비교한다(모든 코어보다 고성능 코어만 쓰는 게 빠를 때가 있다). |
@@ -154,9 +146,9 @@
 
 기기마다 한 줄씩 채운다. 설정을 바꿔 다시 쟀으면 줄을 하나 더 쓰고 비고에 바꾼 값을 적는다.
 
-| 기기 | RAM | 모델 올리기(ms) | SLM 대사 (x/18) | 전체 시간 중앙값 / 90% | 첫 응답 중앙값 | 메모리 최대 | 발열 | 비고 |
-|---|---|---|---|---|---|---|---|---|
-| 예: Galaxy S2x | 12GB | | | | | | | Threads -1, Grammar Gbnf |
+| 기기 | RAM | 모델 올리기(ms) | SLM 대사 (x/52) | 미리 읽기 중앙값 / 최대 | 전체 시간 중앙값 / 90% | 첫 응답 중앙값 | 메모리 최대 | 발열 | 비고 |
+|---|---|---|---|---|---|---|---|---|---|
+| 예: Galaxy S2x | 12GB | | | | | | | | Kanana Q4_K_M, Threads -1, Grammar Gbnf, 미리 읽기 켬, Repeat 4 |
 
 시험이 끝나면 아래를 모아서 넘긴다.
 - 위 기록표
@@ -170,8 +162,8 @@
 |---|---|
 | "모델 올리기 실패", 로그에 `unknown model architecture` | LLMUnity 안의 llama.cpp 가 이 모델을 모른다. 0단계의 "안 되면"으로. |
 | 앱이 켜지자마자 또는 모델을 올리다 꺼짐 | 메모리 부족. iOS는 Increased Memory Limit 를 넣었는지 본다. 더 작은 양자화(Q3)나 더 작은 모델로 비교한다. |
-| 모델 내려받기가 멈추거나 실패 | Wi-Fi와 여유 저장 공간(4GB 이상)을 본다. 7번에서 모델을 **주소로** 등록했는지, Download on Build 를 켰는지 본다. |
-| 모든 장면이 `NotJson` | 형식 제약 문제. Grammar 를 `JsonSchema` → `None` 으로 바꿔 본다. |
+| 모델 내려받기가 멈추거나 실패 | Wi-Fi와 여유 저장 공간(2GB 이상)을 본다. 7번에서 모델을 **주소로** 등록했는지, Download on Build 를 켰는지 본다. |
+| 모든 장면이 `NotJson` | 형식 제약 문제. Grammar 를 `JsonSchema` → `None` 으로 바꿔 본다. `None` 이면 시험 장면이 프롬프트에 출력 형식 설명을 싣는다(`PromptOptions.DescribeFormat`). |
 | 모든 장면이 시간 초과 | Slm Timeout Seconds 를 늘려 실제 시간을 잰다. iOS는 Gpu Layers 99, 안드로이드는 Threads 4 를 시험한다. |
 | "JAMKKAEBI_LLMUNITY 심볼이 없어…" | 2단계 5번. 그 플랫폼 탭에 **대문자로** 넣었는지 본다. |
 | "데이터가 없다" | 2단계 4번. `Assets/Resources/Npc/` 에 JSON 5개(scenes 포함)가 있는지 본다. |
