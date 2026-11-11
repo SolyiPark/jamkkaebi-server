@@ -134,6 +134,8 @@ OPENING_MIN = 6         # 앞부분 비교에 필요한 글자 수 ("고마워."
 RECENT_LINES = 5        # 도깨비마다 기억하는 최근 대사 수 (게임의 NpcRequestManager.RecentLineCount)
 # 어미를 볼 때 건너뛰는 감탄사만 있는 문장·마디 ("어흠.", "허허,", "히힛!"). 짧은 문장을 다 건너뛰면 해요체 도깨비의
 # "고마워! 다시 오세요."의 "고마워!"(3글자)까지 건너뛰어서, 알려진 감탄사만 건너뛴다. 게임의 NpcLineChecks.IsInterjection 과 같다
+# 홀로 쓴 대답 "네!", "예." 도 어미를 보지 않는다 (구름결 "네! 천천히 보세요."). 게임의 NpcLineChecks.Acknowledgment 와 같다
+ACKNOWLEDGMENT_RE = re.compile("^(네|예)$")
 INTERJECTION_RE = re.compile("^(어흠|에헴|흠|허허|어허|허|히힛|히히|히잉|헤헤|킁킁|앗싸|앗|꺄|꺅|오예|야호|와|오|어|음|아)+$")
 VOCATIVE_RE = re.compile(r"[\s,]*(주인님|주인|손님)$")  # 문장 끝에 붙은 부르는 말
 STORY_COUNT = 3  # 도깨비마다 실화 이야기 수
@@ -764,7 +766,7 @@ def sentences_of(line):
 def is_interjection(text):
     """감탄사만 있는 문장·마디인지 ("어흠.", "허허…", "앗,"). 비었어도 True."""
     core = PUNCT_RE.sub("", text)
-    return not core or INTERJECTION_RE.match(core) is not None
+    return not core or INTERJECTION_RE.match(core) is not None or ACKNOWLEDGMENT_RE.match(core) is not None
 
 
 def speech_mismatch(line, hint):

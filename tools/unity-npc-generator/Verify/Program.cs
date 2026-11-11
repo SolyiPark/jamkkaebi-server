@@ -665,6 +665,11 @@ public static class Program
         Check(NpcLineChecks.SpeechMatches("조심해 주세요. 고맙습니다.", haeyo, out wrong) && !NpcLineChecks.SpeechMatches("조심해 줘.", haeyo, out wrong),
                 "해요체: '~요'·'~습니다'는 되고 반말은 걸림");
         Check(!NpcLineChecks.SpeechMatches("어디 가냐?", haeyo, out wrong), "해요체: '~냐'는 반말이라 걸림");
+        Check(NpcLineChecks.SpeechMatches("네! 천천히 보세요.", haeyo, out wrong) && NpcLineChecks.SpeechMatches("예. 고마워요.", haeyo, out wrong),
+                "해요체: 홀로 쓴 대답 '네!'·'예.'는 건너뜀 ← " + wrong);
+        Check(!NpcLineChecks.SpeechMatches("싫으니까! 그만해 주세요.", haeyo, out wrong) && wrong == "싫으니까!",
+                "해요체: 까닭을 말하는 반말 '~으니까'는 걸림 ← " + wrong);
+        Check(NpcLineChecks.SpeechMatches("어디 가십니까? 다시 오셨습니까?", haeyo, out wrong), "해요체: 격식 물음 '~ㅂ니까'·'~습니까'는 통과 ← " + wrong);
         Check(!NpcLineChecks.SpeechMatches("고마워! 다시 오세요.", haeyo, out wrong) && wrong == "고마워!",
                 "짧은 문장도 감탄사가 아니면 어미를 봄 (해요체의 '고마워!') ← " + wrong);
         Check(NpcLineChecks.SpeechMatches("히힛! 같이 놀자!", banmal, out wrong) && NpcLineChecks.SpeechMatches("어흠. 고맙소.", hao, out wrong)
