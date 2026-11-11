@@ -9,6 +9,9 @@ namespace Jamkkaebi.Npc
     {
         public string Id { get; internal set; }
 
+        /// <summary>어느 도깨비인지. 시스템 프롬프트를 미리 읽힐 때 쓴다.</summary>
+        public int RelicId { get; internal set; }
+
         /// <summary>게임이 만들 요청과 같은 모양. 돌릴 때마다 새로 만든다 (요청 관리자가 RequestId 를 고쳐 쓴다).</summary>
         public Func<ReactionRequest> CreateRequest { get; internal set; }
 
@@ -34,6 +37,7 @@ namespace Jamkkaebi.Npc
                 result.Add(new NpcTestScene
                 {
                     Id = Text(scene, "id"),
+                    RelicId = (int)(double)scene["relicId"],
                     CreateRequest = () => ToRequest(scene),
                     Expected = Texts(scene, "expected"),
                     Note = Text(scene, "note")

@@ -106,8 +106,9 @@ namespace Jamkkaebi.Npc
     /// <item>후보 정하기: 선택지와 상대(주인/손님)에 맞는 행동만 넣는다. 손님은 도깨비를 건드릴 수 없어 관람(visit)만 된다.</item>
     /// <item>가장 중요한 사실 하나를 상황 문장에 직접 적는다. 안부 묻기는 흐려짐·재봉인 → 3일 안 관리 → 지난 대화 → 없음 순서로 본다.</item>
     /// <item>사실(Facts)은 이번 상황과 관련된 것만, 한국어 값으로 넣는다. 손님 장면에는 선명도를 넣지 않는다.</item>
-    /// <item>대화 기억은 이번 행동과 관련된 것만 넣는다 (지난 대화 꺼내기는 그 기억 하나, 이야기는 마지막 이야기 하나).</item>
-    /// <item>이야기 듣기는 StoryRotation 으로 실화를 돌려 가며 골라 verified_story · story_index 를 넣는다.</item>
+    /// <item>대화 기억은 이번 행동과 관련된 것만 넣는다 (지난 대화 꺼내기는 그 기억 하나).</item>
+    /// <item>이야기 듣기는 StoryRotation 으로 실화를 돌려 가며 골라 verified_story · story_index 를 넣는다. 이야기는 AI 를 부르지 않고
+    /// 규칙 기반 생성기가 그 번호의 이야기 대사를 쓴다.</item>
     /// </list>
     /// 문턱값은 규칙 기반 생성기와 같다(3일, 2번). 그래서 AI 가 실패해 기본 대사로 넘어가도 같은 내용으로 대답한다.
     /// </summary>
@@ -127,6 +128,10 @@ namespace Jamkkaebi.Npc
 
         private readonly PersonaCatalog personas;
         private readonly StoryRotation stories;
+
+        // 도깨비·상대·선택지마다 이번 앱 실행에서 몇 번째 요청인지. 곁들일 거리를 돌리는 데 쓴다 (Variation)
+        private readonly Dictionary<string, int> turns = new Dictionary<string, int>();
+        private readonly object turnsGate = new object();
 
         public NpcContextBuilder(PersonaCatalog personas) : this(personas, new StoryRotation())
         {
@@ -158,7 +163,8 @@ namespace Jamkkaebi.Npc
                 RelicId = input.RelicId,
                 Mode = input.Mode,
                 Input = input.Input,
-                ContentVersion = personas.contentVersion
+                ContentVersion = personas.contentVersion,
+                Variation = NextVariation(input)
             };
             var context = new NpcContext { Request = request, KeyFact = "none" };
             bool owner = input.Mode == InteractionMode.Owner;
@@ -218,11 +224,15 @@ namespace Jamkkaebi.Npc
             {
                 // ① 흐려짐·재봉인: 관리를 부탁해야 하므로 가장 먼저 본다
                 bool resealed = clarity == "RESEALED";
-                string gap = days.HasValue ? days.Value + "일 동안 " : "";
                 // 재봉인은 "다시 봉인되었다"만 적으면 Gemma 가 관리를 부탁하지 않았다(0/3). 흐려진 끝에 봉인됐고 닦아 줘야
-                // 깨어난다는 것까지 적으면 4/4 부탁했다. 안부 행동의 뜻이 "흐려졌다고 적혀 있을 때만 부탁"이라 '흐려지다'를 넣는다
-                request.Situation = situation + " 너는 " + gap + "관리를 받지 못해 "
-                        + (resealed ? "흐려지다 못해 다시 봉인되었다. 주인이 닦아 주어야 다시 깨어날 수 있다." : "흐려졌다.");
+                // 깨어난다는 것까지 적으면 4/4 부탁했다. 흐려짐도 "흐려졌다"만 적으면 Mi:dm 이 상태만 말하고 부탁하지 않았다(0/3).
+                // 며칠인지는 '오래'로 줄인다(며칠은 사실 칸에 있다). "9일 동안 관리를 못 받아 흐려졌어요."처럼 앞 문장이 길면
+                // Kanana 의 부탁이 40자를 한 글자 넘겨 잘렸다(S03 0/3, 2026-11-11). 부탁을 이유보다 앞에 두는 것도 해 봤지만
+                // Kanana 는 그래도 흐려진 이야기부터 했다. 작은 모델은 상황 문장을 그대로 옮기므로 '~서'로 잇지 않고 짧은 문장
+                // 둘로 쓴다 ("~해 흐려져서, ~" 를 옮겨 "닦아 주셔서 선명해져서"처럼 '~서'가 겹쳤다)
+                request.Situation = situation + " 너는 오래 관리를 받지 못해 "
+                        + (resealed ? "흐려지다 못해 다시 봉인되었다. 주인에게 닦아 깨워 달라고 부탁한다."
+                                    : "흐려졌다. 주인에게 닦아 달라고 부탁한다.");
                 context.KeyFact = resealed ? "resealed" : "faded";
                 AddClarity(input, request);
                 AddLastCare(days, request);
@@ -231,8 +241,11 @@ namespace Jamkkaebi.Npc
             }
             if (days.HasValue && days.Value <= RecentCareDays)
             {
-                // ② 최근 관리: 주인이 해 준 일을 떠올리게 한다
-                request.Situation = situation + " " + WhenAt(days.Value) + " 주인이 너를 닦아 관리해 주었다.";
+                // ② 최근 관리: 주인이 해 준 일을 떠올리게 한다. 일어난 일만 적으면 Mi:dm 이 "덕분에 더 맑아졌어요"처럼
+                // 언제 무엇을 해 줬는지 빼고 고마워했다(S04 2/3). 고마워할 일을 적되, '주인이'를 넣으면 Kanana 가 주인에게
+                // "주인이 닦아 관리해 주셔서"라고 그대로 옮겨서, 받은 쪽에서 쓴다 (도깨비는 닦이는 쪽이다). "받은 덕분에 선명해서
+                // 고맙다"는 "닦아 주셔서 선명해져서 고마워요"로 옮겨 '~서'가 겹쳐서, 고마운 일 하나만 적는다(선명은 사실 칸에 있다)
+                request.Situation = situation + " 너는 " + WhenAt(days.Value) + " 닦아 관리를 받은 일이 고맙다.";
                 context.KeyFact = "recent_care";
                 AddClarity(input, request);
                 AddLastCare(days, request);
@@ -315,22 +328,8 @@ namespace Jamkkaebi.Npc
             context.HoldStory(stories, ticket);
             request.Facts.Add(new Fact(NpcFactKeys.VerifiedStory, fact));
             request.Facts.Add(new Fact(NpcFactKeys.StoryIndex, index.ToString(CultureInfo.InvariantCulture)));
+            // 들려준 이야기는 기억에 남겨, 다음 안부에서 지난 대화로 꺼낼 수 있게 한다
             context.MemoryToSave = new MemoryEntry(0, NpcActions.TellStory, summary);
-
-            // 지난번에 들려준 이야기 하나 — "그 이야기는 다시 풀지 않는다" 규칙과 함께 실린다
-            MemoryEntry lastStory = null;
-            foreach (MemoryEntry memory in Recent(input.Memory))
-            {
-                if (memory.ActionId == NpcActions.TellStory && !string.IsNullOrEmpty(memory.Summary))
-                {
-                    lastStory = memory;
-                    break;
-                }
-            }
-            if (lastStory != null)
-            {
-                request.Memory.Add(lastStory);
-            }
         }
 
         private static void Visit(NpcContextInput input, NpcContext context)
@@ -353,6 +352,23 @@ namespace Jamkkaebi.Npc
             // 선명도는 방치 상태라 손님에게 보여 주지 않는다
             request.Facts.Add(new Fact(NpcFactKeys.VisitCount30d, visits.ToString(CultureInfo.InvariantCulture)));
             AddAwakening(input, request);
+        }
+
+        // ---------- 곁들일 거리 ----------
+
+        // 같은 도깨비·상대·선택지로 거듭 부르면 1씩 늘어, 프롬프트 조립기가 곁들일 거리를 차례로 바꿔 싣는다.
+        // 시작점은 날마다 옮긴다 — 실행할 때마다 0부터 세면, 앱을 새로 켠 날의 첫 인사가 늘 같은 거리로 시작한다
+        private int NextVariation(NpcContextInput input)
+        {
+            string key = input.RelicId.ToString(CultureInfo.InvariantCulture) + ":" + input.Mode + ":" + input.Input;
+            int turn;
+            lock (turnsGate)
+            {
+                turns.TryGetValue(key, out turn);
+                turns[key] = turn + 1;
+            }
+            int day = (int)(input.Today.Date.Ticks / TimeSpan.TicksPerDay % 1000);
+            return day + turn;
         }
 
         // ---------- 지난 대화 ----------
