@@ -22,7 +22,7 @@ namespace Jamkkaebi.Npc
     /// <para>대사 규칙</para>
     /// <list type="bullet">
     /// <item>안부 답하기: 흐려짐·재봉인이면 관리 부탁, RecentCareDays 일 안에 관리를 받았으면 그 일을 떠올림, 아니면 평소 상태.</item>
-    /// <item>이야기 듣기: 페르소나 도깨비는 실화를 담은 이야기 대사(stories) 중 요청의 story_index 번째를 쓰고, 번호가 없으면
+    /// <item>이야기 듣기(늘 이 생성기가 맡는다 — SLM 은 이야기를 만들지 않는다): 페르소나 도깨비는 실화를 담은 이야기 대사(stories) 중 요청의 story_index 번째를 쓰고, 번호가 없으면
     /// StoryRotation 으로 돌려 가며 고른다 — 다 들려줄 때까지 같은 이야기를 반복하지 않는다. 페르소나 없는 도깨비는
     /// 자료 문장(verified_story)을 바꾸지 않고 그대로 싣고 앞뒤에 말투를 붙인다.</item>
     /// <item>같은 도깨비·같은 행동에서 바로 앞과 같은 대사는 피한다.</item>
@@ -94,6 +94,12 @@ namespace Jamkkaebi.Npc
 
         public void Unload()
         {
+        }
+
+        /// <summary>미리 읽어 둘 것이 없다.</summary>
+        public Task PrepareAsync(int relicId, CancellationToken ct)
+        {
+            return Task.FromResult(true);
         }
 
         public Task<ReactionResult> GenerateAsync(ReactionRequest request, CancellationToken ct)
@@ -199,7 +205,7 @@ namespace Jamkkaebi.Npc
             {
                 return null;
             }
-            return Pick(request.RelicId + ":" + actionId + ":" + variant, lines);
+            return Pick(request.RelicId + ":" + actionId + ":" + variant, lines, request.RecentLines);
         }
 
         private string StoryLine(ReactionRequest request, SpiritLines spirit)
@@ -256,8 +262,9 @@ namespace Jamkkaebi.Npc
             return "default";
         }
 
-        // 같은 도깨비·같은 행동에서 바로 앞과 같은 대사는 피한다
-        private string Pick(string key, List<string> lines)
+        // 같은 도깨비·같은 행동에서 바로 앞과 같은 대사는 피하고, 그 도깨비가 최근에 띄운 대사(request.RecentLines)와
+        // 같은 대사도 되도록 피한다. 다 겹치면 바로 앞과 다른 것, 그것도 없으면 아무거나 쓴다
+        private string Pick(string key, List<string> lines, List<string> recent)
         {
             lock (gate)
             {
@@ -267,6 +274,11 @@ namespace Jamkkaebi.Npc
                 if (pool.Count == 0)
                 {
                     pool = lines;
+                }
+                List<string> fresh = pool.Where(line => !NpcLineChecks.FindSimilar(line, recent).HasValue).ToList();
+                if (fresh.Count > 0)
+                {
+                    pool = fresh;
                 }
                 string picked = pool[random.Next(pool.Count)];
                 lastLines[key] = picked;

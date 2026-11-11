@@ -25,6 +25,12 @@ namespace Jamkkaebi.Npc
         /// 시간 제한은 요청 관리자가 정하고 ct 로만 전달한다.
         /// </summary>
         Task<ReactionResult> GenerateAsync(ReactionRequest request, CancellationToken ct);
+
+        /// <summary>
+        /// 도깨비를 탭해 확대할 때 부른다. SLM 생성기는 그 도깨비의 시스템 프롬프트를 모델에 미리 읽혀 두어, 다음 요청은
+        /// 짧은 사용자 메시지만 읽게 한다. 규칙 기반 생성기는 할 일이 없다. 취소되면 OperationCanceledException 을 던질 수 있다.
+        /// </summary>
+        Task PrepareAsync(int relicId, CancellationToken ct);
     }
 
     public enum InteractionMode
@@ -46,7 +52,7 @@ namespace Jamkkaebi.Npc
         Cancelled,      // 요청 관리자가 취소했다 (시간 초과, NPC 전환, 화면 종료)
         InvalidOutput,  // 모델 출력이 형식·후보·길이 검사를 통과하지 못했다
         NoCandidate,    // 후보가 없다 — 부르는 쪽이 부르지 않는 게 맞다
-        Unsupported,    // 이 생성기가 맡지 않는 요청 (SLM: 페르소나가 아직 없는 도깨비) — 규칙 기반 생성기로 대신한다
+        Unsupported,    // 이 생성기가 맡지 않는 요청 (SLM: 페르소나가 아직 없는 도깨비, 정해진 대사를 쓰는 이야기) — 규칙 기반 생성기로 대신한다
         Error           // 그 밖의 오류
     }
 
@@ -80,6 +86,32 @@ namespace Jamkkaebi.Npc
         public const string TellStory = "tell_story";            // Idle
         public const string StruggleProtest = "struggle_protest"; // Struggle
         public const string StrugglePlay = "struggle_play";      // Struggle
+
+        /// <summary>
+        /// AI 로 만들지 않고 늘 정해진 대사(규칙 기반 생성기)를 쓰는 행동. 이야기는 2B 모델이 사실을 지어내거나 빼먹어서,
+        /// 검수한 이야기 대사 3개(default_lines.json 의 stories)를 StoryRotation 순서대로 꺼내 쓴다.
+        /// </summary>
+        public static bool UsesFixedLines(string actionId)
+        {
+            return actionId == TellStory;
+        }
+
+        /// <summary>후보가 모두 정해진 대사를 쓰는 행동인지. 그러면 SLM 을 부르지 않는다.</summary>
+        public static bool OnlyFixedLines(List<ActionCandidate> candidates)
+        {
+            if (candidates == null || candidates.Count == 0)
+            {
+                return false;
+            }
+            foreach (ActionCandidate candidate in candidates)
+            {
+                if (candidate == null || !UsesFixedLines(candidate.ActionId))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
     }
 
     /// <summary>
@@ -184,7 +216,7 @@ namespace Jamkkaebi.Npc
 
         /// <summary>
         /// 이번 상황 한 줄. 컨텍스트 구성기가 이번에 가장 중요한 사실 하나를 여기에 직접 적는다
-        /// (예: "주인이 안부를 물었다. 이틀 전에 주인이 너를 닦아 주었다."). SLM 생성기가 쓰고, 규칙 기반 생성기는 쓰지 않는다.
+        /// (예: "주인이 안부를 물었다. 너는 이틀 전에 닦아 관리를 받은 일이 고맙다."). SLM 생성기가 쓰고, 규칙 기반 생성기는 쓰지 않는다.
         /// </summary>
         public string Situation { get; set; }
 
@@ -198,6 +230,19 @@ namespace Jamkkaebi.Npc
 
         /// <summary>행동 카탈로그·페르소나·기본 대사의 버전.</summary>
         public string ContentVersion { get; set; }
+
+        /// <summary>
+        /// 페르소나의 곁들일 거리 중 몇 번째 것을 실을지 (목록 길이로 나눈 나머지를 쓴다). 같은 상황이 거듭될 때 대사가 갈리도록
+        /// 컨텍스트 구성기가 요청마다 바꾼다. 기본 0. 규칙 기반 생성기는 쓰지 않는다.
+        /// </summary>
+        public int Variation { get; set; }
+
+        /// <summary>
+        /// 이 도깨비가 최근에 띄운 대사. 출력 검사기가 같은 대사를 거르고(Repeated), 규칙 기반 생성기도 피한다. 요청 관리자가
+        /// 이번 실행에서 띄운 것을 채워 넣고, 게임이 저장해 둔 것을 미리 넣어도 된다. <b>프롬프트에는 싣지 않는다</b> — 실으면
+        /// 작은 모델이 그 대사를 그대로 옮긴다.
+        /// </summary>
+        public List<string> RecentLines { get; set; }
 
         /// <summary>키에 맞는 사실의 값. 없으면 null.</summary>
         public string FindFact(string key)
@@ -246,13 +291,16 @@ namespace Jamkkaebi.Npc
         /// <summary>어느 생성기가 만들었는지. 평가와 디버깅용.</summary>
         public ReactionSource Source { get; private set; }
 
+        /// <summary>Success 일 때 사람이 읽는 메모 (예: "긴 대사를 문장 단위로 잘라 씀 (52자 → 18자)"). 로그와 평가용. 없으면 null.</summary>
+        public string Note { get; private set; }
+
         public bool IsSuccess
         {
             get { return Status == ReactionStatus.Success; }
         }
 
         public static ReactionResult Success(string requestId, string actionId, string targetId, string line,
-                                             ReactionSource source)
+                                             ReactionSource source, string note = null)
         {
             return new ReactionResult
             {
@@ -262,7 +310,8 @@ namespace Jamkkaebi.Npc
                 TargetId = targetId,
                 Line = line,
                 FailReason = FailReason.None,
-                Source = source
+                Source = source,
+                Note = note
             };
         }
 
@@ -276,6 +325,24 @@ namespace Jamkkaebi.Npc
                 FailDetail = detail,
                 Source = source
             };
+        }
+
+        /// <summary>
+        /// 앞 시도에서 출력 검사에 걸린 이유를 덧붙인 결과 (SLM 생성기가 다시 만들었을 때). 성공이면 Note, 실패면 FailDetail 에 붙는다.
+        /// </summary>
+        public ReactionResult WithEarlierRejections(IList<string> rejected)
+        {
+            string earlier = "앞 시도 " + rejected.Count + "번 거름: " + string.Join(" / ", new List<string>(rejected).ToArray());
+            var copy = (ReactionResult)MemberwiseClone();
+            if (IsSuccess)
+            {
+                copy.Note = Note == null ? earlier : Note + "; " + earlier;
+            }
+            else
+            {
+                copy.FailDetail = FailDetail == null ? earlier : FailDetail + " (" + earlier + ")";
+            }
+            return copy;
         }
     }
 }

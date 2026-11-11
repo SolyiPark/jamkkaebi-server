@@ -14,20 +14,31 @@ namespace Jamkkaebi.Npc
         TargetMismatch, // 대상이 고른 행동의 대상이 아니다
         EmptyLine,      // 대사가 없다
         Newline,        // 대사에 줄바꿈이 있다
-        TooLong,        // 대사가 길이 제한을 넘는다
-        Forbidden       // 대사가 공통 금칙어에 걸린다
+        TooLong,        // 첫 문장부터 길이 제한을 넘는다 (또는 토큰 한도에서 끊겼는데 끝난 문장이 없다)
+        Forbidden,      // 대사가 공통 금칙어에 걸린다
+        SelfName,       // 자기 이름을 말한다 ("반갑게요, 향산이") — 페르소나를 받은 검사기만 본다
+        SpeechMismatch, // 그 도깨비의 어미로 끝나지 않는 문장이 있다 (존댓말·반말 섞기) — 페르소나를 받은 검사기만 본다
+        Repeated        // 그 도깨비가 최근에 띄운 대사(request.RecentLines)와 같다
     }
 
     /// <summary>모델 출력 한 건의 검사 결과.</summary>
     public sealed class OutputCheck
     {
         internal OutputCheck(OutputProblem problem, string detail, string actionId, string targetId, string line)
+                : this(problem, detail, actionId, targetId, line, line, false)
+        {
+        }
+
+        internal OutputCheck(OutputProblem problem, string detail, string actionId, string targetId, string line,
+                             string fullLine, bool truncated)
         {
             Problem = problem;
             Detail = detail;
             ActionId = actionId;
             TargetId = targetId;
             Line = line;
+            FullLine = fullLine;
+            Truncated = truncated;
         }
 
         public OutputProblem Problem { get; private set; }
@@ -38,33 +49,70 @@ namespace Jamkkaebi.Npc
         public string ActionId { get; private set; }
         public string TargetId { get; private set; }
 
-        /// <summary>앞뒤 공백과 따옴표를 걷어 낸 대사.</summary>
+        /// <summary>띄울 대사. 앞뒤 공백과 따옴표를 걷어 내고, 길면 제한 안에 드는 앞 문장들만 남긴 것.</summary>
         public string Line { get; private set; }
+
+        /// <summary>모델이 낸 대사 전체 (자르기 전). 자르지 않았으면 Line 과 같다.</summary>
+        public string FullLine { get; private set; }
+
+        /// <summary>출력 토큰 한도에서 대사 중간에 끊겼는지. 끊겼으면 끝난 문장까지만 Line 에 남는다.</summary>
+        public bool Truncated { get; private set; }
+
+        /// <summary>
+        /// 검사 전에 어미를 그 도깨비 말투로 고쳤으면 고치기 전 대사 (모델이 쓴 그대로, 자르기 전). 고치지 않았으면 null.
+        /// Line · FullLine 은 고친 뒤의 대사다.
+        /// </summary>
+        public string LineBeforeSpeechFix { get; internal set; }
+
+        /// <summary>대사를 문장 단위로 잘라 냈는지.</summary>
+        public bool Trimmed
+        {
+            get { return IsValid && Line != FullLine; }
+        }
 
         public bool IsValid
         {
             get { return Problem == OutputProblem.None; }
         }
 
-        /// <summary>통과하면 Success, 아니면 Failed(InvalidOutput). 출처는 Slm.</summary>
+        /// <summary>통과하면 Success(잘라 냈거나 어미를 고쳤으면 Note 에 적는다), 아니면 Failed(InvalidOutput). 출처는 Slm.</summary>
         public ReactionResult ToResult(string requestId)
         {
-            return IsValid
-                    ? ReactionResult.Success(requestId, ActionId, TargetId, Line, ReactionSource.Slm)
-                    : ReactionResult.Failed(requestId, FailReason.InvalidOutput, ReactionSource.Slm, Problem + ": " + Detail);
+            if (!IsValid)
+            {
+                return ReactionResult.Failed(requestId, FailReason.InvalidOutput, ReactionSource.Slm, Problem + ": " + Detail);
+            }
+            string note = !Trimmed ? null
+                    : (Truncated ? "토큰 한도에서 끊긴 대사를 끝난 문장까지만 씀" : "긴 대사를 문장 단위로 잘라 씀")
+                      + " (" + FullLine.Length + "자 → " + Line.Length + "자)";
+            if (LineBeforeSpeechFix != null)
+            {
+                string fix = "어미를 말투에 맞게 고침 ('" + LineBeforeSpeechFix + "')";
+                note = note == null ? fix : note + "; " + fix;
+            }
+            return ReactionResult.Success(requestId, ActionId, TargetId, Line, ReactionSource.Slm, note);
         }
     }
 
     /// <summary>
     /// SLM 출력 검사. 모델이 낸 글을 읽어 아래를 차례로 확인하고, 하나라도 걸리면 화면에 띄우지 않는다.
     /// <list type="number">
-    /// <item>JSON: 앞뒤 잡글·생각(&lt;think&gt;)·코드 블록이 있어도 JSON 객체 하나를 찾아 읽는다.</item>
+    /// <item>JSON: 앞뒤 잡글·생각(&lt;think&gt;)·코드 블록이 있어도 JSON 객체 하나를 찾아 읽는다. 출력 토큰 한도에서
+    /// 대사 문자열 안에서 끊겼으면 닫아서 읽고, 끝나지 않은 마지막 조각은 버린다.</item>
     /// <item>후보 포함: 행동이 후보에 있고, 대상이 <b>그 행동의</b> 대상 중 하나다.</item>
-    /// <item>대사: 비어 있지 않고, 줄바꿈이 없고, 길이 제한 안이다.</item>
-    /// <item>금칙어: 공통 금칙어(NpcLineFilter)에 걸리지 않는다.</item>
+    /// <item>말투 다듬기: 페르소나 카탈로그를 받았으면, 아래 검사 전에 흔한 어미를 그 도깨비 말투로 고친다
+    /// (NpcLineChecks.NormalizeSpeech — "고마워요" → 반말 "고마워", "모시겠습니다" → 하오체 "모시겠소"). NormalizeSpeech 로 끈다.</item>
+    /// <item>대사: 비어 있지 않고, 줄바꿈이 없고, 길이 제한 안이다. 길면 다 버리지 않고 제한 안에 드는 앞 문장들만 남긴다
+    /// (작은 모델은 두세 문장을 써서 넘기는 일이 많다). 첫 문장부터 넘치면 TooLong.</item>
+    /// <item>금칙어: 띄울 대사(자른 뒤)가 공통 금칙어(NpcLineFilter)에 걸리지 않는다.</item>
+    /// <item>자기 이름·어미: 페르소나 카탈로그를 받았으면, 자기 이름을 말하지 않고 문장마다 그 도깨비의 어미(endingHint)로 끝난다
+    /// (존댓말·반말 섞기를 막는다, NpcLineChecks.SpeechMatches).</item>
+    /// <item>반복: 그 도깨비가 최근에 띄운 대사(request.RecentLines)와 같지 않다 (NpcLineChecks.Similar). 요청 관리자가 채운다.</item>
     /// </list>
-    /// 길이 제한은 tools/npc-prompt-test/run.py 의 길이OK 판정과 같다 (기본 40자, 손님 관람 25자, 이야기 75자).
-    /// 프롬프트에 적는 길이(30·20·60자)보다 조금 넉넉하다 — 작은 모델은 글자 수를 정확히 세지 못한다.
+    /// 프롬프트 규칙만으로는 작은 모델이 이름·어미·반복을 지키지 않아서(2026-11-11 시험) 검사로 강제한다. 걸리면 SLM 생성기가
+    /// 곁들일 거리를 바꿔 다시 생성하고(MaxAttempts), 그래도 걸리면 요청 관리자가 기본 대사로 대신한다.
+    /// 길이 제한과 자르는 규칙은 tools/npc-prompt-test/run.py 의 길이OK 판정(fit_sentences)과 같다 (기본 40자, 손님 관람 25자).
+    /// 프롬프트에 적는 길이(30·20자)보다 조금 넉넉하다 — 작은 모델은 글자 수를 정확히 세지 못한다.
     /// </summary>
     public sealed class NpcOutputValidator
     {
@@ -73,18 +121,32 @@ namespace Jamkkaebi.Npc
 
         private const string QuoteChars = "\"“”'‘’";
 
-        private readonly NpcLineFilter filter;
+        // 이것 뒤에 공백이나 글 끝이 오면 문장이 끝난다. 점 두 개 이상(...)과 '…'는 말줄임이라 끝이 아니다
+        private const string SentenceEnd = ".!?~。";
 
-        public NpcOutputValidator(NpcLineFilter filter)
+        // 문장 끝 뒤에 붙는 닫는 따옴표·괄호
+        private const string SentenceClose = "\"'”’)]」』";
+
+        private readonly NpcLineFilter filter;
+        private readonly PersonaCatalog personas;
+
+        /// <summary>자기 이름·어미 검사 없이 (형식·길이·금칙어·반복만). 게임은 페르소나를 받는 쪽을 쓴다.</summary>
+        public NpcOutputValidator(NpcLineFilter filter) : this(filter, null)
+        {
+        }
+
+        /// <param name="personas">주면 자기 이름과 어미(존댓말·반말 섞기)도 검사한다.</param>
+        public NpcOutputValidator(NpcLineFilter filter, PersonaCatalog personas)
         {
             if (filter == null)
             {
                 throw new ArgumentNullException("filter");
             }
             this.filter = filter;
+            this.personas = personas;
+            NormalizeSpeech = true;
             MaxChars = new Dictionary<string, int>
             {
-                { NpcInputs.ListenStory, 75 },
                 { NpcInputs.Visit, 25 }
             };
         }
@@ -99,16 +161,32 @@ namespace Jamkkaebi.Npc
             return input != null && MaxChars != null && MaxChars.TryGetValue(input, out limit) ? limit : DefaultMaxChars;
         }
 
+        /// <summary>
+        /// 검사 전에 흔한 어미를 그 도깨비 말투로 고치는지 (NpcLineChecks.NormalizeSpeech, 기본 켬). 페르소나를 받은 검사기만 고친다.
+        /// 끄면 모델이 쓴 그대로 검사한다 (run.py --no-normalize).
+        /// </summary>
+        public bool NormalizeSpeech { get; set; }
+
         public OutputCheck Check(string raw, ReactionRequest request)
         {
             if (request == null)
             {
                 throw new ArgumentNullException("request");
             }
+            string said;
+            OutputCheck check = Inspect(raw, request, out said);
+            check.LineBeforeSpeechFix = said;
+            return check;
+        }
 
+        // said: 어미를 고쳤으면 고치기 전 대사, 아니면 null
+        private OutputCheck Inspect(string raw, ReactionRequest request, out string said)
+        {
+            said = null;
             Dictionary<string, object> json;
             string jsonError;
-            if (!TryReadObject(raw, out json, out jsonError))
+            bool truncated;
+            if (!TryReadObject(raw, out json, out jsonError, out truncated))
             {
                 return Fail(OutputProblem.NotJson, jsonError, null, null, null);
             }
@@ -116,6 +194,16 @@ namespace Jamkkaebi.Npc
             string action = Text(json, "action").Trim();
             string target = Text(json, "target").Trim();
             string line = CleanLine(Text(json, "line"));
+            Persona persona = personas != null ? personas.Find(request.RelicId) : null;
+            if (NormalizeSpeech && persona != null && persona.endingHint != null)
+            {
+                string fixedLine = NpcLineChecks.NormalizeSpeech(line, persona.endingHint.label);
+                if (fixedLine != line)
+                {
+                    said = line;
+                    line = fixedLine;
+                }
+            }
 
             ActionCandidate candidate = null;
             if (request.Candidates != null)
@@ -152,16 +240,103 @@ namespace Jamkkaebi.Npc
                 return Fail(OutputProblem.Newline, "대사에 줄바꿈이 있다", action, target, line);
             }
             int limit = LimitFor(request.Input);
-            if (line.Length > limit)
+            string fitted = FitSentences(line, limit, truncated);
+            if (fitted == null)
             {
-                return Fail(OutputProblem.TooLong, line.Length + "자 (제한 " + limit + "자)", action, target, line);
+                string why = truncated
+                        ? "토큰 한도에서 끊겼고 " + limit + "자 안에 끝난 문장이 없다 (" + line.Length + "자까지 나옴)"
+                        : "첫 문장부터 제한을 넘는다 (" + line.Length + "자, 제한 " + limit + "자)";
+                return new OutputCheck(OutputProblem.TooLong, why, action, target, line, line, truncated);
             }
-            ForbiddenMatch bad = filter.Find(line);
+            ForbiddenMatch bad = filter.Find(fitted);
             if (bad != null)
             {
-                return Fail(OutputProblem.Forbidden, "금칙어 " + bad, action, target, line);
+                return new OutputCheck(OutputProblem.Forbidden, "금칙어 " + bad, action, target, fitted, line, truncated);
             }
-            return new OutputCheck(OutputProblem.None, null, action, target, line);
+            if (persona != null)
+            {
+                if (!string.IsNullOrEmpty(persona.name) && NpcLineChecks.Core(fitted).Contains(NpcLineChecks.Core(persona.name)))
+                {
+                    return new OutputCheck(OutputProblem.SelfName, "자기 이름 '" + persona.name + "'", action, target, fitted, line, truncated);
+                }
+                string wrong;
+                if (!NpcLineChecks.SpeechMatches(fitted, persona.endingHint, out wrong))
+                {
+                    return new OutputCheck(OutputProblem.SpeechMismatch,
+                            (persona.endingHint.label ?? "말투") + " 어미가 아닌 문장 '" + wrong + "'", action, target, fitted, line, truncated);
+                }
+            }
+            KeyValuePair<string, string>? same = NpcLineChecks.FindSimilar(fitted, request.RecentLines);
+            if (same.HasValue)
+            {
+                return new OutputCheck(OutputProblem.Repeated, "최근 대사 '" + same.Value.Key + "' 와 같음 (" + same.Value.Value + ")",
+                        action, target, fitted, line, truncated);
+            }
+            return new OutputCheck(OutputProblem.None, null, action, target, fitted, line, truncated);
+        }
+
+        /// <summary>
+        /// 제한 안에 드는 앞 문장들만 남긴다. 첫 문장부터 넘치면 null. 끊긴 대사(truncated)는 끝나지 않은 마지막 조각을 버린다.
+        /// run.py 의 fit_sentences 와 같다.
+        /// </summary>
+        public static string FitSentences(string line, int limit, bool truncated)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return null;
+            }
+            List<int> ends = SentenceEnds(line);
+            if (!truncated && (ends.Count == 0 || ends[ends.Count - 1] < line.TrimEnd().Length))
+            {
+                ends.Add(line.Length); // 문장 부호 없이 끝난 마지막 문장
+            }
+            string fitted = null;
+            foreach (int end in ends)
+            {
+                string piece = line.Substring(0, end).TrimEnd();
+                if (piece.Length > limit)
+                {
+                    break;
+                }
+                if (piece.Length > 0)
+                {
+                    fitted = piece;
+                }
+            }
+            return fitted;
+        }
+
+        // 문장이 끝나는 자리(끝 글자 다음 위치)들
+        private static List<int> SentenceEnds(string line)
+        {
+            var ends = new List<int>();
+            int i = 0;
+            while (i < line.Length)
+            {
+                if (SentenceEnd.IndexOf(line[i]) < 0)
+                {
+                    i++;
+                    continue;
+                }
+                int j = i;
+                bool onlyDots = true;
+                while (j < line.Length && SentenceEnd.IndexOf(line[j]) >= 0)
+                {
+                    onlyDots &= line[j] == '.';
+                    j++;
+                }
+                bool ellipsis = j - i >= 2 && onlyDots;
+                while (j < line.Length && SentenceClose.IndexOf(line[j]) >= 0)
+                {
+                    j++;
+                }
+                if (!ellipsis && (j == line.Length || char.IsWhiteSpace(line[j])))
+                {
+                    ends.Add(j);
+                }
+                i = j;
+            }
+            return ends;
         }
 
         private static OutputCheck Fail(OutputProblem problem, string detail, string action, string target, string line)
@@ -186,29 +361,75 @@ namespace Jamkkaebi.Npc
             return text ?? Convert.ToString(value, CultureInfo.InvariantCulture);
         }
 
-        /// <summary>생각 블록을 지우고, 처음 '{' 부터 마지막 '}' 까지를 JSON 객체로 읽는다.</summary>
-        private static bool TryReadObject(string raw, out Dictionary<string, object> json, out string error)
+        /// <summary>
+        /// 생각 블록을 지우고, 처음 '{' 부터 마지막 '}' 까지를 JSON 객체로 읽는다. 읽지 못했는데 글이 문자열 안에서 끝났으면
+        /// (출력 토큰 한도에서 끊김) 문자열과 객체를 닫아 다시 읽고 truncated 를 세운다. run.py 의 parse_json 과 같다.
+        /// </summary>
+        private static bool TryReadObject(string raw, out Dictionary<string, object> json, out string error, out bool truncated)
         {
             json = null;
+            truncated = false;
             string text = StripThink(raw ?? "");
             int start = text.IndexOf('{');
-            int end = text.LastIndexOf('}');
-            if (start < 0 || end <= start)
+            if (start < 0)
             {
                 error = "JSON 객체가 없다";
                 return false;
             }
-            try
+            int end = text.LastIndexOf('}');
+            error = "JSON 객체가 없다";
+            if (end > start)
             {
-                json = MiniJson.ParseObject(text.Substring(start, end - start + 1));
-                error = null;
-                return true;
+                try
+                {
+                    json = MiniJson.ParseObject(text.Substring(start, end - start + 1));
+                    error = null;
+                    return true;
+                }
+                catch (FormatException e)
+                {
+                    error = "JSON 을 읽지 못했다: " + e.Message;
+                }
             }
-            catch (FormatException e)
+            string tail = text.Substring(start);
+            if (!EndsInString(tail))
             {
-                error = "JSON 을 읽지 못했다: " + e.Message;
                 return false;
             }
+            try
+            {
+                json = MiniJson.ParseObject(tail.TrimEnd('\\') + "\"}");
+                error = null;
+                truncated = true;
+                return true;
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
+        }
+
+        // 글 끝이 JSON 문자열 안인지 (닫히지 않은 따옴표가 있는지)
+        private static bool EndsInString(string text)
+        {
+            bool inside = false;
+            bool escaped = false;
+            foreach (char c in text)
+            {
+                if (escaped)
+                {
+                    escaped = false;
+                }
+                else if (c == '\\')
+                {
+                    escaped = inside;
+                }
+                else if (c == '"')
+                {
+                    inside = !inside;
+                }
+            }
+            return inside;
         }
 
         // 생각 모드를 끄지 못한 모델이 <think>…</think> 를 앞에 붙이는 경우. 닫히지 않았으면 끝까지 지운다
