@@ -19,6 +19,10 @@ namespace Jamkkaebi.Npc
     ///
     /// <para>로그는 "[NPC시험]" 으로 시작한다. 안드로이드는 adb logcat, iOS 는 Xcode 콘솔에서 본다.
     /// CSV 는 Application.persistentDataPath 에 생긴다 (경로는 화면과 로그에 나온다).</para>
+    ///
+    /// <para>prepareSystemPrompt 를 켜면 장면마다 요청 전에 그 도깨비의 시스템 프롬프트를 미리 읽힌다(게임에서 탭해 확대할 때처럼).
+    /// 미리 읽기 시간은 따로 재고, 요청 시간에는 사용자 메시지를 읽고 대사를 쓰는 시간만 남는다.
+    /// 이야기 듣기 장면은 정해진 대사를 쓰므로 SLM 대사 수에서 뺀다.</para>
     /// </summary>
     public sealed class NpcDeviceTestRunner : MonoBehaviour
     {
@@ -44,7 +48,10 @@ namespace Jamkkaebi.Npc
         public LlmUnityGrammar grammar = LlmUnityGrammar.Gbnf;
 
         public string lmStudioUrl = "http://192.168.0.10:1234";
-        public string lmStudioModel = "google/gemma-4-e2b";
+        public string lmStudioModel = "kanana-1.5-2.1b-instruct-2505";
+
+        [Tooltip("LM Studio: JSON 스키마 형식 제약을 쓴다. Kanana 처럼 형식 제약을 켜면 LM Studio 가 오류를 내는 모델은 끈다 — 끄면 프롬프트에 형식 설명을 싣는다 (run.py --no-format 과 같다)")]
+        public bool lmStudioJsonSchema = false;
 
         [Header("시험")]
         [Tooltip("SLM 을 기다리는 시간(초). 잴 때는 넉넉히 두고, 결과를 보고 게임 값(SlmTimeout)을 정한다")]
@@ -52,6 +59,9 @@ namespace Jamkkaebi.Npc
 
         [Tooltip("장면마다 반복 횟수")]
         public int repeat = 1;
+
+        [Tooltip("요청 전에 그 도깨비의 시스템 프롬프트를 미리 읽힌다 (게임에서 탭해 확대할 때처럼). 끄면 요청 시간에 시스템 프롬프트 읽기가 섞인다")]
+        public bool prepareSystemPrompt = true;
 
         public bool autoStart = true;
 
@@ -154,8 +164,13 @@ namespace Jamkkaebi.Npc
             model = CreateBackend();
             if (model != null)
             {
-                slm = new SlmReactionGenerator(model, new PromptAssembler(personaCatalog, actionCatalog),
-                        new NpcOutputValidator(new NpcLineFilter(forbiddenCatalog)));
+                // 형식 제약을 끄면(Grammar None) 모델이 JSON 모양을 알 수 있게 프롬프트에 형식 설명을 싣는다
+                // LM Studio 는 JSON 스키마를 끄면(lmStudioJsonSchema) 같은 방식으로 형식 설명을 싣는다
+                bool unconstrained = backend == BackendKind.LlmUnity ? grammar == LlmUnityGrammar.None : !lmStudioJsonSchema;
+                var promptOptions = new PromptOptions { DescribeFormat = unconstrained };
+                // 게임처럼 페르소나를 넘겨 자기 이름·존댓말 반말 섞기도 거른다. 걸리면 곁들일 거리를 바꿔 한 번 더 만든다
+                slm = new SlmReactionGenerator(model, new PromptAssembler(personaCatalog, actionCatalog, promptOptions),
+                        new NpcOutputValidator(new NpcLineFilter(forbiddenCatalog), personaCatalog));
                 status = "모델 올리는 중";
                 long before = MemoryMb();
                 Stopwatch loading = Stopwatch.StartNew();
@@ -175,12 +190,16 @@ namespace Jamkkaebi.Npc
             }
 
             manager = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(slmTimeoutSeconds) };
-            var csv = new StringBuilder("장면,반복,출처,행동,기대행동일치,대사,글자수,첫응답ms,전체ms,메모리MB,메모\n");
+            var csv = new StringBuilder("장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모\n");
             var slmTimes = new List<long>();
             var firstTokens = new List<long>();
+            var prepareTimes = new List<long>();
             var reasons = new Dictionary<string, int>();
             int total = 0;
+            int fixedCount = 0;
             int slmCount = 0;
+            int trimmed = 0;
+            int speechFixed = 0;
             int expectedOk = 0;
             long peak = 0;
 
@@ -191,21 +210,44 @@ namespace Jamkkaebi.Npc
                     ct.ThrowIfCancellationRequested();
                     total++;
                     status = scene.Id + " #" + rep + " (" + total + "/" + sceneList.Count * Math.Max(1, repeat) + ")";
+                    ReactionRequest request = scene.CreateRequest();
+                    // 게임처럼 반복마다 곁들일 거리를 바꾼다 (run.py 와 같게 1번째 반복 = 0번째)
+                    request.Variation = rep - 1;
+
+                    // 게임에서 탭해 확대할 때처럼 시스템 프롬프트를 먼저 읽힌다. 같은 도깨비가 이어지면 바로 끝난다
+                    long prepareMs = -1;
+                    if (prepareSystemPrompt && slm != null && slm.IsReady && !NpcActions.OnlyFixedLines(request.Candidates))
+                    {
+                        Stopwatch preparing = Stopwatch.StartNew();
+                        await manager.PrepareAsync(scene.RelicId, ct);
+                        prepareMs = preparing.ElapsedMilliseconds;
+                        prepareTimes.Add(prepareMs);
+                    }
+
                     Stopwatch watch = Stopwatch.StartNew();
-                    NpcResponse response = await manager.RequestAsync(scene.CreateRequest(), ct);
+                    NpcResponse response = await manager.RequestAsync(request, ct);
                     watch.Stop();
 
                     long memory = MemoryMb();
                     peak = Math.Max(peak, memory);
+                    bool isFixed = response.Note == NpcRequestManager.FixedLinesNote;
                     bool fromSlm = response.ShouldShow && !response.UsedFallback;
-                    string source = !response.ShouldShow ? "없음" : (fromSlm ? "SLM" : "기본");
+                    string source = !response.ShouldShow ? "없음" : (fromSlm ? "SLM" : (isFixed ? "정해진" : "기본"));
                     string action = response.ShouldShow ? response.Reaction.ActionId : "";
                     string line = response.ShouldShow ? response.Reaction.Line : "";
                     bool expected = scene.Expected.Contains(action);
                     long firstToken = fromSlm ? FirstTokenMs() : -1;
-                    if (fromSlm)
+                    if (isFixed)
+                    {
+                        fixedCount++;
+                    }
+                    else if (fromSlm)
                     {
                         slmCount++;
+                        // Note 에는 문장을 잘라 낸 것과 어미를 고친 것이 함께 적힌다 (OutputCheck.ToResult)
+                        string reactionNote = response.Reaction.Note ?? "";
+                        trimmed += reactionNote.Contains("잘라") || reactionNote.Contains("끊긴") ? 1 : 0;
+                        speechFixed += reactionNote.Contains("어미를 말투에 맞게 고침") ? 1 : 0;
                         slmTimes.Add(watch.ElapsedMilliseconds);
                         if (firstToken >= 0)
                         {
@@ -223,16 +265,25 @@ namespace Jamkkaebi.Npc
                     }
 
                     Say(scene.Id + " " + source + " " + action + " " + line + "  (" + watch.ElapsedMilliseconds + "ms"
-                        + (firstToken >= 0 ? ", 첫 응답 " + firstToken + "ms" : "") + ")" + (fromSlm ? "" : "  ← " + response.Note));
+                        + (prepareMs >= 0 ? ", 미리 읽기 " + prepareMs + "ms" : "")
+                        + (firstToken >= 0 ? ", 첫 응답 " + firstToken + "ms" : "") + ")"
+                        + (fromSlm && response.Reaction.Note == null ? "" : "  ← " + response.Note));
                     csv.Append(Csv(scene.Id)).Append(',').Append(rep).Append(',').Append(source).Append(',').Append(action).Append(',')
                         .Append(expected ? "O" : "X").Append(',').Append(Csv(line)).Append(',').Append(line.Length).Append(',')
-                        .Append(firstToken).Append(',').Append(watch.ElapsedMilliseconds).Append(',').Append(memory).Append(',')
-                        .Append(Csv(response.Note)).Append('\n');
+                        .Append(prepareMs).Append(',').Append(firstToken).Append(',').Append(watch.ElapsedMilliseconds).Append(',')
+                        .Append(memory).Append(',').Append(Csv(response.Note)).Append('\n');
                 }
             }
 
             Say("=== 요약 ===");
-            Say("SLM 대사 " + slmCount + "/" + total + ", 기대 행동 일치 " + expectedOk + "/" + total);
+            Say("SLM 대사 " + slmCount + "/" + (total - fixedCount) + " (이야기 " + fixedCount + "건은 정해진 대사, 문장 잘라 씀 " + trimmed + "건"
+                + ", 어미 고침 " + speechFixed + "건)"
+                + ", 기대 행동 일치 " + expectedOk + "/" + total);
+            if (prepareTimes.Count > 0)
+            {
+                Say("시스템 프롬프트 미리 읽기: 중앙값 " + Percentile(prepareTimes, 0.5) + "ms, 최대 " + prepareTimes.Max() + "ms"
+                    + " (같은 도깨비가 이어지면 0 에 가깝다)");
+            }
             foreach (KeyValuePair<string, int> reason in reasons.OrderByDescending(r => r.Value))
             {
                 Say("기본 대사로 대신: " + reason.Key + " " + reason.Value + "건");
@@ -273,7 +324,7 @@ namespace Jamkkaebi.Npc
                     return null;
 #endif
                 case BackendKind.LmStudio:
-                    return new LmStudioModelBackend(new LmStudioOptions { BaseUrl = lmStudioUrl, Model = lmStudioModel });
+                    return new LmStudioModelBackend(new LmStudioOptions { BaseUrl = lmStudioUrl, Model = lmStudioModel, UseJsonSchema = lmStudioJsonSchema });
                 default:
                     return null;
             }

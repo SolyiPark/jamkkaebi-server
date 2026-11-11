@@ -44,21 +44,39 @@ namespace Jamkkaebi.Npc
     /// <summary>
     /// 요청 관리자. 반응 요청 한 건을 받아 SLM 으로 만들어 보고, 안 되면 규칙 기반 생성기의 기본 대사로 대신한다.
     ///
+    /// <para><b>정해진 대사를 쓰는 경우</b>: 이야기 듣기는 SLM 을 부르지 않고 검수한 이야기 대사를 차례로 쓴다 (Note 가 FixedLinesNote).</para>
+    ///
     /// <para><b>기본 대사로 대신하는 경우</b>: SLM 을 끈 기기(저사양), 모델을 아직 안 받았거나 안 올라옴, 시간 초과,
     /// 출력 검사 실패, 페르소나 없는 도깨비, 런타임 오류. 앞의 둘은 SLM 을 부르지도 않는다.</para>
     ///
+    /// <para><b>시스템 프롬프트 미리 읽기</b>: 도깨비를 탭해 확대할 때 PrepareAsync 를 부르면, 그 도깨비의 시스템 메시지를
+    /// 모델에 미리 읽혀 둔다. 다른 도깨비의 요청·준비가 오거나 Cancel·CancelAll 하면 멈춘다.</para>
+    ///
     /// <para><b>아무것도 띄우지 않는 경우</b>: 부르는 쪽이 취소함(화면 종료), Cancel(relicId)(NPC 전환), CancelAll,
     /// 같은 도깨비에게 새 요청이 와서 옛 요청이 밀림, 후보가 없음. 늦게 끝난 옛 요청의 결과는 버린다.</para>
+    ///
+    /// <para><b>같은 대사 막기</b>: 도깨비마다 이번 실행에서 띄운 대사 RecentLineCount 개를 기억해 요청의 RecentLines 에 넣는다.
+    /// 출력 검사기는 그와 같은 대사를 거르고(SLM 생성기가 다시 만든다), 기본 대사도 그와 다른 것을 고른다.</para>
     ///
     /// <para>도깨비(relicId)마다 진행 중인 요청을 하나만 둔다. 손님 관람처럼 여러 도깨비가 동시에 말풍선을 띄우는 것은 된다.
     /// RequestId 는 시도마다 여기서 새로 붙인다. Unity 메인 스레드에서 await 하면 결과도 메인 스레드로 돌아온다.</para>
     /// </summary>
     public sealed class NpcRequestManager
     {
+        /// <summary>정해진 대사(이야기)를 띄웠을 때의 Note. SLM 을 부르지 않았다.</summary>
+        public const string FixedLinesNote = "이야기는 정해진 대사";
+
         private readonly INpcReactionGenerator slm;
         private readonly INpcReactionGenerator rule;
         private readonly object gate = new object();
         private readonly Dictionary<int, Session> sessions = new Dictionary<int, Session>();
+
+        // 도깨비마다 최근에 띄운 대사 (오래된 것부터)
+        private readonly Dictionary<int, List<string>> shown = new Dictionary<int, List<string>>();
+
+        // 진행 중인 시스템 프롬프트 미리 읽기. 모델은 하나라 한 번에 하나만 둔다
+        private Session preparing;
+        private int preparingRelicId;
 
         /// <param name="slm">SLM 생성기. 모델을 쓰지 않는 빌드면 null.</param>
         /// <param name="rule">규칙 기반 생성기. 반드시 있어야 한다.</param>
@@ -72,7 +90,11 @@ namespace Jamkkaebi.Npc
             this.rule = rule;
             SlmEnabled = slm != null;
             SlmTimeout = TimeSpan.FromSeconds(3);
+            RecentLineCount = 5;
         }
+
+        /// <summary>도깨비마다 기억해 두고 다시 쓰지 않을 최근 대사 수. 기본 5. 0 이면 기억하지 않는다.</summary>
+        public int RecentLineCount { get; set; }
 
         /// <summary>
         /// SLM 을 쓸지. 실기기 측정으로 정한 사양 기준에 못 미치는 기기면 false 로 두어 처음부터 기본 대사만 쓴다.
@@ -116,11 +138,16 @@ namespace Jamkkaebi.Npc
                 {
                     return NpcResponse.Discard(null, session.CancelNote());
                 }
+                AttachRecent(request);
 
                 // 1) SLM
                 ReactionResult slmAttempt = null;
                 string fallbackNote;
-                if (!SlmEnabled || slm == null)
+                if (NpcActions.OnlyFixedLines(request.Candidates))
+                {
+                    fallbackNote = FixedLinesNote;
+                }
+                else if (!SlmEnabled || slm == null)
                 {
                     fallbackNote = "SLM 꺼짐(기기 사양 또는 모델 없는 빌드) → 기본 대사";
                 }
@@ -137,7 +164,8 @@ namespace Jamkkaebi.Npc
                     }
                     if (!session.TimedOut && slmAttempt.IsSuccess && slmAttempt.RequestId == request.RequestId)
                     {
-                        return NpcResponse.Show(slmAttempt, slmAttempt, "SLM");
+                        Remember(request.RelicId, slmAttempt.Line);
+                        return NpcResponse.Show(slmAttempt, slmAttempt, slmAttempt.Note != null ? "SLM (" + slmAttempt.Note + ")" : "SLM");
                     }
                     fallbackNote = session.TimedOut
                             ? "SLM 시간 초과(" + (int)SlmTimeout.TotalMilliseconds + "ms) → 기본 대사"
@@ -162,6 +190,7 @@ namespace Jamkkaebi.Npc
                 }
                 if (fallback.IsSuccess && fallback.RequestId == request.RequestId)
                 {
+                    Remember(request.RelicId, fallback.Line);
                     return NpcResponse.Show(fallback, slmAttempt, fallbackNote);
                 }
                 return NpcResponse.Discard(slmAttempt, "기본 대사도 실패 " + fallback.FailReason + " (" + fallbackNote + ")");
@@ -172,27 +201,136 @@ namespace Jamkkaebi.Npc
             }
         }
 
-        /// <summary>그 도깨비의 진행 중인 요청을 취소한다 (NPC 전환). 결과는 버린다.</summary>
+        // 이 도깨비의 최근 대사를 요청에 넣는다. 게임이 미리 넣어 둔 것은 그대로 두고 뒤에 붙인다
+        private void AttachRecent(ReactionRequest request)
+        {
+            List<string> lines;
+            lock (gate)
+            {
+                lines = shown.TryGetValue(request.RelicId, out lines) ? new List<string>(lines) : new List<string>();
+            }
+            if (request.RecentLines == null)
+            {
+                request.RecentLines = new List<string>();
+            }
+            foreach (string line in lines)
+            {
+                if (!request.RecentLines.Contains(line))
+                {
+                    request.RecentLines.Add(line);
+                }
+            }
+        }
+
+        private void Remember(int relicId, string line)
+        {
+            if (RecentLineCount <= 0 || string.IsNullOrEmpty(line))
+            {
+                return;
+            }
+            lock (gate)
+            {
+                List<string> lines;
+                if (!shown.TryGetValue(relicId, out lines))
+                {
+                    lines = new List<string>();
+                    shown[relicId] = lines;
+                }
+                lines.Remove(line);
+                lines.Add(line);
+                while (lines.Count > RecentLineCount)
+                {
+                    lines.RemoveAt(0);
+                }
+            }
+        }
+
+        /// <summary>도깨비마다 기억해 둔 최근 대사 (오래된 것부터). 게임이 저장해 두었다가 다음 실행에 RecentLines 로 넘길 때 쓴다.</summary>
+        public List<string> RecentLinesOf(int relicId)
+        {
+            lock (gate)
+            {
+                List<string> lines;
+                return shown.TryGetValue(relicId, out lines) ? new List<string>(lines) : new List<string>();
+            }
+        }
+
+        /// <summary>
+        /// 도깨비를 탭해 확대할 때(선택지를 띄우기 전) 부른다. 그 도깨비의 시스템 메시지를 모델에 미리 읽혀 두어, 이어지는
+        /// 요청은 짧은 사용자 메시지만 읽게 한다. 기다리지 않아도 된다 — 예외를 던지지 않고, 실패해도 다음 요청이 처음부터 읽을 뿐이다.
+        /// SLM 을 쓰지 않거나 모델이 준비되지 않았으면 아무것도 하지 않는다. 다른 도깨비의 요청·준비가 오거나,
+        /// Cancel(그 도깨비)·CancelAll 하거나, ct 가 취소되면 멈춘다. 같은 도깨비의 요청은 이 준비가 끝나기를 기다렸다가 이어 읽는다.
+        /// </summary>
+        public async Task PrepareAsync(int relicId, CancellationToken ct = default(CancellationToken))
+        {
+            if (!SlmEnabled || slm == null || !slm.IsReady)
+            {
+                return;
+            }
+            var mine = new Session(ct);
+            Session previous;
+            lock (gate)
+            {
+                previous = preparing;
+                preparing = mine;
+                preparingRelicId = relicId;
+            }
+            if (previous != null)
+            {
+                previous.Cancel("다른 도깨비를 준비");
+            }
+            try
+            {
+                await slm.PrepareAsync(relicId, mine.Token).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // 미리 읽기는 덤이다. 취소·실패해도 다음 요청이 시스템 메시지부터 읽는다
+            }
+            finally
+            {
+                lock (gate)
+                {
+                    if (preparing == mine)
+                    {
+                        preparing = null;
+                    }
+                }
+                mine.Dispose();
+            }
+        }
+
+        /// <summary>그 도깨비의 진행 중인 요청(과 시스템 프롬프트 미리 읽기)을 취소한다 (NPC 전환). 결과는 버린다.</summary>
         public void Cancel(int relicId)
         {
             Session session;
+            Session prepare;
             lock (gate)
             {
                 sessions.TryGetValue(relicId, out session);
+                prepare = preparing != null && preparingRelicId == relicId ? preparing : null;
             }
             if (session != null)
             {
                 session.Cancel("다른 NPC 로 전환해 취소");
             }
+            if (prepare != null)
+            {
+                prepare.Cancel("다른 NPC 로 전환해 취소");
+            }
         }
 
-        /// <summary>모든 진행 중인 요청을 취소한다 (화면 종료, 정화 미니게임 진입). 결과는 버린다.</summary>
+        /// <summary>모든 진행 중인 요청과 미리 읽기를 취소한다 (화면 종료, 정화 미니게임 진입). 결과는 버린다.</summary>
         public void CancelAll()
         {
             List<Session> running;
             lock (gate)
             {
                 running = new List<Session>(sessions.Values);
+                if (preparing != null)
+                {
+                    running.Add(preparing);
+                }
             }
             foreach (Session session in running)
             {
@@ -248,18 +386,25 @@ namespace Jamkkaebi.Npc
         }
 
         // 취소는 잠금 밖에서 한다. 취소하는 순간 그 요청의 남은 처리가 같은 스레드에서 이어 돌며 End 로 목록을 고치기 때문이다
+        // 다른 도깨비를 미리 읽는 중이면 멈춘다 (모델은 하나라, 그대로 두면 이 요청이 그 뒤에 줄을 선다)
         private Session Begin(int relicId, CancellationToken ct)
         {
             var session = new Session(ct);
             Session previous;
+            Session otherPrepare;
             lock (gate)
             {
                 sessions.TryGetValue(relicId, out previous);
                 sessions[relicId] = session;
+                otherPrepare = preparing != null && preparingRelicId != relicId ? preparing : null;
             }
             if (previous != null)
             {
                 previous.Cancel("같은 도깨비의 새 요청으로 대체");
+            }
+            if (otherPrepare != null)
+            {
+                otherPrepare.Cancel("다른 도깨비의 요청");
             }
             return session;
         }

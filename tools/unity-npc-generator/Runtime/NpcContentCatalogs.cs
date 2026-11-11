@@ -51,7 +51,14 @@ namespace Jamkkaebi.Npc
         public string onDrag;
 
         public string speechStyle;
+
+        /// <summary>대사 줄 끝에 붙이는 짧은 말투 다짐 (예: "반말로만, '~요'·'~습니다' 없이"). 시스템 메시지에만 두면 작은 모델이 잊고 섞었다.</summary>
+        public string speechReminder;
+
         public List<string> examples = new List<string>();
+
+        /// <summary>상황별 곁들일 거리. 같은 상황이 거듭될 때 대사가 갈리도록 요청마다 하나씩 돌려 싣는다.</summary>
+        public PersonaFlavors flavors = new PersonaFlavors();
 
         /// <summary>
         /// 실화 이야기 조각. 서버 realStory 를 이야기 한 번에 하나씩 쓰도록 나눈 것이고, 사실을 바꾸거나 보태지 않았다.
@@ -61,6 +68,34 @@ namespace Jamkkaebi.Npc
 
         /// <summary>어미 검사용. 프롬프트에는 싣지 않는다.</summary>
         public EndingHint endingHint;
+    }
+
+    /// <summary>
+    /// 상황별 곁들일 거리 (personas.json 의 flavors). 성향·생김새에서 고른 짧은 이름씨다. 요청마다 ReactionRequest.Variation 번째
+    /// 것을 프롬프트에 하나 싣는다 — 같은 상황이 거듭될 때 프롬프트가 같으면 작은 모델이 같은 대사를 내서다.
+    /// </summary>
+    [Serializable]
+    public sealed class PersonaFlavors
+    {
+        public List<string> tap = new List<string>();     // 탭 인사
+        public List<string> faded = new List<string>();   // 흐려짐·재봉인 안부
+        public List<string> clear = new List<string>();   // 선명한 안부, 관리 감사
+        public List<string> drag = new List<string>();    // 끌려감
+        public List<string> visit = new List<string>();   // 손님 관람
+
+        /// <summary>PromptAssembler.FlavorKey 의 이름에 맞는 목록. 없으면 null.</summary>
+        public List<string> For(string key)
+        {
+            switch (key)
+            {
+                case "tap": return tap;
+                case "faded": return faded;
+                case "clear": return clear;
+                case "drag": return drag;
+                case "visit": return visit;
+                default: return null;
+            }
+        }
     }
 
     [Serializable]
@@ -90,6 +125,8 @@ namespace Jamkkaebi.Npc
         public string label;
         public string pattern;
         public string notPattern;
+        /// <summary>대사 어디에도 있으면 안 되는 말(정규식). 반말 도깨비의 '야'·'저', 주인을 '주인님' 아닌 말로 부르기 같은 것.</summary>
+        public string bannedPattern;
     }
 
     /// <summary>행동 카탈로그 (actions.json).</summary>
