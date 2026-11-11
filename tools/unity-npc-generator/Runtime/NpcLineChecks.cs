@@ -31,8 +31,9 @@ namespace Jamkkaebi.Npc
         /// <summary>앞부분을 비교하려면 두 대사 모두 적어도 이 글자 수는 되어야 한다 ("고마워." 같은 짧은 말은 보지 않는다).</summary>
         public const int OpeningMin = 6;
 
-        /// <summary>감탄만 있는 짧은 문장("어흠.", "허허,", "히힛!")은 어미를 보지 않는다.</summary>
-        public const int ShortSentence = 3;
+        // 감탄사만 있는 문장·마디("어흠.", "허허,", "히힛!")는 어미를 보지 않는다. 짧은 문장을 다 건너뛰면 해요체 도깨비의
+        // "고마워! 다시 오세요."의 "고마워!"(3글자)까지 건너뛰어서, 알려진 감탄사만 건너뛴다. run.py 의 INTERJECTION_RE 와 같다
+        private static readonly Regex Interjection = new Regex("^(어흠|에헴|흠|허허|어허|허|히힛|히히|히잉|헤헤|킁킁|앗싸|앗|꺄|꺅|오예|야호|와|오|어|음|아)+$", RegexOptions.CultureInvariant);
 
         private const string SentenceEnd = ".!?~。";
         private const string SentenceClose = "\"'”’)]」』";
@@ -214,7 +215,7 @@ namespace Jamkkaebi.Npc
             var judged = new List<string>();
             foreach (string sentence in Sentences(line))
             {
-                if (Core(sentence).Length > ShortSentence)
+                if (!IsInterjection(sentence))
                 {
                     judged.Add(sentence);
                 }
@@ -241,7 +242,7 @@ namespace Jamkkaebi.Npc
                     foreach (string piece in sentence.Split(','))
                     {
                         string clause = piece.Trim();
-                        if (Core(clause).Length > ShortSentence
+                        if (!IsInterjection(clause)
                                 && Regex.IsMatch(Ending(clause), hint.notPattern, RegexOptions.CultureInvariant))
                         {
                             wrong = clause;
@@ -251,6 +252,13 @@ namespace Jamkkaebi.Npc
                 }
             }
             return true;
+        }
+
+        /// <summary>감탄사만 있는 문장·마디인지 ("어흠.", "허허…", "앗,"). 비었어도 true.</summary>
+        public static bool IsInterjection(string text)
+        {
+            string core = Core(text);
+            return core.Length == 0 || Interjection.IsMatch(core);
         }
 
         // 어미를 볼 끝: 끝의 문장 부호와 부르는 말("주인님")을 뗀 것

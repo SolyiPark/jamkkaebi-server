@@ -664,6 +664,11 @@ public static class Program
                 && !NpcLineChecks.SpeechMatches("좋은 하루 보내요, 천천히 구경하게.", hage, out wrong), "하게체: '~요'를 섞으면 걸림");
         Check(NpcLineChecks.SpeechMatches("조심해 주세요. 고맙습니다.", haeyo, out wrong) && !NpcLineChecks.SpeechMatches("조심해 줘.", haeyo, out wrong),
                 "해요체: '~요'·'~습니다'는 되고 반말은 걸림");
+        Check(!NpcLineChecks.SpeechMatches("어디 가냐?", haeyo, out wrong), "해요체: '~냐'는 반말이라 걸림");
+        Check(!NpcLineChecks.SpeechMatches("고마워! 다시 오세요.", haeyo, out wrong) && wrong == "고마워!",
+                "짧은 문장도 감탄사가 아니면 어미를 봄 (해요체의 '고마워!') ← " + wrong);
+        Check(NpcLineChecks.SpeechMatches("히힛! 같이 놀자!", banmal, out wrong) && NpcLineChecks.SpeechMatches("어흠. 고맙소.", hao, out wrong)
+                && NpcLineChecks.SpeechMatches("앗, 깨질까 봐 무서워요.", haeyo, out wrong), "감탄사만 있는 문장·마디는 건너뜀");
         // bannedPattern: 묘작이는 '야'·'저'·'주인님' 아닌 호칭, 향산이는 반말 인사·반말 어미
         Check(!NpcLineChecks.SpeechMatches("야, 나 좀 만져봐!", banmal, out wrong) && !NpcLineChecks.SpeechMatches("주인님, 저 왔어!", banmal, out wrong)
                 && !NpcLineChecks.SpeechMatches("주인 왔어! 놀자!", banmal, out wrong)
@@ -698,7 +703,7 @@ public static class Program
         Expect(loose, Out("greet", "player", "안녕하시오, 계시오? 주인께서 오셨구려."), again, OutputProblem.Repeated,
                 "반복은 페르소나 없이도 봄 (최근 대사만 있으면)");
 
-        // 기본 대사도 페르소나 어미를 지킨다 (모델이 실패했을 때 대신 나가는 말이다)
+        // 기본 대사와 이야기 대사도 페르소나 어미를 지킨다 (모델이 실패했을 때, 이야기 듣기 때 검사 없이 그대로 나가는 말이다)
         foreach (SpiritLines spirit in lines.spirits)
         {
             Persona owner = personas.Find(spirit.relicId);
@@ -706,7 +711,7 @@ public static class Program
             {
                 continue;
             }
-            foreach (string line in spirit.pools.SelectMany(p => p.lines))
+            foreach (string line in spirit.pools.SelectMany(p => p.lines).Concat(spirit.stories ?? new List<string>()))
             {
                 Check(NpcLineChecks.SpeechMatches(line, owner.endingHint, out wrong), spirit.name + " 기본 대사 어미: " + line + " ← " + wrong);
             }
@@ -1169,8 +1174,12 @@ public static class Program
         {
             ReactionRequest request = ToRequest(scene);
             // 게임에서 탭해 확대할 때처럼 시스템 메시지를 먼저 읽힌다
+            // 이야기 듣기는 정해진 대사라 모델을 부르지 않는다. 미리 읽기도 하지 않는다 (실기기 시험기와 같다)
             Stopwatch preparing = Stopwatch.StartNew();
-            manager.PrepareAsync(request.RelicId).Wait();
+            if (!NpcActions.OnlyFixedLines(request.Candidates))
+            {
+                manager.PrepareAsync(request.RelicId).Wait();
+            }
             preparing.Stop();
             Stopwatch watch = Stopwatch.StartNew();
             NpcResponse response = Ask(manager, request);

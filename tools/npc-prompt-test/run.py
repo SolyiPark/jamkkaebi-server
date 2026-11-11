@@ -17,6 +17,7 @@ CSV로 저장한다. 말투·상황 반영 점수는 사람이 CSV에서 채운�
 """
 
 import argparse
+import random
 import csv
 import http.client
 import json
@@ -32,6 +33,8 @@ from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 DATA = BASE / "data"
+# 게임의 기본 대사 (출력 검사에 걸려 기본 대사로 대신할 때 무엇을 띄우는지 흉내 낸다). 없으면 흉내 내지 않는다
+DEFAULT_LINES = BASE.parent / "unity-npc-generator" / "Data" / "default_lines.json"
 
 VARIANTS = {
     "single": "한 번 호출. 상황은 키-값, 예시 대사와 대화 기억 포함",
@@ -55,7 +58,7 @@ FIELDS = [
     ("scene", "장면"), ("spirit", "도깨비"), ("mode", "모드"), ("input", "선택지"), ("repeat", "반복"),
     ("action", "행동"), ("animation", "애니메이션"), ("target", "대상"), ("line", "대사"),
     ("final", "최종"), ("attempts", "시도"), ("rejected", "거른이유"),
-    ("full_line", "자르기전대사"), ("speech_fixed", "다듬기전대사"), ("cut", "문장자름"), ("truncated", "토큰한도끊김"),
+    ("full_line", "자르기전대사"), ("speech_fixed", "다듬기전대사"), ("fallback_line", "띄운기본대사"), ("cut", "문장자름"), ("truncated", "토큰한도끊김"),
     ("json_ok", "JSON"), ("pure_json", "순수JSON"), ("action_ok", "행동OK"), ("target_ok", "대상OK"),
     ("expected_ok", "기대행동"), ("forbidden_ok", "금지어없음"), ("mention_ok", "필수어포함"),
     ("bad_ok", "공통금칙어없음"), ("bad_hits", "걸린금칙어"),
@@ -129,7 +132,9 @@ SIMILAR_OPENING = 0.8   # 앞 OPENING_CHARS 글자가 이만큼 겹치면 ("주�
 OPENING_CHARS = 10      # 앞부분으로 비교하는 글자 수. 첫 문장으로 비교하면 "주인님~"의 '~'에서 끊겨 놓쳤다
 OPENING_MIN = 6         # 앞부분 비교에 필요한 글자 수 ("고마워." 같은 짧은 말은 보지 않는다)
 RECENT_LINES = 5        # 도깨비마다 기억하는 최근 대사 수 (게임의 NpcRequestManager.RecentLineCount)
-SHORT_SENTENCE = 3  # 어미를 볼 때 건너뛰는 짧은 문장 ("어흠.", "허허,", "히힛!" 같은 감탄)
+# 어미를 볼 때 건너뛰는 감탄사만 있는 문장·마디 ("어흠.", "허허,", "히힛!"). 짧은 문장을 다 건너뛰면 해요체 도깨비의
+# "고마워! 다시 오세요."의 "고마워!"(3글자)까지 건너뛰어서, 알려진 감탄사만 건너뛴다. 게임의 NpcLineChecks.IsInterjection 과 같다
+INTERJECTION_RE = re.compile("^(어흠|에헴|흠|허허|어허|허|히힛|히히|히잉|헤헤|킁킁|앗싸|앗|꺄|꺅|오예|야호|와|오|어|음|아)+$")
 VOCATIVE_RE = re.compile(r"[\s,]*(주인님|주인|손님)$")  # 문장 끝에 붙은 부르는 말
 STORY_COUNT = 3  # 도깨비마다 실화 이야기 수
 
@@ -151,6 +156,8 @@ def load_content():
         "labels": scene_file["labels"],
         "scenes": scene_file["scenes"],
         "forbidden": compile_forbidden(read_json("forbidden.json")),
+        "default_lines": json.loads(DEFAULT_LINES.read_text(encoding="utf-8")) if DEFAULT_LINES.exists() else None,
+        "last_fallback": {},  # 기본 대사 고르기에서 (도깨비:행동:변형) 마다 바로 앞에 띄운 것
     }
 
 
@@ -754,6 +761,12 @@ def sentences_of(line):
     return [p.strip() for p in pieces if p.strip()]
 
 
+def is_interjection(text):
+    """감탄사만 있는 문장·마디인지 ("어흠.", "허허…", "앗,"). 비었어도 True."""
+    core = PUNCT_RE.sub("", text)
+    return not core or INTERJECTION_RE.match(core) is not None
+
+
 def speech_mismatch(line, hint):
     """그 도깨비의 어미(endingHint)로 끝나지 않는 첫 문장. 없으면 None. 게임의 NpcLineChecks.SpeechMatches 와 같다.
     한 문장이라도 어긋나면 걸린다 — "놀고 싶어요~ 같이 놀자!"처럼 섞은 것도 잡는다. 감탄만 있는 짧은 문장("어흠.", "히힛!")은
@@ -768,7 +781,7 @@ def speech_mismatch(line, hint):
     ending = lambda text: VOCATIVE_RE.sub("", TRAILING_RE.sub("", text))
     # pattern: 문장마다 이렇게 끝나야 한다
     if hint.get("pattern"):
-        judged = [s for s in sentences_of(line) if len(PUNCT_RE.sub("", s)) > SHORT_SENTENCE] or [line]
+        judged = [s for s in sentences_of(line) if not is_interjection(s)] or [line]
         for sentence in judged:
             if re.search(hint["pattern"], ending(sentence)) is None:
                 return sentence
@@ -777,7 +790,7 @@ def speech_mismatch(line, hint):
     if hint.get("notPattern"):
         for sentence in sentences_of(line):
             for clause in (c.strip() for c in sentence.split(",")):
-                if len(PUNCT_RE.sub("", clause)) > SHORT_SENTENCE and re.search(hint["notPattern"], ending(clause)):
+                if not is_interjection(clause) and re.search(hint["notPattern"], ending(clause)):
                     return clause
     return None
 
@@ -1008,7 +1021,8 @@ def evaluate(obj, scene, persona, limit, forbidden_groups, truncated=False, norm
         "truncated": truncated,
         "length": len(line),
         "length_ok": fitted is not None and 0 < len(line) <= limit,
-        "newline_ok": "\n" not in line,
+        # 자르기 전 대사로 본다. 앞 문장만 남기면 뒤의 줄바꿈이 사라져, 게임이 거르는 대사를 통과시켰다 (게임은 자르기 전에 본다)
+        "newline_ok": "\n" not in full_line and "\r" not in full_line,
         "foreign_ok": FOREIGN_RE.search(line) is None,
         "ending_ok": ending_check(line, persona.get("endingHint")),
     }
@@ -1085,6 +1099,52 @@ def metric_fields(metrics):
     }
 
 
+# 게임의 RuleBasedReactionGenerator 와 같은 기준
+RECENT_CARE_DAYS = 3
+REGULAR_VISITOR_DAYS = 2
+FADED_CLARITIES = {"FADED", "RESEALED", "흐려짐", "재봉인"}
+
+
+def fact_of(scene, key):
+    return next((str(f["value"]) for f in scene["facts"] if f["key"] == key), None)
+
+
+def pick_fallback(content, scene, recent):
+    """기본 대사로 대신할 때 게임이 띄울 대사 (RuleBasedReactionGenerator 를 흉내 낸다). 기본 대사 파일이 없으면 None.
+    후보 고르기(손님 방문 횟수 → preferredActions → 첫 후보)·안부 변형·최근 대사 피하기·바로 앞 대사 피하기가 같다. 고르기는 무작위다."""
+    data = content.get("default_lines")
+    if not data:
+        return None
+    spirit = next((s for s in data["spirits"] if s["relicId"] == scene["relicId"]), data["fallback"])
+    ids = [c["action"] for c in scene["candidates"]]
+    action = None
+    if scene["input"] == "visit":
+        visits = fact_of(scene, "visit_count_30d")
+        want = "wander_recall" if visits and visits.isdigit() and int(visits) >= REGULAR_VISITOR_DAYS else "wander_greet"
+        action = want if want in ids else None
+    action = action or next((a for a in spirit.get("preferredActions", []) if a in ids), ids[0])
+    kind = ""
+    if action == "answer_status":
+        clarity, days = fact_of(scene, "clarity"), fact_of(scene, "last_care_days_ago")
+        kind = ("faded" if clarity and clarity.strip() in FADED_CLARITIES
+                else "recent_care" if days and days.lstrip("-").isdigit() and int(days) <= RECENT_CARE_DAYS else "default")
+
+    def find(lines_of, variant_name):
+        return next((p["lines"] for p in lines_of.get("pools", [])
+                     if p["actionId"] == action and p["variant"] == variant_name), None)
+    lines = find(spirit, kind) or find(spirit, "") or find(data["fallback"], kind) or find(data["fallback"], "")
+    if not lines:
+        return None
+    key = f"{scene['relicId']}:{action}:{kind}"
+    last = content["last_fallback"].get(key)
+    # 최근 대사와 같은 것을 먼저 빼고, 그 안에서 바로 앞 대사를 피한다 (게임의 Pick 과 같은 순서)
+    pool = [x for x in lines if find_similar(x, recent) is None] or lines
+    pool = [x for x in pool if x != last] or pool
+    picked = random.choice(pool)
+    content["last_fallback"][key] = picked
+    return picked
+
+
 def run_enforced(args, content, model, variant, scene, persona, rep, seed, recent):
     """게임처럼 만든다: 출력 검사(game_problem)에 걸리면 곁들일 거리를 바꿔 다시 만들고(--attempts 번까지),
     그래도 걸리면 게임은 기본 대사로 대신한다(최종 = 기본 대사). 모델 호출 오류는 다시 하지 않는다 (게임도 바로 기본 대사).
@@ -1111,11 +1171,15 @@ def run_enforced(args, content, model, variant, scene, persona, rep, seed, recen
     row["attempts"] = attempt
     row["final"] = "SLM" if problem is None else "기본 대사"
     row["rejected"] = " / ".join(rejected)
+    # 기본 대사로 대신했으면 게임이 띄울 기본 대사를 고른다. 대사 칸은 마지막 시도의 모델 대사 그대로 두고, 띄운 것은 따로 적는다
+    row["fallback_line"] = (pick_fallback(content, scene, recent) or "") if problem else ""
+    row["shown_line"] = row["fallback_line"] if problem else row.get("line", "")
     if total and attempt > 1:
         row.update(metric_fields(total))
-    # 반복안됨: 띄운(또는 마지막으로 만든) 대사가 그 도깨비의 최근 대사와 다른지. 최근 대사가 없으면 판단하지 않는다
-    same = find_similar(row["line"], recent) if row.get("line") and recent else None
-    row["fresh_ok"] = None if not (row.get("line") and recent) else same is None
+    # 반복안됨: 화면에 띄운 대사(SLM 이거나 기본 대사)가 그 도깨비의 최근 대사와 다른지. 최근 대사가 없으면 판단하지 않는다
+    shown = row["shown_line"]
+    same = find_similar(shown, recent) if shown and recent else None
+    row["fresh_ok"] = None if not (shown and recent) else same is None
     if same:
         row["copy_hit"] = " / ".join(x for x in (row.get("copy_hit", ""), f"반복:{same[0]}") if x)
     return row
@@ -1341,8 +1405,9 @@ def main():
                         # 게임의 RecentLines 처럼 그 도깨비가 이 모델·방식에서 최근에 띄운 대사 (장면이 달라도 같은 도깨비면 함께)
                         key = (model, variant, scene["relicId"])
                         row = run_enforced(args, content, model, variant, scene, persona, rep, seed, recent[key])
-                        if row["final"] == "SLM":
-                            recent[key] = (recent[key] + [row["line"]])[-RECENT_LINES:]
+                        # 게임처럼 화면에 띄운 대사는 기본 대사여도 기억한다 (NpcRequestManager.RecentLinesOf)
+                        if row["shown_line"]:
+                            recent[key] = (recent[key] + [row["shown_line"]])[-RECENT_LINES:]
                         rows.append(row)
                         writer.writerow([cell(row, key) for key, _ in FIELDS])
                         f.flush()
@@ -1351,8 +1416,8 @@ def main():
                             shown = f"{row['action']}({row['animation'] or '후보 밖'}) {line}"
                             if row["attempts"] > 1 or row["final"] != "SLM":
                                 shown += f"  [{row['attempts']}번 시도, {row['final']}: {row['rejected'][:50]}]"
-                        elif error:
-                            shown = f"실패 {error[:60]}"
+                        elif row.get("error"):
+                            shown = f"실패 {row['error'][:60]}"
                         elif not row["raw"] and row.get("reasoning_tokens"):
                             shown = f"대사 없음 — 생각에 {row['reasoning_tokens']}토큰을 쓰다 출력 한도에 걸림"
                         else:

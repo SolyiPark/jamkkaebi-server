@@ -1,5 +1,5 @@
 {
-  "contentVersion": "lines-7",
+  "contentVersion": "lines-8",
   "storyPolicy": "stories 는 실화를 담은 이야기 대사로(잠깨비 목적에 맞춰 고른 실화), npc-prompt-test/data/personas.json 의 stories 와 같은 순서다. 사실은 그대로 두고 말투만 입혔다. 돌려 가며 써서 다 들려줄 때까지 같은 이야기를 반복하지 않는다. fallback(페르소나가 아직 없는 도깨비)은 stories 없이 자료 문장(verified_story) 앞뒤에 storyPrefix·storyTail 을 붙인다.",
   "spirits": [
     {
@@ -30,7 +30,7 @@
       "name": "향산이",
       "preferredActions": ["thank_calm", "struggle_play"],
       "stories": [
-        "허허, 주차장이 될 뻔한 땅을, 한 번만 더 파 보자던 사람들 덕에 내가 발견됐다네. 국보도 되었지.",
+        "허허, 주차장이 될 뻔한 땅을, 한 번만 더 파 보자던 사람들 덕에 내가 발견됐다네. 국보도 되었다네.",
         "내 몸 좀 보게… 용이 연꽃 몸을 받치고, 산봉우리 사이엔 다섯 악사, 꼭대기엔 봉황이 있다네.",
         "허허, 1,300년 넘게 진흙에 묻혀 있었던 덕에 옛 모습을 지킬 수 있었구먼."
       ],

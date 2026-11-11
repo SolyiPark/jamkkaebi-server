@@ -48,7 +48,10 @@ namespace Jamkkaebi.Npc
         public LlmUnityGrammar grammar = LlmUnityGrammar.Gbnf;
 
         public string lmStudioUrl = "http://192.168.0.10:1234";
-        public string lmStudioModel = "google/gemma-4-e2b";
+        public string lmStudioModel = "kanana-1.5-2.1b-instruct-2505";
+
+        [Tooltip("LM Studio: JSON 스키마 형식 제약을 쓴다. Kanana 처럼 형식 제약을 켜면 LM Studio 가 오류를 내는 모델은 끈다 — 끄면 프롬프트에 형식 설명을 싣는다 (run.py --no-format 과 같다)")]
+        public bool lmStudioJsonSchema = false;
 
         [Header("시험")]
         [Tooltip("SLM 을 기다리는 시간(초). 잴 때는 넉넉히 두고, 결과를 보고 게임 값(SlmTimeout)을 정한다")]
@@ -162,7 +165,9 @@ namespace Jamkkaebi.Npc
             if (model != null)
             {
                 // 형식 제약을 끄면(Grammar None) 모델이 JSON 모양을 알 수 있게 프롬프트에 형식 설명을 싣는다
-                var promptOptions = new PromptOptions { DescribeFormat = backend == BackendKind.LlmUnity && grammar == LlmUnityGrammar.None };
+                // LM Studio 는 JSON 스키마를 끄면(lmStudioJsonSchema) 같은 방식으로 형식 설명을 싣는다
+                bool unconstrained = backend == BackendKind.LlmUnity ? grammar == LlmUnityGrammar.None : !lmStudioJsonSchema;
+                var promptOptions = new PromptOptions { DescribeFormat = unconstrained };
                 // 게임처럼 페르소나를 넘겨 자기 이름·존댓말 반말 섞기도 거른다. 걸리면 곁들일 거리를 바꿔 한 번 더 만든다
                 slm = new SlmReactionGenerator(model, new PromptAssembler(personaCatalog, actionCatalog, promptOptions),
                         new NpcOutputValidator(new NpcLineFilter(forbiddenCatalog), personaCatalog));
@@ -319,7 +324,7 @@ namespace Jamkkaebi.Npc
                     return null;
 #endif
                 case BackendKind.LmStudio:
-                    return new LmStudioModelBackend(new LmStudioOptions { BaseUrl = lmStudioUrl, Model = lmStudioModel });
+                    return new LmStudioModelBackend(new LmStudioOptions { BaseUrl = lmStudioUrl, Model = lmStudioModel, UseJsonSchema = lmStudioJsonSchema });
                 default:
                     return null;
             }

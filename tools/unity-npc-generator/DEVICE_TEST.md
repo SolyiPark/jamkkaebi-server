@@ -85,7 +85,7 @@
    - 이야기 듣기 5장면(S10 · S11 · S18 · S19 · S20)은 AI 를 쓰지 않고 정해진 이야기 대사가 나온다(출처 "정해진"). 그래서 SLM 대사는 13장면 중 몇 개인지로 센다.
    - 장면 줄의 "미리 읽기 …ms" 가 시스템 프롬프트를 읽는 시간이다. 같은 도깨비가 이어지는 장면(S03→S04, S05→S06 등)은 0 에 가까워야 한다.
 3. **"모델 올리기 실패"** 가 나오면 콘솔 로그를 본다. `unknown model architecture` 같은 말이 있으면 0단계의 "안 되면"으로 간다. **폰으로 넘어가지 말고** 콘솔 로그를 저장해 알린다.
-4. 비교하고 싶으면 Backend 를 `LmStudio`(Lm Studio Model = `kanana-1.5-2.1b-instruct-2505`)로 바꿔 PC의 LM Studio 결과와 나란히 본다.
+4. 비교하고 싶으면 Backend 를 `LmStudio`(Lm Studio Model = `kanana-1.5-2.1b-instruct-2505`, Lm Studio Json Schema 끔)로 바꿔 PC의 LM Studio 결과와 나란히 본다.
 5. 장면 줄 끝의 메모에 "어미를 말투에 맞게 고침 ('…')"이 붙으면 모델이 쓴 대사를 고친 것이다. 요약에 "어미 고침 n건"으로 센다.
 
 ## 4. 안드로이드 폰
@@ -125,7 +125,7 @@
 9. **설정을 바꿔 다시 재기**: 6단계 표를 보고 Threads(4), Grammar(`JsonSchema` → `None`)를 바꿔 다시 빌드해 비교한다. 바꾼 값은 기록표 비고에 적는다.
 10. **(선택) LLMUnity로 모델이 안 뜰 때 흐름만 보기**: 폰이 PC의 LM Studio를 쓰게 해서 화면·요청 흐름을 먼저 확인할 수 있다. **이때 잰 속도는 PC 속도라 폰 성능 기록으로 쓰지 않는다.**
     - PC의 LM Studio에서 서버를 켜고 "Serve on Local Network"를 켠다. 폰과 PC는 같은 Wi-Fi에 둔다.
-    - `NpcDeviceTestRunner` 의 Backend = `LmStudio`, Lm Studio Url = `http://<PC 내부 IP>:1234`, Lm Studio Model = `kanana-1.5-2.1b-instruct-2505`. LM Studio 에서 형식 제약 오류가 나면 Grammar 를 `None` 으로 둔다.
+    - `NpcDeviceTestRunner` 의 Backend = `LmStudio`, Lm Studio Url = `http://<PC 내부 IP>:1234`, Lm Studio Model = `kanana-1.5-2.1b-instruct-2505`, **Lm Studio Json Schema = 끔**(기본값). Kanana 는 LM Studio 에서 JSON 스키마 형식 제약을 켜면 오류가 난다. 끄면 형식 제약 없이 프롬프트에 출력 형식 설명을 싣는다(PC 의 `run.py --no-format` 과 같은 조건). Grammar 칸은 LLMUnity 에만 쓰인다.
     - 연결이 막히면 Player Settings → Other Settings → Allow downloads over HTTP 를 Always allowed 로 바꿔 본다.
 
 

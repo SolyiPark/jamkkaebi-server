@@ -262,23 +262,24 @@ namespace Jamkkaebi.Npc
             return "default";
         }
 
-        // 같은 도깨비·같은 행동에서 바로 앞과 같은 대사는 피하고, 그 도깨비가 최근에 띄운 대사(request.RecentLines)와
-        // 같은 대사도 되도록 피한다. 다 겹치면 바로 앞과 다른 것, 그것도 없으면 아무거나 쓴다
+        // 그 도깨비가 최근에 띄운 대사(request.RecentLines)와 같은 대사를 먼저 피하고, 그 안에서 같은 도깨비·같은 행동의
+        // 바로 앞 대사를 피한다. 바로 앞 대사를 먼저 빼면 [A, B] 에서 앞 대사 A 를 빼고 남은 B 가 최근 대사라 B 를 또 띄웠다.
+        // 최근 대사와 다 겹치면 바로 앞과 다른 것, 그것도 없으면 아무거나 쓴다
         private string Pick(string key, List<string> lines, List<string> recent)
         {
             lock (gate)
             {
                 string last;
                 lastLines.TryGetValue(key, out last);
-                List<string> pool = lines.Where(line => line != last).ToList();
+                List<string> pool = lines.Where(line => !NpcLineChecks.FindSimilar(line, recent).HasValue).ToList();
                 if (pool.Count == 0)
                 {
                     pool = lines;
                 }
-                List<string> fresh = pool.Where(line => !NpcLineChecks.FindSimilar(line, recent).HasValue).ToList();
-                if (fresh.Count > 0)
+                List<string> notLast = pool.Where(line => line != last).ToList();
+                if (notLast.Count > 0)
                 {
-                    pool = fresh;
+                    pool = notLast;
                 }
                 string picked = pool[random.Next(pool.Count)];
                 lastLines[key] = picked;
