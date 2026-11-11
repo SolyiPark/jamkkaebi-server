@@ -23,7 +23,7 @@ namespace Jamkkaebi.Npc
             NumThreads = -1;
             ContextSize = 2048;
             Temperature = 0.7f;
-            MaxTokens = 160;
+            MaxTokens = 64;
             Grammar = LlmUnityGrammar.Gbnf;
             DisableThinking = true;
             WarmUp = true;
@@ -42,12 +42,15 @@ namespace Jamkkaebi.Npc
         /// <summary>CPU 스레드 수 (-1 = 모두). 폰은 고성능 코어 수(보통 4 안팎)가 더 빠를 수 있다.</summary>
         public int NumThreads { get; set; }
 
-        /// <summary>컨텍스트 크기(토큰). 프롬프트가 700~1000 토큰이고 대사가 160 토큰 이내라 2048 이면 된다. 작을수록 메모리를 덜 쓴다.</summary>
+        /// <summary>컨텍스트 크기(토큰). 프롬프트가 1000 토큰 안쪽이고 대사가 64 토큰 이내라 2048 이면 된다. 작을수록 메모리를 덜 쓴다.</summary>
         public int ContextSize { get; set; }
 
         public float Temperature { get; set; }
 
-        /// <summary>한 번에 생성할 최대 토큰.</summary>
+        /// <summary>
+        /// 한 번에 생성할 최대 토큰. JSON 뼈대 약 20토큰 + 40자 대사 약 25토큰이라 64 로 둔다. 넘치면 대사 중간에서 끊기고,
+        /// 출력 검사기가 끝난 문장까지만 쓴다. 줄이면 생성 시간의 상한이 줄지만 끊기는 대사가 는다.
+        /// </summary>
         public int MaxTokens { get; set; }
 
         /// <summary>정하면 결과가 재현된다. 없으면 무작위.</summary>
@@ -121,6 +124,8 @@ namespace Jamkkaebi.Npc
     /// <item>취소: 취소되면 모델에 멈추라고 하고, CancelGrace 안에 멈추지 않아도 기다리지 않는다.</item>
     /// <item>올리기·내리기: LoadAsync 가 모델을 올리고(실패하면 예외, IsLoaded 는 false) 미리 한 번 생성해 둔다.
     /// Unload 는 진행 중인 요청을 취소하고 모델을 내려 메모리를 돌려준다. 올리는 도중에 Unload 하면 올린 모델을 바로 내린다.</item>
+    /// <item>미리 읽기: PrepareAsync 가 시스템 메시지로 1토큰만 생성해 llama.cpp 가 그 앞부분을 기억하게 한다. 마지막으로 읽은
+    /// 시스템 메시지가 같으면(같은 도깨비와 이어 말함) 아무것도 하지 않는다.</item>
     /// </list>
     /// </summary>
     public sealed class LlmUnityModelBackend : INpcModelBackend
@@ -135,6 +140,11 @@ namespace Jamkkaebi.Npc
         private CancellationTokenSource lifetime = new CancellationTokenSource();
         private long generation;
         private volatile LlmUnityCall lastCall;
+        private volatile LlmUnityCall lastPrepare;
+
+        // 마지막으로 끝까지 읽힌 시스템 메시지와 그 세션. oneAtATime 안에서만 읽고 쓴다
+        private ILlmUnitySession readSession;
+        private string readSystem;
 
         /// <summary>Unity 메인 스레드에서 만든다.</summary>
         public LlmUnityModelBackend(ILlmUnityRuntime runtime, LlmUnityOptions options)
@@ -173,6 +183,12 @@ namespace Jamkkaebi.Npc
         public LlmUnityCall LastCall
         {
             get { return lastCall; }
+        }
+
+        /// <summary>마지막으로 시스템 메시지를 실제로 미리 읽힌 호출의 측정값 (ElapsedMs ≈ 시스템 메시지를 읽는 시간). 아직 없으면 null.</summary>
+        public LlmUnityCall LastPrepare
+        {
+            get { return lastPrepare; }
         }
 
         public async Task LoadAsync(CancellationToken ct)
@@ -255,12 +271,30 @@ namespace Jamkkaebi.Npc
             }
         }
 
-        public async Task<string> CompleteAsync(NpcPrompt prompt, CancellationToken ct)
+        public Task<string> CompleteAsync(NpcPrompt prompt, CancellationToken ct)
         {
             if (prompt == null)
             {
                 throw new ArgumentNullException("prompt");
             }
+            return Run(prompt.System, prompt.User, GrammarFor(prompt), options.MaxTokens, false, ct);
+        }
+
+        /// <summary>
+        /// 시스템 메시지를 미리 읽혀 둔다 (형식 제약 없이 1토큰). 마지막으로 끝까지 읽힌 시스템 메시지가 같으면 바로 끝난다.
+        /// 생성 요청과 같은 줄에 서서, 미리 읽는 동안 온 같은 도깨비의 요청은 끝나기를 기다렸다가 이어 읽는다.
+        /// </summary>
+        public Task PrepareAsync(string system, CancellationToken ct)
+        {
+            if (system == null)
+            {
+                throw new ArgumentNullException("system");
+            }
+            return Run(system, NpcPrompt.PrepareUser, null, 1, true, ct);
+        }
+
+        private async Task<string> Run(string system, string user, string grammar, int maxTokens, bool prepare, CancellationToken ct)
+        {
             ILlmUnitySession current;
             CancellationToken alive;
             lock (gate)
@@ -280,12 +314,16 @@ namespace Jamkkaebi.Npc
                 try
                 {
                     token.ThrowIfCancellationRequested();
-                    string grammar = GrammarFor(prompt);
+                    if (prepare && readSession == current && readSystem == system)
+                    {
+                        return ""; // 이미 읽어 둔 시스템 메시지
+                    }
+                    // 끝까지 읽히기 전에는 모델이 무엇을 기억하는지 모른다
+                    readSystem = null;
                     Stopwatch watch = Stopwatch.StartNew();
                     long firstToken = -1;
                     Action onFirstToken = () => Interlocked.CompareExchange(ref firstToken, watch.ElapsedMilliseconds, -1);
-                    Task<string> chat = OnUnity(() => current.ChatOnceAsync(prompt.System, prompt.User, grammar, options.MaxTokens,
-                            options, onFirstToken));
+                    Task<string> chat = OnUnity(() => current.ChatOnceAsync(system, user, grammar, maxTokens, options, onFirstToken));
 
                     var cancelled = new TaskCompletionSource<bool>();
                     using (token.Register(() => cancelled.TrySetResult(true)))
@@ -303,7 +341,17 @@ namespace Jamkkaebi.Npc
 
                     string reply = await chat.ConfigureAwait(false);
                     watch.Stop();
-                    lastCall = new LlmUnityCall(Interlocked.Read(ref firstToken), watch.ElapsedMilliseconds, reply != null ? reply.Length : 0);
+                    readSession = current;
+                    readSystem = system;
+                    var measured = new LlmUnityCall(Interlocked.Read(ref firstToken), watch.ElapsedMilliseconds, reply != null ? reply.Length : 0);
+                    if (prepare)
+                    {
+                        lastPrepare = measured;
+                    }
+                    else
+                    {
+                        lastCall = measured;
+                    }
                     return reply ?? "";
                 }
                 finally
