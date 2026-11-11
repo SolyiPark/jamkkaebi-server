@@ -121,11 +121,6 @@
      ```bash
      adb pull /storage/emulated/0/Android/data/<패키지 이름>/files/ ./DeviceResults/
      ```
-     `[NPC시험]` 으로 시작하는 줄이 시험 결과다.
-   - CSV 가져오기 (파일 이름 `npc_device_test_날짜_시각.csv`, 경로는 화면 마지막 줄에 나온다):
-     ```bash
-     adb pull /sdcard/Android/data/<패키지 이름>/files/
-     ```
 7. **발열 보기**: 시험이 도는 동안
    ```bash
    adb shell dumpsys thermalservice
