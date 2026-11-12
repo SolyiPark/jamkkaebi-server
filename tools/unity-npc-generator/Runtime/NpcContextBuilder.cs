@@ -336,16 +336,18 @@ namespace Jamkkaebi.Npc
         {
             ReactionRequest request = context.Request;
             int visits = Math.Max(1, input.RecentVisitDays.HasValue ? input.RecentVisitDays.Value : 1);
-            const string watching = " 손님은 너를 건드릴 수 없고 구경만 한다. 너는 걸어 다니며 짧은 말풍선을 띄운다.";
+            const string watching = " 친구는 너를 건드릴 수 없고 구경만 한다. 너는 걸어 다니며 짧은 말풍선을 띄운다.";
             if (visits >= RegularVisitorDays)
             {
-                request.Situation = "최근 30일 동안 " + visits + "번 온 손님이 전시관을 둘러보고 있다." + watching;
+                request.Situation = "최근 30일 동안 " + visits + "번 온 친구가 전시관을 둘러보고 있다." + watching;
                 context.KeyFact = "regular_visit";
-                Candidates(request, NpcActions.WanderGreet, NpcActions.WanderRecall);
+                // 단골에게 인사 후보까지 주면 모델이 "처음 온 친구라서 반가워"라고 하는 인사를 골랐다(2026-11-12 11:45 시험, S13 말발굽 4번 중 2번).
+                // 알아보기 하나만 두면 행동 칸도 빠져 출력 토큰이 줄어든다
+                Candidates(request, NpcActions.WanderRecall);
             }
             else
             {
-                request.Situation = "처음 온 손님이 전시관을 둘러보고 있다." + watching;
+                request.Situation = "처음 온 친구가 전시관을 둘러보고 있다." + watching;
                 context.KeyFact = "first_visit";
                 Candidates(request, NpcActions.WanderGreet);
             }

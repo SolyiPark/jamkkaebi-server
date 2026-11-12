@@ -47,7 +47,7 @@ namespace Jamkkaebi.Npc
         public PromptOptions()
         {
             IncludeExamples = true;
-            DefaultLineChars = 25;
+            DefaultLineChars = 20;
             TargetLabels = new Dictionary<string, string>();
             // 말풍선에 맞춘 길이
             LineChars = new Dictionary<string, int>
@@ -113,7 +113,7 @@ namespace Jamkkaebi.Npc
 
         // 도깨비는 닦이고 옮겨지는 쪽이다. 이것을 몰라 "닦을 수 있어서 고마워요", 끌려가면서 "조심할게요"라고 했다.
         // 자기 몸을 남이 보듯 "개운해진 모습이 참 보기 좋네"라고도 했다
-        public const string RuleRole = "- 관리는 주인이 너를 닦아 주는 일, 끌어당기기는 주인이 너를 옮기는 일이다. 바라는 것은 주인에게 부탁하고, 네 몸과 기분은 네가 느끼는 대로 말한다.";
+        public const string RuleRole = "- 관리는 주인이 너를 닦아 주는 일, 끌어당기기는 주인이 너를 옮기는 일이다. 바라는 것은 주인에게 부탁하고, 네 몸과 기분은 네가 느끼는 대로 말한다. 자료에 적힌 네 몸·무늬·하는 일은 네 것이니 '내 ~'라 하고, 상대가 그 일을 하는 것처럼 묻지 않는다.";
 
         // 영어를 섞거나, 자기 이름을 부르거나, 후보의 행동 이름을 대사에 그대로 적는 일을 막는다 (personas.json 의 examplePolicy).
         // 자기 이름은 출력 검사기도 거른다(SelfName)
@@ -121,7 +121,14 @@ namespace Jamkkaebi.Npc
 
         // 하오체·하게체·반말 도깨비가 '~요', '~습니다'를 섞고, 어미 조각을 아무 말에나 붙였다("반갑게요", "반가워구먼").
         // 출력 검사기도 문장마다 어미를 본다(SpeechMismatch)
-        public const string RuleSpeech = "- 말투의 어미로만 끝맺고, 존댓말과 반말을 섞지 않는다.";
+        public const string RuleSpeech = "- 말투의 어미로만 끝맺고, 존댓말과 반말을 섞지 않는다. 높임('-시-')은 쓰지 않는다.";
+
+        // 같은 탭 인사가 "안녕!", "안녕."으로 부호만 다르고 내용이 같았다(2026-11-12 시험: 말발굽 S01). 인사말 한 단어로 끝내면 곁들일 거리를
+        // 담을 데가 없다. 인사만 달랑 말하면 출력 검사(TooPlain)도 거른다
+        // "혹시 한 번 더 닦아주면 좋겠어", "부탁줘"처럼 부탁을 돌려 말하거나 겸양 낱말을 잘못 바꾼 대사가 나왔다(2026-11-12 시험). 부탁은 바로 말하게 한다
+        public const string RuleAsk = "- 부탁은 '~해 줘', '~해 줄래?'처럼 바로 말한다.";
+
+        public const string RuleVary = "- 인사말 한 단어로 끝내지 말고, 곁들일 거리나 지금 상황에 맞는 한마디를 덧붙여 매번 다르게 말한다.";
 
         // "이틀 전에 닦아 주셔서 선명해져서 고마워요"처럼 어순이 어색했고, 길이를 채우느라 "부딪힐까 조마조마한 날개에 신경 쓰며,
         // 손님께서 부드럽게 다뤄 주시면 좋겠어요"처럼 행동에 필요 없는 말을 덧붙였다
@@ -138,19 +145,26 @@ namespace Jamkkaebi.Npc
         /// "한마디 넣는다"로 두었더니 거리를 둘째 문장에 붙여 첫 문장은 늘 상황 문장을 옮긴 말("이틀 전에 닦아 주셔서 고마워요")이었고,
         /// 길이로 자르면 거리가 잘려 같은 대사만 남았다(2026-11-11 20:02). 바뀌는 거리로 말을 시작하게 해 앞부분이 요청마다 달라지게 한다.
         /// </summary>
-        public const string FlavorHint = "(이것에 대한 느낌으로 말을 시작한다)";
+        public const string FlavorHint = "(너의 것. 이것에 대한 느낌으로 말을 시작한다)";
 
         // 작은 모델은 예시 대사와 사용자 메시지의 페르소나 칸·상황 문장을 그대로 옮겨, 같은 상황마다 같은 대사를 냈다
         public const string RuleExamples = "- 예시와 자료의 문장은 그대로 옮기지 말고 지금 상황에 맞게 새로 말한다.";
 
         // 대화 기억에 남은 대사를 그대로 다시 읊는 일을 막는다. 기억이 있을 때만 사용자 메시지의 대사 줄에 붙인다
-        public const string RuleNoRepeat = "'최근 이 상대와 있었던 일'은 그때 한 말을 되풀이하지 말고, 그 일을 떠올리는 새 말로 한다.";
+        public const string RuleNoRepeat = "'기억'에 적힌 일은 그때 한 말을 되풀이하지 말고, 그 일을 떠올리는 새 말로 한다.";
 
         // 아래는 형식 제약이 없을 때만(DescribeFormat) 사용자 메시지 끝에 붙인다.
         // 제약이 없으면 행동 칸에 설명이나 선택지 이름을 적는 일이 있어 '영문 ID'라고 못 박는다
         public const string RuleChoose = "반드시 후보 중 하나의 행동과, 그 행동에 적힌 대상 중 하나를 고른다. 후보에 없는 것은 만들지 않는다.";
+        public const string RuleChooseAction = "반드시 후보 중 하나의 행동을 고른다. 후보에 없는 것은 만들지 않는다.";
         public const string RuleJson = "JSON 한 개만 출력한다. 설명이나 다른 글은 쓰지 않는다.";
         public const string FormatLine = "출력 형식: {\"action\": \"후보의 행동 ID(영문)\", \"target\": \"대상 ID(영문)\", \"line\": \"대사\"}";
+
+        // 응답 시간은 거의 출력 토큰 수에 비례한다(Kanana 2B 는 초당 6토큰 안팎). 대상이 하나뿐이면 target 칸을, 행동도 하나뿐이면 action 칸까지
+        // 빼서 JSON 틀이 차지하는 토큰(약 20개)을 줄인다. 빠진 칸은 NpcOutputValidator 가 후보로 채운다. 형식 제약(GBNF·스키마)이 있을 때는 그대로 둔다
+        public const string FormatActionLine = "출력 형식: {\"action\": \"후보의 행동 ID(영문)\", \"line\": \"대사\"}";
+        public const string FormatLineOnly = "출력 형식: {\"line\": \"대사\"}";
+        private const string CandidatesHeadAction = "후보 (action 에는 행동 ID 를 아래 영문 그대로 적는다):";
 
         private const string CandidatesHead = "후보:";
         private const string CandidatesHeadFree = "후보 (action 에는 행동 ID, target 에는 대상 ID 를 아래 영문 그대로 적는다):";
@@ -253,10 +267,13 @@ namespace Jamkkaebi.Npc
             {
                 head.Add(FlavorLine(flavor));
             }
-            string user = string.Join("\n", head.ToArray()) + "\n\n" + CandidatesBlock(request, targetIds) + "\n" + LineRule(request, persona);
+            // 모델이 적을 칸: 행동·대상이 하나뿐이면 line, 대상만 하나뿐이면 action+line, 아니면 전부 (run.py 의 output_shape)
+            int shape = !options.DescribeFormat || targetIds.Count != 1 ? 2 : (actionIds.Count == 1 ? 0 : 1);
+            string user = string.Join("\n", head.ToArray()) + "\n\n" + CandidatesBlock(request, targetIds, shape) + "\n" + LineRule(request, persona);
             if (options.DescribeFormat)
             {
-                user += "\n\n" + RuleChoose + "\n" + RuleJson + "\n" + FormatLine;
+                user += "\n\n" + (shape == 0 ? "" : (shape == 1 ? RuleChooseAction : RuleChoose) + "\n") + RuleJson + "\n"
+                        + (shape == 0 ? FormatLineOnly : (shape == 1 ? FormatActionLine : FormatLine));
             }
 
             return new NpcPrompt
@@ -305,6 +322,8 @@ namespace Jamkkaebi.Npc
             lines.Add(RuleLine);
             lines.Add(RuleSpeech);
             lines.Add(RuleOrder);
+            lines.Add(RuleVary);
+            lines.Add(RuleAsk);
             if (options.IncludeExamples)
             {
                 lines.Add(RuleExamples);
@@ -319,7 +338,7 @@ namespace Jamkkaebi.Npc
         {
             List<string> lines = request.Mode == InteractionMode.Owner
                     ? new List<string> { "지금 상대: 주인(이 전시관의 주인)", "주인을 대할 때: " + p.toOwner }
-                    : new List<string> { "지금 상대: 손님(주인의 친구. 구경만 하고 너를 건드릴 수 없다)", "손님을 대할 때: " + p.toVisitor };
+                    : new List<string> { "지금 상대: 친구(주인의 친구. 구경만 하고 너를 건드릴 수 없다)", "친구를 대할 때: " + p.toVisitor };
 
             var wanted = new HashSet<string>();
             foreach (ActionCandidate candidate in request.Candidates)
@@ -418,7 +437,7 @@ namespace Jamkkaebi.Npc
 
             if (request.Memory != null && request.Memory.Count > 0)
             {
-                lines.Add("최근 이 상대와 있었던 일:");
+                lines.Add("기억:");
                 foreach (MemoryEntry memory in request.Memory)
                 {
                     string when = memory.DaysAgo == 0 ? "오늘" : memory.DaysAgo + "일 전";
@@ -432,15 +451,20 @@ namespace Jamkkaebi.Npc
 
         // 'player(주인)'처럼 붙여 쓰면 형식 제약이 없을 때 그 모양 그대로 대상 칸에 적는다. ID와 뜻을 따로 보여 준다.
         // 어느 칸에 무엇을 적을지는 형식 제약이 없을 때만 말한다
-        private string CandidatesBlock(ReactionRequest request, List<string> targetIds)
+        // shape: 0 = line 만, 1 = action+line, 2 = 전부(대상 칸·'대상 ID 뜻' 줄 포함)
+        private string CandidatesBlock(ReactionRequest request, List<string> targetIds, int shape)
         {
-            var lines = new List<string> { options.DescribeFormat ? CandidatesHeadFree : CandidatesHead };
+            string head = shape == 2 ? (options.DescribeFormat ? CandidatesHeadFree : CandidatesHead) : (shape == 1 ? CandidatesHeadAction : CandidatesHead);
+            var lines = new List<string> { head };
             foreach (ActionCandidate candidate in request.Candidates)
             {
                 string targets = string.Join(", ", (candidate.TargetIds ?? new List<string>()).ToArray());
-                lines.Add("- " + candidate.ActionId + ": " + Meaning(candidate.ActionId) + " / 대상: " + targets);
+                lines.Add("- " + candidate.ActionId + ": " + Meaning(candidate.ActionId) + (shape == 2 ? " / 대상: " + targets : ""));
             }
-            lines.Add("대상 ID 뜻: " + string.Join(", ", targetIds.Select(t => t + " = " + TargetLabel(t, request.Mode)).ToArray()));
+            if (shape == 2)
+            {
+                lines.Add("대상 ID 뜻: " + string.Join(", ", targetIds.Select(t => t + " = " + TargetLabel(t, request.Mode)).ToArray()));
+            }
             return string.Join("\n", lines.ToArray());
         }
 
@@ -483,7 +507,7 @@ namespace Jamkkaebi.Npc
         {
             if (targetId == NpcTargets.Player)
             {
-                return mode == InteractionMode.Owner ? "주인" : "손님";
+                return mode == InteractionMode.Owner ? "주인" : "친구";
             }
             if (targetId == NpcTargets.None)
             {

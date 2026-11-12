@@ -18,6 +18,9 @@ namespace Jamkkaebi.Npc
         Forbidden,      // 대사가 공통 금칙어에 걸린다
         SelfName,       // 자기 이름을 말한다 ("반갑게요, 향산이") — 페르소나를 받은 검사기만 본다
         SpeechMismatch, // 그 도깨비의 어미로 끝나지 않는 문장이 있다 (존댓말·반말 섞기) — 페르소나를 받은 검사기만 본다
+        TooPlain,       // 인사 행동의 대사가 인사말뿐이다 ("안녕!", "안녕.") — 부호를 뺀 글자가 MinGreetingCore 보다 적다. 페르소나를 받은 검사기만 본다
+        InnerRepeat,    // 한 대사 안에서 같은 말을 되풀이한다 ("고마워, 관리해줘서 고마워") — 페르소나를 받은 검사기만 본다
+        WrongHistory,   // 방문 횟수와 어긋난다 (단골에게 "처음 온 친구", 첫 방문에 "또 왔구나")
         Repeated        // 그 도깨비가 최근에 띄운 대사(request.RecentLines)와 같다
     }
 
@@ -116,6 +119,10 @@ namespace Jamkkaebi.Npc
     /// </summary>
     public sealed class NpcOutputValidator
     {
+        /// <summary>인사 행동의 대사는 부호를 뺀 글자가 이 수보다 적으면 인사말뿐이라 거른다. run.py 의 MIN_GREETING_CORE 와 같다.</summary>
+        public const int MinGreetingCore = 4;
+        private static readonly string[] PlainCheckedActions = { "greet", "wander_greet" };
+
         /// <summary>MaxChars 에 없는 선택지의 대사 길이 제한.</summary>
         public const int DefaultMaxChars = 40;
 
@@ -193,11 +200,37 @@ namespace Jamkkaebi.Npc
 
             string action = Text(json, "action").Trim();
             string target = Text(json, "target").Trim();
+            // 행동·대상이 하나뿐인 요청은 모델이 그 칸을 적지 않는다(PromptAssembler 의 출력 모양). 비어 있으면 후보로 채운다 (run.py 의 evaluate 와 같다)
+            if (action.Length == 0 && request.Candidates != null && request.Candidates.Count == 1)
+            {
+                action = request.Candidates[0].ActionId;
+            }
+            if (target.Length == 0 && request.Candidates != null)
+            {
+                List<string> onlyTargets = new List<string>();
+                foreach (ActionCandidate c in request.Candidates)
+                {
+                    if (c != null && c.ActionId == action && c.TargetIds != null)
+                    {
+                        foreach (string t in c.TargetIds)
+                        {
+                            if (!onlyTargets.Contains(t))
+                            {
+                                onlyTargets.Add(t);
+                            }
+                        }
+                    }
+                }
+                if (onlyTargets.Count == 1)
+                {
+                    target = onlyTargets[0];
+                }
+            }
             string line = CleanLine(Text(json, "line"));
             Persona persona = personas != null ? personas.Find(request.RelicId) : null;
-            if (NormalizeSpeech && persona != null && persona.endingHint != null)
+            if (NormalizeSpeech && persona != null)
             {
-                string fixedLine = NpcLineChecks.NormalizeSpeech(line, persona.endingHint.label);
+                string fixedLine = NpcLineChecks.NormalizeSpeech(line, persona.endingHint != null ? persona.endingHint.label : null, persona.name);
                 if (fixedLine != line)
                 {
                     said = line;
@@ -253,9 +286,19 @@ namespace Jamkkaebi.Npc
             {
                 return new OutputCheck(OutputProblem.Forbidden, "금칙어 " + bad, action, target, fitted, line, truncated);
             }
+            if (request.Input == NpcInputs.Visit)
+            {
+                int visits;
+                string conflict = NpcLineChecks.HistoryContradiction(fitted,
+                        int.TryParse(request.FindFact(NpcFactKeys.VisitCount30d), out visits) ? visits : (int?)null);
+                if (conflict != null)
+                {
+                    return new OutputCheck(OutputProblem.WrongHistory, "방문 기록과 어긋남 '" + conflict + "'", action, target, fitted, line, truncated);
+                }
+            }
             if (persona != null)
             {
-                if (!string.IsNullOrEmpty(persona.name) && NpcLineChecks.Core(fitted).Contains(NpcLineChecks.Core(persona.name)))
+                if (NpcLineChecks.ContainsSelfName(fitted, persona.name))
                 {
                     return new OutputCheck(OutputProblem.SelfName, "자기 이름 '" + persona.name + "'", action, target, fitted, line, truncated);
                 }
@@ -265,6 +308,15 @@ namespace Jamkkaebi.Npc
                     return new OutputCheck(OutputProblem.SpeechMismatch,
                             (persona.endingHint.label ?? "말투") + " 어미가 아닌 문장 '" + wrong + "'", action, target, fitted, line, truncated);
                 }
+                if (Array.IndexOf(PlainCheckedActions, action) >= 0 && NpcLineChecks.Core(fitted).Length < MinGreetingCore)
+                {
+                    return new OutputCheck(OutputProblem.TooPlain, "인사말뿐 '" + fitted + "'", action, target, fitted, line, truncated);
+                }
+            }
+            string repeatedWord = persona != null ? NpcLineChecks.InnerRepeat(fitted) : null;
+            if (repeatedWord != null)
+            {
+                return new OutputCheck(OutputProblem.InnerRepeat, "한 대사 안의 반복 '" + repeatedWord + "'", action, target, fitted, line, truncated);
             }
             KeyValuePair<string, string>? same = NpcLineChecks.FindSimilar(fitted, request.RecentLines);
             if (same.HasValue)
