@@ -952,7 +952,7 @@ HONORIFIC_WORDS = [
 ]
 # 2026-11-12 11:15 시험: "어서 왔어"(어서 + 과거), "닦아달라고 부탁해"(부탁을 전해 들은 말투로 옮김)처럼 문맥에 어색한 말이 나왔다.
 # 고칠 수 있는 것은 고치고(아래), 못 고친 것은 공통 금칙어 awkward 묶음이 거른다. C# NpcLineChecks.FixAwkward 와 같다
-QUOTED_ASK_RE = re.compile(r"([가-힣]*[아어여해])\s?달라고\s?(?:부탁|요청|말)(?:해요|했어요|했어|할게요|할게|해|드려요|드릴게요|드릴게)?")
+QUOTED_ASK_RE = re.compile(r"([가-힣]*[아어여해])\s?달라고\s?(?:부탁|요청|말)(?:드립니다|드려요|드릴게요|드릴게|드려|해요|했어요|했어|했다|했네|합니다|할게요|할게|하다|해)?")
 ARRIVE_RE = re.compile(r"어서\s?왔(?:어요|어|네요|네|구나|지)")
 
 
@@ -1162,6 +1162,7 @@ MIN_GREETING_CORE = 4
 
 # 방문 횟수와 어긋나는 말. 7번 온 단골에게 "처음 온 친구라서 반가워", 처음 온 친구에게 "또 왔구나"라고 했다(2026-11-12 11:45 시험, S13).
 # C# NpcLineChecks.HistoryContradiction 과 같다. 부호·띄어쓰기를 뺀 대사에서 찾는다
+REGULAR_VISITS = 2  # 이 횟수 이상 온 손님은 단골 (C# RuleBasedReactionGenerator.RegularVisitorDays)
 REGULAR_ONLY_WORDS = ("처음",)
 FIRST_ONLY_WORDS = ("또왔", "다시왔", "자주왔", "오랜만", "단골")
 
@@ -1171,7 +1172,7 @@ def history_contradiction(line, visits):
     if visits is None:
         return None
     core = PUNCT_RE.sub("", line or "")
-    for word in (REGULAR_ONLY_WORDS if visits >= 2 else FIRST_ONLY_WORDS):
+    for word in (REGULAR_ONLY_WORDS if visits >= REGULAR_VISITS else FIRST_ONLY_WORDS):
         if word in core:
             return word
     return None

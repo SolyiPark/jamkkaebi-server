@@ -215,7 +215,7 @@ namespace Jamkkaebi.Npc
                 return null;
             }
             string core = Core(line);
-            foreach (string word in visits.Value >= 2 ? RegularOnlyWords : FirstOnlyWords)
+            foreach (string word in visits.Value >= RuleBasedReactionGenerator.RegularVisitorDays ? RegularOnlyWords : FirstOnlyWords)
             {
                 if (core.Contains(word))
                 {
@@ -308,7 +308,7 @@ namespace Jamkkaebi.Npc
 
         // 문맥에 어색한 말을 고친다 ("닦아달라고 부탁해" → "닦아 줘", "어서 왔어" → "어서 와"). run.py 의 fix_awkward 와 같다. 못 고친 것은 금칙어 awkward 묶음이 거른다
         private static readonly Regex QuotedAsk = new Regex(
-                "([가-힣]*[아어여해])\\s?달라고\\s?(?:부탁|요청|말)(?:해요|했어요|했어|할게요|할게|해|드려요|드릴게요|드릴게)?", RegexOptions.CultureInvariant);
+                "([가-힣]*[아어여해])\\s?달라고\\s?(?:부탁|요청|말)(?:드립니다|드려요|드릴게요|드릴게|드려|해요|했어요|했어|했다|했네|합니다|할게요|할게|하다|해)?", RegexOptions.CultureInvariant);
         private static readonly Regex Arrive = new Regex("어서\\s?왔(?:어요|어|네요|네|구나|지)", RegexOptions.CultureInvariant);
 
         private static string FixAwkward(string line)
