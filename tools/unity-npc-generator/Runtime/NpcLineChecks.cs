@@ -60,7 +60,7 @@ namespace Jamkkaebi.Npc
             new[] { "계세요", "있어" }, new[] { "마세요", "마" }, new[] { "죠", "지" },
             // 격식 어미를 반말로 (run.py 의 SPEECH_WORDS["반말"] 과 같다)
             new[] { "반갑습니다", "반가워" }, new[] { "겠습니다", "겠어" },
-            new[] { "있습니다", "있어" }, new[] { "없습니다", "없어" }, new[] { "않습니다", "않아" }, new[] { "입니다", "이야" },
+            new[] { "있습니다", "있어" }, new[] { "없습니다", "없어" }, new[] { "않습니다", "않아" }, 
             new[] { "합니다", "해" }, new[] { "됩니다", "돼" }, new[] { "갑니다", "가" }, new[] { "옵니다", "와" },
             new[] { "았습니다", "았어" }, new[] { "었습니다", "었어" }, new[] { "였습니다", "였어" }, new[] { "왔습니다", "왔어" }, new[] { "갔습니다", "갔어" },
             new[] { "봤습니다", "봤어" }, new[] { "줬습니다", "줬어" }, new[] { "했습니다", "했어" }, new[] { "됐습니다", "됐어" }, new[] { "썼습니다", "썼어" },
@@ -168,7 +168,28 @@ namespace Jamkkaebi.Npc
             return null;
         }
 
-        private static readonly Regex Guest = new Regex("손님(께서|께)?", RegexOptions.CultureInvariant);
+        private static readonly Regex Guest = new Regex("손님(?:(이라서|이라고|이라는|이야|이다|께서|께|이랑|이|은|을|과|아)(?![가-힣]))?", RegexOptions.CultureInvariant);
+
+        private static string GuestParticle(string particle)
+        {
+            switch (particle)
+            {
+                case "이라서": return "라서";
+                case "이라고": return "라고";
+                case "이라는": return "라는";
+                case "이야": return "야";
+                case "이다": return "다";
+                case "께서": return "가";
+                case "께": return "한테";
+                case "이랑": return "랑";
+                case "이": return "가";
+                case "은": return "는";
+                case "을": return "를";
+                case "과": return "와";
+                case "아": return "야";
+                default: return "";
+            }
+        }
 
         /// <summary>'손님'이 대사에 남으면 출력 직전에 '친구'로 바꾼다 (손님께서→친구가, 손님께→친구한테). run.py 의 guest_to_friend 와 같다.</summary>
         public static string GuestToFriend(string line)
@@ -177,11 +198,11 @@ namespace Jamkkaebi.Npc
             {
                 return line;
             }
-            return Guest.Replace(line, m => "친구" + (m.Groups[1].Value == "께서" ? "가" : (m.Groups[1].Value == "께" ? "한테" : "")));
+            return Guest.Replace(line, m => "친구" + GuestParticle(m.Groups[1].Value));
         }
 
         private static readonly string[] RegularOnlyWords = { "처음" };
-        private static readonly string[] FirstOnlyWords = { "또왔", "또와", "또오", "다시왔", "다시와", "오랜만", "단골", "자주" };
+        private static readonly string[] FirstOnlyWords = { "또왔", "다시왔", "자주왔", "오랜만", "단골" };
 
         /// <summary>
         /// 손님 방문 횟수와 어긋나는 낱말. 단골(2번 이상)이면 '처음', 첫 방문이면 '또·다시·오랜만·단골'. 없으면 null.
@@ -281,7 +302,7 @@ namespace Jamkkaebi.Npc
             return list.ToArray();
         }
 
-        private static readonly Regex HonorificSi = new Regex("(?<=[가-힣])(?<![마도])시(?=면|며|고|는|던|지|네|겠|니|거|길|려|도록|어서|나|잖|더라)", RegexOptions.CultureInvariant);
+        private static readonly Regex HonorificSi = new Regex("(?<=[가-힣])(?<![마도다])시(?=면|며|고|는|던|지|네|겠|니|거|길|려|도록|어서|나|잖|더라)", RegexOptions.CultureInvariant);
         // '닦아 주면 좋겠어'는 부탁을 돌려 말해 어색하다. 바로 '닦아 줘'로 말한다
         private static readonly Regex AskRequest = new Regex("(?<=[아어여해])( ?)주면 좋겠(?:어요|어|다)(?=[\\s.!?…~,]|$)", RegexOptions.CultureInvariant);
 
@@ -296,11 +317,27 @@ namespace Jamkkaebi.Npc
             return Arrive.Replace(line, "어서 와");
         }
 
+        private static readonly Regex Imnida = new Regex("([가-힣])입니다" + WordEnd, RegexOptions.CultureInvariant);
+
+        /// <summary>'~입니다'를 반말로: 받침 없는 낱말 뒤는 '야'(친구입니다→친구야), 받침 있는 낱말 뒤는 '이야'(책입니다→책이야). run.py 의 imnida_to_banmal 과 같다.</summary>
+        private static string ImnidaToBanmal(string line)
+        {
+            return Imnida.Replace(line, m => m.Groups[1].Value + ((m.Groups[1].Value[0] - 0xAC00) % 28 != 0 ? "이야" : "야"));
+        }
+
         private static string DropHonorific(string line)
         {
             foreach (string[] pair in HonorificWords)
             {
-                line = line.Replace(pair[0], pair[1]);
+                if (pair[0].EndsWith("신"))
+                {
+                    // '-신'(주신·하신)은 낱말 끝일 때만 — '안녕하신가'·'주신다'의 '신'을 건드리지 않는다
+                    line = Regex.Replace(line, Regex.Escape(pair[0]) + "(?=[\\s.!?…~,]|$)", pair[1], RegexOptions.CultureInvariant);
+                }
+                else
+                {
+                    line = line.Replace(pair[0], pair[1]);
+                }
             }
             line = HonorificSi.Replace(line, "");
             return AskRequest.Replace(line, "$1줘");
@@ -357,7 +394,7 @@ namespace Jamkkaebi.Npc
             {
                 case "반말":
                     line = ReplaceWords(line, BanmalWords);
-                    line = FixAwkward(DropHonorific(line));
+                    line = FixAwkward(DropHonorific(ImnidaToBanmal(line)));
                     line = BanmalPronoun.Replace(line, m => m.Groups[1].Value + BanmalPronounOf(m.Groups[2].Value));
                     return WordYo.Replace(line, m => YoNouns.Contains(m.Groups[1].Value + "요") || m.Groups[1].Value.EndsWith("세")
                             || m.Groups[1].Value.EndsWith("시") ? m.Value : m.Groups[1].Value);
@@ -389,7 +426,9 @@ namespace Jamkkaebi.Npc
             line = LeadingJunk.Replace(line, "");
             line = CommaBeforeEnd.Replace(line, "");
             line = CommaAfterEnd.Replace(line, " ");
-            return MultiSpace.Replace(line, " ").Trim();
+            line = MultiSpace.Replace(line, " ").Trim();
+            // "주인님!"처럼 호칭만 있던 대사는 부호만 남는다. 말이 하나도 없으면 빈 대사로 본다
+            return Regex.IsMatch(line, "[가-힣A-Za-z0-9]") ? line : "";
         }
 
         private static string ReplaceWords(string line, string[][] words)

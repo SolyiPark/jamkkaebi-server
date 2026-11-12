@@ -846,7 +846,7 @@ SPEECH_WORDS = {
         ("주세요", "줘"), ("하세요", "해"), ("보세요", "봐"), ("오세요", "와"), ("가세요", "가"), ("계세요", "있어"), ("마세요", "마"), ("죠", "지"),
         # 격식 어미를 반말로 (2026-11-12 시험: "순찰 나왔습니다!", "반갑습니다!"가 어미 검사에 걸렸다)
         ("반갑습니다", "반가워"), ("겠습니다", "겠어"), ("있습니다", "있어"),
-        ("없습니다", "없어"), ("않습니다", "않아"), ("입니다", "이야"), ("합니다", "해"), ("됩니다", "돼"), ("갑니다", "가"), ("옵니다", "와"),
+        ("없습니다", "없어"), ("않습니다", "않아"), ("합니다", "해"), ("됩니다", "돼"), ("갑니다", "가"), ("옵니다", "와"),
         *[(c + "습니다", c + "어") for c in "았었였왔갔봤줬했됐썼냈"],
     ],
     "하오체": [
@@ -913,7 +913,9 @@ def strip_address(line, name=None):
     line = LEADING_JUNK_RE.sub("", line)
     line = COMMA_BEFORE_END_RE.sub("", line)
     line = COMMA_AFTER_END_RE.sub(" ", line)
-    return MULTI_SPACE_RE.sub(" ", line).strip()
+    line = MULTI_SPACE_RE.sub(" ", line).strip()
+    # "주인님!"처럼 호칭만 있던 대사는 부호만 남는다. 말이 하나도 없으면 빈 대사로 본다
+    return line if re.search("[가-힣A-Za-z0-9]", line) else ""
 WORD_YO_RE = re.compile("([가-힣]+)요" + WORD_END)
 YO_NOUNS = {"필요", "중요", "요요", "주요", "수요"}  # 반말에서 '요'를 떼면 안 되는 낱말
 
@@ -961,16 +963,28 @@ def fix_awkward(line):
 
 
 # 앞이 한글이고 '마시다'·'도시'가 아닐 때, 뒤가 이런 어미인 '시'를 뗀다 (주시면→주면, 하시는→하는, 보시고→보고)
-HONORIFIC_SI_RE = re.compile("(?<=[가-힣])(?<![마도])시(?=면|며|고|는|던|지|네|겠|니|거|길|려|도록|어서|나|잖|더라)")
+HONORIFIC_SI_RE = re.compile("(?<=[가-힣])(?<![마도다])시(?=면|며|고|는|던|지|네|겠|니|거|길|려|도록|어서|나|잖|더라)")
 # '닦아 주면 좋겠어'는 부탁을 돌려 말해 어색하다. 바로 '닦아 줘'로 말한다 (2026-11-12 시험: "혹시 한 번 더 닦아주면 좋겠어")
 ASK_RE = re.compile("(?<=[아어여해])( ?)주면 좋겠(?:어요|어|다)(?=[\\s.!?…~,]|$)")
 
 
 def drop_honorific(line):
     for a, b in HONORIFIC_WORDS:
-        line = line.replace(a, b)
+        if a.endswith("신"):
+            # '-신'(주신·하신)은 낱말 끝일 때만 — '안녕하신가'·'주신다'의 '신'을 건드리지 않는다
+            line = re.sub(re.escape(a) + "(?=[\\s.!?…~,]|$)", b, line)
+        else:
+            line = line.replace(a, b)
     line = HONORIFIC_SI_RE.sub("", line)
     return ASK_RE.sub(lambda m: m.group(1) + "줘", line)
+
+
+IMNIDA_RE = re.compile("([가-힣])입니다" + WORD_END)
+
+
+def imnida_to_banmal(line):
+    """'~입니다'를 반말로: 받침 없는 낱말 뒤는 '야'(친구입니다→친구야), 받침 있는 낱말 뒤는 '이야'(책입니다→책이야). C# NpcLineChecks.ImnidaToBanmal 과 같다."""
+    return IMNIDA_RE.sub(lambda m: m.group(1) + ("이야" if (ord(m.group(1)) - 0xAC00) % 28 else "야"), line)
 
 
 def _apply_speech(line, label):
@@ -983,21 +997,22 @@ def _apply_speech(line, label):
     for pattern, word in SPEECH_WORD_RES[label]:
         line = pattern.sub(lambda m, w=word: w, line)
     if label == "반말":
-        line = fix_awkward(drop_honorific(line))
+        line = fix_awkward(drop_honorific(imnida_to_banmal(line)))
         line = BANMAL_PRONOUN_RE.sub(lambda m: m.group(1) + BANMAL_PRONOUNS[m.group(2)], line)
         keep = lambda stem: stem + "요" in YO_NOUNS or stem.endswith(("세", "시"))
         return WORD_YO_RE.sub(lambda m: m.group(0) if keep(m.group(1)) else m.group(1), line)
     return FORMAL_RE.sub(lambda m: formal(m, FORMAL_ENDINGS[label]), line)
 
 
-GUEST_RE = re.compile("손님(께서|께)?")
+GUEST_PARTICLES = {"이라서": "라서", "이라고": "라고", "이라는": "라는", "이야": "야", "이다": "다", "께서": "가", "께": "한테", "이랑": "랑", "이": "가", "은": "는", "을": "를", "과": "와", "아": "야"}
+GUEST_RE = re.compile("손님(?:(이라서|이라고|이라는|이야|이다|께서|께|이랑|이|은|을|과|아)(?![가-힣]))?")
 
 
 def guest_to_friend(line):
-    """'손님'이 대사에 남으면 출력 직전에 '친구'로 바꾼다 (손님께서→친구가, 손님께→친구한테). C# NpcLineChecks.GuestToFriend 와 같다."""
+    """'손님'이 대사에 남으면 출력 직전에 '친구'로 바꾼다. 붙은 조사도 맞춘다(손님이→친구가, 손님은→친구는, 손님을→친구를, 손님께서→친구가, 손님께→친구한테). C# NpcLineChecks.GuestToFriend 와 같다."""
     if not line or "손님" not in line:
         return line
-    return GUEST_RE.sub(lambda m: "친구" + {"께서": "가", "께": "한테"}.get(m.group(1) or "", ""), line)
+    return GUEST_RE.sub(lambda m: "친구" + GUEST_PARTICLES.get(m.group(1) or "", ""), line)
 
 
 # 한 대사 안에서 같은 말을 되풀이하지 않는다 (2026-11-12 10:52 시험: "고마워, 관리해줘서 고마워", "고마워! 관리해줘서 고마워~").
@@ -1148,7 +1163,7 @@ MIN_GREETING_CORE = 4
 # 방문 횟수와 어긋나는 말. 7번 온 단골에게 "처음 온 친구라서 반가워", 처음 온 친구에게 "또 왔구나"라고 했다(2026-11-12 11:45 시험, S13).
 # C# NpcLineChecks.HistoryContradiction 과 같다. 부호·띄어쓰기를 뺀 대사에서 찾는다
 REGULAR_ONLY_WORDS = ("처음",)
-FIRST_ONLY_WORDS = ("또왔", "또와", "또오", "다시왔", "다시와", "오랜만", "단골", "자주")
+FIRST_ONLY_WORDS = ("또왔", "다시왔", "자주왔", "오랜만", "단골")
 
 
 def history_contradiction(line, visits):

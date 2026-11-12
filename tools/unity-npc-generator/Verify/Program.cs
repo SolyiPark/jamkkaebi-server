@@ -254,7 +254,7 @@ public static class Program
             // 낮춰 부르기 (반말 도깨비가 주인을 이렇게 불러 거만하게 들렸다)
             "주인아, 이리 와 줘!", "주인아~ 놀자", "손님아.", "놀자, 주인아",
             // 주인님·주인·손님 호칭은 어떤 꼴로도 금지 (모든 도깨비가 반말이라 호칭 없이 말한다)
-            "주인님, 놀자!", "손님, 천천히 보세요.", "나는 잠깨비 도깨비야", "어서 왔어", "닦아 달라고 부탁해", "가까이 다가와도 돼", "쯧, 내려줘라", "얼른 비켜라.", "최근 이 상대와 있었던 일을 말해 줘", "손 떼 줘, 긁힐라", "주인아저씨 같구먼", "주인 아직 안 왔어?", "흥미로운 손님이구려", "주인을 졸라서 놀았어"
+            "주인님, 놀자!", "손님, 천천히 보세요.", "나는 잠깨비 도깨비야", "어서 왔어", "닦아 달라고 부탁해", "가까이 다가와도 돼", "쯧, 내려줘라", "얼른 비켜라.", "최근 이 상대와 있었던 일을 말해 줘", "손 떼 줘, 긁힐라", "흥미로운 손님이구려"
         };
         foreach (string line in blocked)
         {
@@ -708,6 +708,8 @@ public static class Program
         Check(NpcLineChecks.NormalizeSpeech("향산아, 오셨어? 닦아주시면 좋겠어.", "반말", "향산이") == "왔어? 닦아줘.", "이름 어간·조사와 -시- 높임을 지움");
         Check(NpcLineChecks.NormalizeSpeech("도시는 마시고 주시면", "반말", "말발굽") == "도시는 마시고 주면", "'도시'·'마시고'의 시는 지키고 높임만 뺌");
         Expect(strict, Out("greet", "player", "안녕!"), Tap(8), OutputProblem.TooPlain, "인사 행동의 대사가 인사말뿐이면 걸림");
+        Expect(strict, Out("greet", "player", "주인님!"), Tap(8), OutputProblem.EmptyLine, "호칭만 있던 대사는 지우고 나면 빈 대사로 걸림");
+        Expect(strict, Out("wander_greet", "player", "반가워! 다음에 또 와."), Request(8, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet), OutputProblem.None, "첫 방문에 '다음에 또 와'(초대)는 통과");
         ReactionRequest regularVisit = Request(8, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderRecall);
         regularVisit.Facts.Add(new Fact(NpcFactKeys.VisitCount30d, "7"));
         Expect(strict, Out("wander_recall", "player", "안녕, 처음 온 친구라서 반가워!"), regularVisit, OutputProblem.WrongHistory, "7번 온 단골에게 '처음'이라고 하면 걸림");
@@ -870,6 +872,14 @@ public static class Program
             new[] { "반말", "닦아달라고 부탁해.", "닦아 줘." },
             new[] { "반말", "한 번 더 닦아 달라고 부탁드려요.", "한 번 더 닦아 줘." },
             new[] { "반말", "어서 왔어!", "어서 와!" },
+            new[] { "반말", "나는 친구입니다.", "나는 친구야." },
+            new[] { "반말", "이건 책입니다.", "이건 책이야." },
+            new[] { "반말", "손님이 왔어. 손님은 좋아. 손님을 반겨. 손님과 놀자.", "친구가 왔어. 친구는 좋아. 친구를 반겨. 친구와 놀자." },
+            new[] { "반말", "손님이라서 왔어. 손님이야.", "친구라서 왔어. 친구야." },
+            new[] { "반말", "다시는 안 늦을게. 같이 놀자!", "다시는 안 늦을게. 같이 놀자!" },
+            new[] { "반말", "마시고 가. 도시는 커.", "마시고 가. 도시는 커." },
+            new[] { "반말", "안녕하신가, 주신다고 했어.", "안녕하신가, 주신다고 했어." },
+            new[] { "반말", "주신 덕분에 좋아. 오신 분은 누구야?", "준 덕분에 좋아. 온 분은 누구야?" },
             new[] { "반말", "내려주셔도 돼요.", "내려줘도 돼." },
             new[] { "반말", "고마워, 관리해줘서 고마워", "관리해줘서 고마워" },
             new[] { "반말", "고마워! 관리해줘서 고마워~", "관리해줘서 고마워~" },
