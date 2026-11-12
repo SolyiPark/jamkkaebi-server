@@ -14,10 +14,10 @@ namespace Jamkkaebi.Npc
     public static class NpcLineChecks
     {
         /// <summary>글자 쌍(이웃한 두 글자) 겹침이 이만큼 넘으면 같은 대사다. "고마워, 덕분에 더 선명해졌어." 와 "관리해 줘서 고마워, 덕분에 더 선명해졌어." 는 0.81.</summary>
-        public const double SimilarPairs = 0.6;
+        public const double SimilarPairs = 0.8;
 
         /// <summary>짧은 대사의 이만큼이 긴 대사 안에 그대로 있으면 같은 대사다 ("안녕하시오, 계시오?" 와 "안녕하시오, 계시오? 주인님께서…").</summary>
-        public const double ContainedShare = 0.6;
+        public const double ContainedShare = 0.8;
 
         /// <summary>그 겹침이 적어도 이 글자 수는 되어야 한다 ("고마워" 처럼 짧은 낱말 하나로는 같다고 보지 않는다).</summary>
         public const int ContainedMin = 5;
@@ -51,10 +51,20 @@ namespace Jamkkaebi.Npc
         // 말투마다 먼저 바꾸는 낱말 (흔히 틀리는 것). 앞에서부터 차례로 바꾼다 (긴 것을 먼저 둔다). run.py 의 SPEECH_WORDS 와 같다
         private static readonly string[][] BanmalWords =
         {
+            new[] { "안녕하세요", "안녕" }, new[] { "안녕하십니까", "안녕" }, // "하세요"→"해"보다 먼저
+            new[] { "보내세요", "보내" }, new[] { "쉬세요", "쉬어" }, new[] { "드세요", "먹어" }, new[] { "앉으세요", "앉아" }, new[] { "즐기세요", "즐겨" },
+            new[] { "둘러보세요", "둘러봐" }, new[] { "지요", "지" },
             new[] { "고맙습니다", "고마워" }, new[] { "감사합니다", "고마워" }, new[] { "감사해요", "고마워" }, new[] { "주셔서", "줘서" },
             new[] { "이에요", "이야" }, new[] { "에요", "야" }, new[] { "예요", "야" },
             new[] { "주세요", "줘" }, new[] { "하세요", "해" }, new[] { "보세요", "봐" }, new[] { "오세요", "와" }, new[] { "가세요", "가" },
-            new[] { "죠", "지" }
+            new[] { "계세요", "있어" }, new[] { "마세요", "마" }, new[] { "죠", "지" },
+            // 격식 어미를 반말로 (run.py 의 SPEECH_WORDS["반말"] 과 같다)
+            new[] { "반갑습니다", "반가워" }, new[] { "겠습니다", "겠어" },
+            new[] { "있습니다", "있어" }, new[] { "없습니다", "없어" }, new[] { "않습니다", "않아" }, new[] { "입니다", "이야" },
+            new[] { "합니다", "해" }, new[] { "됩니다", "돼" }, new[] { "갑니다", "가" }, new[] { "옵니다", "와" },
+            new[] { "았습니다", "았어" }, new[] { "었습니다", "었어" }, new[] { "였습니다", "였어" }, new[] { "왔습니다", "왔어" }, new[] { "갔습니다", "갔어" },
+            new[] { "봤습니다", "봤어" }, new[] { "줬습니다", "줬어" }, new[] { "했습니다", "했어" }, new[] { "됐습니다", "됐어" }, new[] { "썼습니다", "썼어" },
+            new[] { "냈습니다", "냈어" }
         };
         private static readonly string[][] HaoWords =
         {
@@ -79,9 +89,229 @@ namespace Jamkkaebi.Npc
         private static readonly Regex BanmalPronoun = new Regex("(^|\\s)(저는|저를|제가|저도|저랑|저한테|제)" + WordEnd, RegexOptions.CultureInvariant);
 
         // 반말 도깨비가 "주인아,"라고 부르면 거만하게 들린다(공통 금칙어 '낮춰 부르기'). 부르는 말만 높여 고친다
-        private static readonly Regex BanmalVocative = new Regex("(주인|손님)아(?=[\\s.!?…~,]|$)", RegexOptions.CultureInvariant);
+        // 주인·손님 호칭과 그 도깨비 자기 이름(어간)은 말하지 않는다. 걸러 내 기본 대사로 바꾸는 대신 검사 전에 지운다. run.py 의 strip_address 와 같다
+        private const string AddressParticles = "(?:께서|께|이입니다|입니다|이에요|이예요|이라고|이라는|이랑|한테|에게|이야|이|가|은|는|을|를|의|도|랑|와|과|아|야)?";
+        private static readonly Dictionary<string, Regex> AddressByName = new Dictionary<string, Regex>();
+
+        private static readonly Regex Segment = new Regex("[^,.!?…~]+[,.!?…~]*" + "\\s*", RegexOptions.CultureInvariant);
+        private static readonly HashSet<string> RepeatExempt = new HashSet<string> { "나는", "내가", "나도", "나랑", "너는", "네가", "이건", "그건", "저기", "여기", "거기" };
+        private static readonly Regex HangulWord = new Regex("[가-힣]+", RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 한 대사 안에서 같은 말을 되풀이하지 않는다 ("고마워, 관리해줘서 고마워" → "관리해줘서 고마워"). 짧은 토막(여섯 글자 이하)이 다른 토막
+        /// 안에 그대로 있으면 그 토막을 지운다. run.py 의 drop_repeated_lead 와 같다.
+        /// </summary>
+        public static string DropRepeatedLead(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return line;
+            }
+            MatchCollection matches = Segment.Matches(line);
+            if (matches.Count < 2)
+            {
+                return line;
+            }
+            var segments = new List<string>();
+            var cores = new List<string>();
+            foreach (Match m in matches)
+            {
+                segments.Add(m.Value);
+                cores.Add(Core(m.Value));
+            }
+            var kept = new System.Text.StringBuilder();
+            for (int i = 0; i < segments.Count; i++)
+            {
+                string core = cores[i];
+                bool repeated = false;
+                if (core.Length >= 2 && core.Length <= 6)
+                {
+                    for (int j = 0; j < segments.Count && !repeated; j++)
+                    {
+                        repeated = j != i && cores[j].Contains(core) && (cores[j].Length > core.Length || j > i);
+                    }
+                }
+                if (!repeated)
+                {
+                    kept.Append(segments[i]);
+                }
+            }
+            string result = kept.ToString().Trim();
+            if (result.Length == 0)
+            {
+                return line;
+            }
+            return result.EndsWith(",") ? result.Substring(0, result.Length - 1) + "." : result;
+        }
+
+        /// <summary>한 대사 안에서 두 번 나온 낱말(세 글자 이상은 앞 두 글자가 같으면 같은 말로 본다). 없으면 null. run.py 의 inner_repeat 와 같다.</summary>
+        public static string InnerRepeat(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return null;
+            }
+            var seen = new HashSet<string>();
+            foreach (Match m in HangulWord.Matches(line))
+            {
+                string word = m.Value;
+                if (word.Length < 2 || RepeatExempt.Contains(word))
+                {
+                    continue;
+                }
+                string key = word.Length == 2 ? word : word.Substring(0, 2);
+                if (!seen.Add(key))
+                {
+                    return word;
+                }
+            }
+            return null;
+        }
+
+        private static readonly Regex Guest = new Regex("손님(께서|께)?", RegexOptions.CultureInvariant);
+
+        /// <summary>'손님'이 대사에 남으면 출력 직전에 '친구'로 바꾼다 (손님께서→친구가, 손님께→친구한테). run.py 의 guest_to_friend 와 같다.</summary>
+        public static string GuestToFriend(string line)
+        {
+            if (string.IsNullOrEmpty(line) || line.IndexOf("손님", StringComparison.Ordinal) < 0)
+            {
+                return line;
+            }
+            return Guest.Replace(line, m => "친구" + (m.Groups[1].Value == "께서" ? "가" : (m.Groups[1].Value == "께" ? "한테" : "")));
+        }
+
+        private static readonly string[] RegularOnlyWords = { "처음" };
+        private static readonly string[] FirstOnlyWords = { "또왔", "또와", "또오", "다시왔", "다시와", "오랜만", "단골", "자주" };
+
+        /// <summary>
+        /// 손님 방문 횟수와 어긋나는 낱말. 단골(2번 이상)이면 '처음', 첫 방문이면 '또·다시·오랜만·단골'. 없으면 null.
+        /// 7번 온 단골에게 "처음 온 친구라서 반가워"라고 했다(2026-11-12 11:45 시험). run.py 의 history_contradiction 과 같다.
+        /// </summary>
+        public static string HistoryContradiction(string line, int? visits)
+        {
+            if (!visits.HasValue || string.IsNullOrEmpty(line))
+            {
+                return null;
+            }
+            string core = Core(line);
+            foreach (string word in visits.Value >= 2 ? RegularOnlyWords : FirstOnlyWords)
+            {
+                if (core.Contains(word))
+                {
+                    return word;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>자기 이름의 어간. 끝의 '이'를 뗀다(향산이→향산, 묘작이→묘작). 이름이 두 글자면 그대로 둔다.</summary>
+        public static string NameStem(string name)
+        {
+            return !string.IsNullOrEmpty(name) && name.Length > 2 && name.EndsWith("이") ? name.Substring(0, name.Length - 1) : name;
+        }
+
+        /// <summary>대사가 자기 이름이나 그 어간을 말하는지 (띄어쓰기·부호는 빼고 본다).</summary>
+        public static bool ContainsSelfName(string line, string name)
+        {
+            if (string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+            string stem = Core(NameStem(name));
+            return stem.Length > 0 && Core(line).Contains(stem);
+        }
+
+        private static Regex AddressFor(string name)
+        {
+            string key = name ?? "";
+            Regex rx;
+            lock (AddressByName)
+            {
+                if (!AddressByName.TryGetValue(key, out rx))
+                {
+                    string words = "주인님|주인";
+                    if (key.Length > 0)
+                    {
+                        string stem = NameStem(key);
+                        // 모델이 이름을 "향 산이"처럼 띄어 쓰기도 해서 글자 사이의 띄어쓰기를 받는다
+                        var chars = new List<string>();
+                        foreach (char ch in stem)
+                        {
+                            chars.Add(Regex.Escape(ch.ToString()));
+                        }
+                        words += "|" + string.Join("\\s?", chars.ToArray()) + (stem != key ? "(?:이)?" : "");
+                    }
+                    rx = new Regex("[\\s,]*(?<![가-힣])(?:" + words + ")" + AddressParticles + "(?=[\\s,.!?…~]|$)", RegexOptions.CultureInvariant);
+                    AddressByName[key] = rx;
+                }
+            }
+            return rx;
+        }
+
+        // 반말 도깨비가 '닦아 주시면', '오셨어'처럼 -시- 높임을 섞으면 어색하다. 높임을 뺀다. run.py 의 HONORIFIC_WORDS 와 같다
+        private static readonly string[][] HonorificWords = BuildHonorificWords();
+
+        private static string[][] BuildHonorificWords()
+        {
+            var list = new List<string[]>();
+            // '인사드려요'·'부탁드려요'의 '드리다'는 '주다'가 아니라 '하다'로 바꾼다
+            string[] nouns = { "부탁", "인사", "감사", "사과", "축하", "말씀", "약속" };
+            string[][] humble = { new[] { "드립니다", "해" }, new[] { "드릴게", "할게" }, new[] { "드릴까", "할까" }, new[] { "드릴래", "할래" }, new[] { "드려", "해" } };
+            foreach (string n in nouns)
+            {
+                foreach (string[] h in humble)
+                {
+                    list.Add(new[] { n + h[0], n + h[1] });
+                }
+            }
+            string[][] rest =
+            {
+                new[] { "계시면", "있으면" }, new[] { "계시는", "있는" }, new[] { "계신", "있는" }, new[] { "계셔서", "있어서" }, new[] { "계셔", "있어" }, new[] { "계셨", "있었" },
+                new[] { "들이셨", "들였" }, new[] { "하셨", "했" }, new[] { "오셨", "왔" }, new[] { "가셨", "갔" }, new[] { "보셨", "봤" }, new[] { "주셨", "줬" },
+                new[] { "주셔", "줘" }, new[] { "하셔", "해" }, new[] { "오셔", "와" }, new[] { "가셔", "가" }, new[] { "보셔", "봐" }, new[] { "안녕하십네다", "안녕" },
+                new[] { "되셨", "됐" }, new[] { "쓰셨", "썼" }, new[] { "이셨", "였" }, new[] { "나셨", "났" }, new[] { "사셨", "샀" }, new[] { "타셨", "탔" },
+                new[] { "자셨", "잤" }, new[] { "서셨", "섰" }, new[] { "내셨", "냈" }, new[] { "드셨", "먹었" }, new[] { "으셨", "었" },
+                new[] { "가실", "갈" }, new[] { "오실", "올" }, new[] { "하실", "할" }, new[] { "보실", "볼" }, new[] { "주실", "줄" }, new[] { "되실", "될" },
+                new[] { "쓰실", "쓸" }, new[] { "드실", "먹을" }, new[] { "이실", "일" },
+                new[] { "들이신", "들인" }, new[] { "하신", "한" }, new[] { "오신", "온" }, new[] { "가신", "간" }, new[] { "보신", "본" }, new[] { "주신", "준" },
+                new[] { "되신", "된" }, new[] { "쓰신", "쓴" }, new[] { "이신", "인" }, new[] { "드신", "먹은" }, new[] { "으신", "은" },
+                new[] { "드릴게", "줄게" }, new[] { "드릴까", "줄까" }, new[] { "드려", "줘" }
+            };
+            list.AddRange(rest);
+            return list.ToArray();
+        }
+
+        private static readonly Regex HonorificSi = new Regex("(?<=[가-힣])(?<![마도])시(?=면|며|고|는|던|지|네|겠|니|거|길|려|도록|어서|나|잖|더라)", RegexOptions.CultureInvariant);
+        // '닦아 주면 좋겠어'는 부탁을 돌려 말해 어색하다. 바로 '닦아 줘'로 말한다
+        private static readonly Regex AskRequest = new Regex("(?<=[아어여해])( ?)주면 좋겠(?:어요|어|다)(?=[\\s.!?…~,]|$)", RegexOptions.CultureInvariant);
+
+        // 문맥에 어색한 말을 고친다 ("닦아달라고 부탁해" → "닦아 줘", "어서 왔어" → "어서 와"). run.py 의 fix_awkward 와 같다. 못 고친 것은 금칙어 awkward 묶음이 거른다
+        private static readonly Regex QuotedAsk = new Regex(
+                "([가-힣]*[아어여해])\\s?달라고\\s?(?:부탁|요청|말)(?:해요|했어요|했어|할게요|할게|해|드려요|드릴게요|드릴게)?", RegexOptions.CultureInvariant);
+        private static readonly Regex Arrive = new Regex("어서\\s?왔(?:어요|어|네요|네|구나|지)", RegexOptions.CultureInvariant);
+
+        private static string FixAwkward(string line)
+        {
+            line = QuotedAsk.Replace(line, m => m.Groups[1].Value + " 줘");
+            return Arrive.Replace(line, "어서 와");
+        }
+
+        private static string DropHonorific(string line)
+        {
+            foreach (string[] pair in HonorificWords)
+            {
+                line = line.Replace(pair[0], pair[1]);
+            }
+            line = HonorificSi.Replace(line, "");
+            return AskRequest.Replace(line, "$1줘");
+        }
+        private static readonly Regex LeadingJunk = new Regex("^[\\s,]+", RegexOptions.CultureInvariant);
+        private static readonly Regex CommaBeforeEnd = new Regex(",\\s*(?=[.!?…~])", RegexOptions.CultureInvariant);
+        private static readonly Regex CommaAfterEnd = new Regex("(?<=[.!?…~]),\\s*", RegexOptions.CultureInvariant);
+        private static readonly Regex MultiSpace = new Regex("\\s{2,}", RegexOptions.CultureInvariant);
         private static readonly Regex WordYo = new Regex("([가-힣]+)요" + WordEnd, RegexOptions.CultureInvariant);
         private static readonly Regex WordFormal = new Regex("([가-힣]*?)([가-힣])(니다|니까)" + WordEnd, RegexOptions.CultureInvariant);
+
 
         /// <summary>
         /// 작은 모델이 흔히 틀리는 어미를 그 도깨비의 말투로 고친다 (endingHint.label: 반말 · 하오체 · 하게체). 고칠 것이 없으면 그대로다.
@@ -98,6 +328,27 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public static string NormalizeSpeech(string line, string label)
         {
+            return NormalizeSpeech(line, label, null);
+        }
+
+        /// <summary>name 을 주면 그 도깨비의 자기 이름(어간)도 지운다.</summary>
+        public static string NormalizeSpeech(string line, string label, string name)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return line;
+            }
+            line = StripAddress(GuestToFriend(line), name);
+            if (line.Length == 0)
+            {
+                return line;
+            }
+            // 말투 어미를 고치다 새로 생긴 이름("향산이예요"→"향산이야")을 한 번 더 지운다
+            return DropRepeatedLead(GuestToFriend(StripAddress(ApplySpeech(line, label), name)));
+        }
+
+        private static string ApplySpeech(string line, string label)
+        {
             if (string.IsNullOrEmpty(line))
             {
                 return line;
@@ -106,7 +357,7 @@ namespace Jamkkaebi.Npc
             {
                 case "반말":
                     line = ReplaceWords(line, BanmalWords);
-                    line = BanmalVocative.Replace(line, m => m.Groups[1].Value == "주인" ? "주인님" : m.Groups[1].Value);
+                    line = FixAwkward(DropHonorific(line));
                     line = BanmalPronoun.Replace(line, m => m.Groups[1].Value + BanmalPronounOf(m.Groups[2].Value));
                     return WordYo.Replace(line, m => YoNouns.Contains(m.Groups[1].Value + "요") || m.Groups[1].Value.EndsWith("세")
                             || m.Groups[1].Value.EndsWith("시") ? m.Value : m.Groups[1].Value);
@@ -119,6 +370,26 @@ namespace Jamkkaebi.Npc
                 default:
                     return line;
             }
+        }
+
+        /// <summary>대사에서 '주인님'·'주인'·'손님' 호칭을 지우고 남은 쉼표·띄어쓰기를 다듬는다 ("주인님, 고마워!" → "고마워!").</summary>
+        public static string StripAddress(string line)
+        {
+            return StripAddress(line, null);
+        }
+
+        public static string StripAddress(string line, string name)
+        {
+            Regex address = AddressFor(name);
+            if (string.IsNullOrEmpty(line) || !address.IsMatch(line))
+            {
+                return line;
+            }
+            line = address.Replace(line, "");
+            line = LeadingJunk.Replace(line, "");
+            line = CommaBeforeEnd.Replace(line, "");
+            line = CommaAfterEnd.Replace(line, " ");
+            return MultiSpace.Replace(line, " ").Trim();
         }
 
         private static string ReplaceWords(string line, string[][] words)
