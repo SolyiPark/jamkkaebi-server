@@ -16,8 +16,8 @@ spec = importlib.util.spec_from_file_location("run", folder / "run.py")
 run = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(run)
 
-args = SimpleNamespace(line_chars=25, max_chars=40, max_sentences=0, format=True)
-free = SimpleNamespace(line_chars=25, max_chars=40, max_sentences=0, format=False)
+args = SimpleNamespace(line_chars=20, max_chars=40, max_sentences=0, format=True)
+free = SimpleNamespace(line_chars=20, max_chars=40, max_sentences=0, format=False)
 content = run.load_content()
 expected = {}
 for scene in content["scenes"]:
@@ -54,6 +54,10 @@ SPEECH_SAMPLES = [
     ("반말", "이거 뭐예요? 아니에요, 고맙습니다."),
     ("반말", "요즘 반짝이는 게 좋아. 주인아저씨는 아니야."),
     ("반말", "주인님, 이거 드세요!"),
+    ("반말", "이틀 전 닦아주신 덕분에 선명해졌어요. 가실래요?"),
+    ("반말", "안녕하세요, 순찰 나왔습니다! 인사드려요."),
+    ("반말", "닦아주시면 좋겠어. 오셨어? 하시는 일 잘 보시고 가."),
+    ("반말", "도시는 마시고 주시면 계시는 곳에서 드릴게."),
     ("하게체", "안녕하세요, 전시관을 둘러보시는군요."),
     ("하게체", "좋은 하루 보내세요, 처음 뵙겠습니다."),
     ("하게체", "고맙습니다, 좋은 향이 퍼지듯 기분이 나아지는 것 같네요."),

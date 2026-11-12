@@ -243,7 +243,7 @@ public static class Program
     {
         Console.WriteLine("=== 공통 금칙어 ===");
         var filter = new NpcLineFilter(catalog);
-        Check(catalog.groups.Count == 6, "금칙어 묶음 6개 (욕설·비하·밀어내기·퉁명·위협·낮춰 부르기)");
+        Check(catalog.groups.Count == 9, "금칙어 묶음 9개 (욕설·비하·밀어내기·퉁명·위협·낮춰 부르기·자기소개·지시문 노출·어색한 말)");
         string[] blocked =
         {
             "……지문 남는다. 놓아.", "……손대지 마.", "앗, 놔줘~ 나 바쁘단 말이야!", "어흠! 내려놓아라.", "놓으라고!",
@@ -252,7 +252,9 @@ public static class Program
             "시발", "씨바 진짜", "닥쳐!", "입 닥쳐", "꺼져!", "당장 꺼져", "미친놈", "너 미쳤어?", "미쳤냐?", "이 새끼야",
             "저 새끼.", "졸라 짜증나", "등신 같은", "니미 뭐야", "염병하네", "죽여버린다", "너 죽여", "다 죽인다",
             // 낮춰 부르기 (반말 도깨비가 주인을 이렇게 불러 거만하게 들렸다)
-            "주인아, 이리 와 줘!", "주인아~ 놀자", "손님아.", "놀자, 주인아"
+            "주인아, 이리 와 줘!", "주인아~ 놀자", "손님아.", "놀자, 주인아",
+            // 주인님·주인·손님 호칭은 어떤 꼴로도 금지 (모든 도깨비가 반말이라 호칭 없이 말한다)
+            "주인님, 놀자!", "손님, 천천히 보세요.", "나는 잠깨비 도깨비야", "어서 왔어", "닦아 달라고 부탁해", "가까이 다가와도 돼", "쯧, 내려줘라", "얼른 비켜라.", "최근 이 상대와 있었던 일을 말해 줘", "손 떼 줘, 긁힐라", "주인아저씨 같구먼", "주인 아직 안 왔어?", "흥미로운 손님이구려", "주인을 졸라서 놀았어"
         };
         foreach (string line in blocked)
         {
@@ -261,13 +263,12 @@ public static class Program
         string[] allowed =
         {
             "새끼 참새가 날아간다!", "심심해 죽겠어~", "앗, 참새를 놓쳤어!", "여기 놓으면 볕이 잘 들겠다!", "바람 쐬러 나가자",
-            "이리저리 구경하게", "흥미로운 손님이구려", "어흠, 살살 내려 주시오.", "…지문 남잖아. 살살 들어 줘.", "",
+            "이리저리 구경하게", "어서 와", "닦아 줘", "조심해 줘, 부탁해", "바라는 건 없어.", "어흠, 살살 내려 주시오.", "…지문 남잖아. 살살 들어 줘.", "",
             // 욕과 글자가 겹치지만 정상인 문장 (실화·문화재 이야기에 나올 만한 꼴)
             "영향을 미친 유물이야", "큰 영향을 미쳤다네", "위기가 닥치는 날", "어려움이 닥쳐도 괜찮아", "불이 꺼져 있구먼",
             "등신불처럼 앉아 있구려", "이곳이 시발점이었지", "꽃씨 바구니", "할머니 미소가 따뜻해", "이 새끼 참새 좀 봐!",
-            "저 새끼 고양이", "아직 새끼야!", "주인을 졸라서 놀았어", "전염병이 돌던 때에도 버텼다네", "숨죽여 기다렸어",
-            "숨을 죽여 봐", "목소리를 죽여서 말해 주오", "발소리를 죽여 다가왔지", "숨죽인다네", "기척을 죽여 숨었지",
-            "주인님, 놀자!", "손님, 천천히 보세요.", "주인아저씨 같구먼", "제 주인 아니에요", "주인 아직 안 왔어?"
+            "저 새끼 고양이", "아직 새끼야!", "전염병이 돌던 때에도 버텼다네", "숨죽여 기다렸어",
+            "숨을 죽여 봐", "목소리를 죽여서 말해 주오", "발소리를 죽여 다가왔지", "숨죽인다네", "기척을 죽여 숨었지"
         };
         foreach (string line in allowed)
         {
@@ -344,8 +345,8 @@ public static class Program
         Console.WriteLine("run.py 와 같은 프롬프트: " + same + "/" + compared);
 
         // 시스템 메시지는 도깨비마다 고정 — 상대·선택지·상황에 따라 바뀌는 것이 없어야 llama.cpp 가 다시 읽지 않는다
-        string[] changing = { "주인을 대할 때", "손님을 대할 때", "상황:", "고른 선택지", "대사:", "자 이내", "가치관", "좋아하는 것",
-                              "싫어하는 것", "관리를 받으면", "끌려갈 때", "최근 이 상대와" };
+        string[] changing = { "주인을 대할 때", "친구를 대할 때", "상황:", "고른 선택지", "대사:", "자 이내", "가치관", "좋아하는 것",
+                              "싫어하는 것", "관리를 받으면", "끌려갈 때", "기억:" };
         foreach (Dictionary<string, object> scene in scenes)
         {
             string id = (string)scene["id"];
@@ -362,8 +363,19 @@ public static class Program
             Check(!prompt.User.Contains(NpcFactKeys.StoryIndex), id + " story_index 는 프롬프트에 없음");
             Check(!(prompt.System + prompt.User).Contains("JSON") && !prompt.User.Contains("출력 형식") && !prompt.User.Contains("영문 그대로"),
                     id + " 형식 제약이 있으면 형식 설명을 싣지 않음");
-            Check(free.Build(request).User.EndsWith(PromptAssembler.FormatLine), id + " 형식 제약이 없으면(DescribeFormat) 형식 설명을 끝에 붙임");
-            Check(prompt.User.StartsWith(request.Mode == InteractionMode.Owner ? "지금 상대: 주인" : "지금 상대: 손님"),
+            string freeUser = free.Build(request).User;
+            // 최근 대사는 프롬프트에 싣지 않는다 (작은 모델이 그대로 베꼈다)
+            request.RecentLines = new List<string> { "첫째로 한 말.", "둘째로 한 말." };
+            Check(!free.Build(request).User.Contains("첫째로 한 말."), id + " 최근 대사를 프롬프트에 싣지 않음");
+            request.RecentLines = null;
+            Check(freeUser.EndsWith(PromptAssembler.FormatLine) || freeUser.EndsWith(PromptAssembler.FormatActionLine) || freeUser.EndsWith(PromptAssembler.FormatLineOnly),
+                    id + " 형식 제약이 없으면(DescribeFormat) 형식 설명을 끝에 붙임");
+            // 대상이 하나뿐이면 target 칸을, 행동도 하나뿐이면 action 칸까지 빼서 출력 토큰을 줄인다 (응답 시간은 출력 토큰 수에 비례)
+            bool onlyTarget = request.Candidates.SelectMany(c => c.TargetIds ?? new List<string>()).Distinct().Count() == 1;
+            bool onlyAction = request.Candidates.Select(c => c.ActionId).Distinct().Count() == 1;
+            Check(onlyTarget == !freeUser.Contains("target") && (onlyTarget && onlyAction) == freeUser.EndsWith(PromptAssembler.FormatLineOnly),
+                    id + " 대상·행동이 하나뿐이면 그 칸을 형식에서 뺌");
+            Check(prompt.User.StartsWith(request.Mode == InteractionMode.Owner ? "지금 상대: 주인" : "지금 상대: 친구"),
                     id + " 사용자 메시지는 지금 상대부터 (같은 상대면 앞부분이 이어짐)");
             if (request.Input == NpcInputs.Care)
             {
@@ -486,10 +498,10 @@ public static class Program
         // 후보 포함
         Expect(validator, Out("answer_status", "player", "어흠."), tap, OutputProblem.UnknownAction, "후보에 없는 행동");
         Expect(validator, Out("안부 묻기", "player", "어흠."), tap, OutputProblem.UnknownAction, "행동 칸에 선택지 이름");
-        Expect(validator, "{\"target\":\"player\",\"line\":\"어흠.\"}", tap, OutputProblem.UnknownAction, "행동이 없음");
+        Expect(validator, "{\"target\":\"player\",\"line\":\"어흠.\"}", tap, OutputProblem.None, "행동이 없어도 후보가 하나뿐이면 후보로 채움");
         Expect(validator, Out("greet", "none", "어흠."), tap, OutputProblem.TargetMismatch, "후보에 없는 대상");
         Expect(validator, Out("greet", "player(주인)", "어흠."), tap, OutputProblem.TargetMismatch, "대상 칸에 'player(주인)'");
-        Expect(validator, "{\"action\":\"greet\",\"line\":\"어흠.\"}", tap, OutputProblem.TargetMismatch, "대상이 없음");
+        Expect(validator, "{\"action\":\"greet\",\"line\":\"어흠.\"}", tap, OutputProblem.None, "대상이 없어도 대상이 하나뿐이면 후보로 채움");
         var paired = new ReactionRequest { RequestId = "p", RelicId = 8, Mode = InteractionMode.Owner, Input = NpcInputs.Tap };
         paired.Candidates.Add(new ActionCandidate(NpcActions.Greet, NpcTargets.Player));
         paired.Candidates.Add(new ActionCandidate(NpcActions.AnswerStatus, "building:1"));
@@ -651,8 +663,12 @@ public static class Program
         }
 
         // 문장마다 어미 (존댓말·반말 섞기)
-        EndingHint hao = personas.Find(8).endingHint, hage = personas.Find(2).endingHint;
-        EndingHint haeyo = personas.Find(5).endingHint, banmal = personas.Find(9).endingHint;
+        // 말발굽·향산이·구름결도 반말로 바꿨으므로, 하오체·하게체·해요체 검사는 페르소나가 아닌 이 합성 어미 규칙으로 계속 시험한다
+        EndingHint hao = new EndingHint { label = "하오체", pattern = "(오|소|구려)$", notPattern = "(니다|요)$" };
+        EndingHint hage = new EndingHint { label = "하게체", pattern = "(네|구먼|게|세|가|나)$", notPattern = "(요|니다|어|야|거든|잖아|냐)$",
+                bannedPattern = "(^|[\\s.!?…~,])안녕(?!하)" };
+        EndingHint haeyo = new EndingHint { label = "해요체", pattern = "(요|니다|[습십합됩갑봅옵]니까)$" };
+        EndingHint banmal = personas.Find(9).endingHint;
         string wrong;
         Check(!NpcLineChecks.SpeechMatches("안녕! 놀고 싶어요~ 같이 놀자!", banmal, out wrong) && wrong == "놀고 싶어요~",
                 "반말 도깨비가 한 문장이라도 '~요'로 끝내면 걸림 ← " + wrong);
@@ -675,10 +691,9 @@ public static class Program
         Check(NpcLineChecks.SpeechMatches("히힛! 같이 놀자!", banmal, out wrong) && NpcLineChecks.SpeechMatches("어흠. 고맙소.", hao, out wrong)
                 && NpcLineChecks.SpeechMatches("앗, 깨질까 봐 무서워요.", haeyo, out wrong), "감탄사만 있는 문장·마디는 건너뜀");
         // bannedPattern: 묘작이는 '야'·'저'·'주인님' 아닌 호칭, 향산이는 반말 인사·반말 어미
-        Check(!NpcLineChecks.SpeechMatches("야, 나 좀 만져봐!", banmal, out wrong) && !NpcLineChecks.SpeechMatches("주인님, 저 왔어!", banmal, out wrong)
-                && !NpcLineChecks.SpeechMatches("주인 왔어! 놀자!", banmal, out wrong)
-                && NpcLineChecks.SpeechMatches("주인님, 나 왔어! 저기 참새 봐!", banmal, out wrong),
-                "반말(묘작이): '야'·'저'·'주인'은 걸리고, '주인님'·'나'·'저기'는 통과 ← " + wrong);
+        Check(!NpcLineChecks.SpeechMatches("야, 나 좀 만져봐!", banmal, out wrong) && !NpcLineChecks.SpeechMatches("나 왔어! 저 놀고 싶어!", banmal, out wrong)
+                && NpcLineChecks.SpeechMatches("나 왔어! 저기 참새 봐!", banmal, out wrong),
+                "반말(묘작이): '야'·'저'는 걸리고, '나'·'저기'는 통과 ← " + wrong);
         Check(!NpcLineChecks.SpeechMatches("안녕, 구경 오셨구먼.", hage, out wrong) && !NpcLineChecks.SpeechMatches("쉬어 가게, 편히 앉아.", hage, out wrong)
                 && NpcLineChecks.SpeechMatches("안녕하신가, 편히 쉬어 가게.", hage, out wrong),
                 "하게체(향산이): 반말 '안녕'·'~아'는 걸리고, '안녕하신가'는 통과 ← " + wrong);
@@ -686,26 +701,45 @@ public static class Program
         // 페르소나를 받은 출력 검사기: 자기 이름·어미·반복
         var strict = new NpcOutputValidator(new NpcLineFilter(forbidden), personas);
         var loose = new NpcOutputValidator(new NpcLineFilter(forbidden));
-        Expect(strict, Out("wander_greet", "player", "향산이가 인사하네."), Request(2, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet),
-                OutputProblem.SelfName, "자기 이름을 말하면 걸림");
+        Expect(strict, Out("wander_greet", "player", "반가워향산이야, 편히 구경해."), Request(2, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet),
+                OutputProblem.SelfName, "자기 이름(어간 '향산')이 낱말에 붙어 지울 수 없으면 걸림");
+        OutputCheck nameStrip = strict.Check(Out("wander_greet", "player", "향산이가 인사하네, 편히 구경해."), Request(2, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet));
+        Check(nameStrip.IsValid && nameStrip.Line == "인사하네, 편히 구경해.", "자기 이름은 조사까지 지우고 통과 ← " + nameStrip.Line);
+        Check(NpcLineChecks.NormalizeSpeech("향산아, 오셨어? 닦아주시면 좋겠어.", "반말", "향산이") == "왔어? 닦아줘.", "이름 어간·조사와 -시- 높임을 지움");
+        Check(NpcLineChecks.NormalizeSpeech("도시는 마시고 주시면", "반말", "말발굽") == "도시는 마시고 주면", "'도시'·'마시고'의 시는 지키고 높임만 뺌");
+        Expect(strict, Out("greet", "player", "안녕!"), Tap(8), OutputProblem.TooPlain, "인사 행동의 대사가 인사말뿐이면 걸림");
+        ReactionRequest regularVisit = Request(8, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderRecall);
+        regularVisit.Facts.Add(new Fact(NpcFactKeys.VisitCount30d, "7"));
+        Expect(strict, Out("wander_recall", "player", "안녕, 처음 온 친구라서 반가워!"), regularVisit, OutputProblem.WrongHistory, "7번 온 단골에게 '처음'이라고 하면 걸림");
+        Expect(strict, Out("wander_recall", "player", "어, 또 왔네. 반가워!"), regularVisit, OutputProblem.None, "7번 온 단골에게 '또 왔네'는 통과");
+        ReactionRequest firstVisit = Request(8, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet);
+        firstVisit.Facts.Add(new Fact(NpcFactKeys.VisitCount30d, "1"));
+        Expect(strict, Out("wander_greet", "player", "어, 또 왔구나! 반가워."), firstVisit, OutputProblem.WrongHistory, "처음 온 친구에게 '또 왔구나'라고 하면 걸림");
+        Expect(strict, Out("wander_greet", "player", "처음 보는 얼굴이네. 반가워!"), firstVisit, OutputProblem.None, "처음 온 친구에게 '처음 보는 얼굴'은 통과");
+        Expect(strict, Out("greet", "player", "오늘 순찰 잘 다녀왔습네까?"), Tap(8), OutputProblem.SpeechMismatch, "'~습네까'처럼 존대가 섞이면 걸림");
+        Expect(strict, Out("greet", "player", "오랜만에 뵙겠어."), Tap(8), OutputProblem.SpeechMismatch, "'뵙겠어'처럼 존대 낱말이 섞이면 걸림");
+        Expect(strict, Out("greet", "player", "관리해 줘서 고마워. 관리가 좋아서 고마워."), Tap(9), OutputProblem.InnerRepeat, "한 대사 안에서 같은 말이 되풀이되면 걸림");
+        Check(NpcLineChecks.InnerRepeat("고마워, 관리해줘서 고마웠어") == "고마웠어" && NpcLineChecks.InnerRepeat("나는 나는 좋아") == null
+                && NpcLineChecks.InnerRepeat("안녕? 오늘도 순찰 잘 다녀왔어?") == null, "한 대사 안의 반복 찾기");
+        Expect(strict, Out("greet", "player", "안녕."), Tap(8), OutputProblem.TooPlain, "부호만 달라도 인사말뿐이면 걸림");
         Expect(loose, Out("wander_greet", "player", "향산이가 인사하네."), Request(2, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet),
                 OutputProblem.None, "페르소나를 안 받은 검사기는 이름·어미를 보지 않음");
         // 말투 다듬기: 흔한 어미는 검사 전에 고치고, 고치지 못한 것만 어미 검사가 거른다
-        OutputCheck fixedCheck = strict.Check(Out("greet", "player", "주인님, 고마워요!"), Tap(9));
-        Check(fixedCheck.IsValid && fixedCheck.Line == "주인님, 고마워!" && fixedCheck.LineBeforeSpeechFix == "주인님, 고마워요!"
+        OutputCheck fixedCheck = strict.Check(Out("greet", "player", "나 왔어, 고마워요!"), Tap(9));
+        Check(fixedCheck.IsValid && fixedCheck.Line == "나 왔어, 고마워!" && fixedCheck.LineBeforeSpeechFix == "나 왔어, 고마워요!"
                 && (fixedCheck.ToResult("s").Note ?? "").Contains("어미를 말투에 맞게 고침"),
                 "반말 도깨비의 '고마워요'는 '고마워'로 고쳐 통과, 고치기 전 대사와 Note 를 남김 ← " + fixedCheck.Line + " / " + fixedCheck.ToResult("s").Note);
-        Expect(strict, Out("greet", "player", "주인님, 이거 드세요!"), Tap(9), OutputProblem.SpeechMismatch, "반말 도깨비가 고치지 못하는 '~요'를 쓰면 걸림");
+        Expect(strict, Out("greet", "player", "이거 어떠세요!"), Tap(9), OutputProblem.SpeechMismatch, "반말 도깨비가 고치지 못하는 '~요'를 쓰면 걸림");
         var unfixed = new NpcOutputValidator(new NpcLineFilter(forbidden), personas) { NormalizeSpeech = false };
-        Expect(unfixed, Out("greet", "player", "주인님, 고마워요!"), Tap(9), OutputProblem.SpeechMismatch, "말투 다듬기를 끄면 '~요'가 그대로 걸림");
-        OutputCheck haoCheck = strict.Check(Out("greet", "player", "안녕하십니까, 주인님. 성실하게 모시겠습니다."), Tap(8));
-        Check(haoCheck.IsValid && haoCheck.Line == "안녕하시오, 주인님. 성실하게 모시겠소.", "하오체 도깨비의 '~습니다'는 '~소'로 고쳐 통과 ← " + haoCheck.Line);
-        OutputCheck untouched = strict.Check(Out("greet", "player", "안녕하시오, 주인님."), Tap(8));
-        Check(untouched.IsValid && untouched.LineBeforeSpeechFix == null && untouched.ToResult("u").Note == null, "하오체 인사는 고치지 않고 통과");
+        Expect(unfixed, Out("greet", "player", "나 왔어, 고마워요!"), Tap(9), OutputProblem.SpeechMismatch, "말투 다듬기를 끄면 '~요'가 그대로 걸림");
+        OutputCheck haoCheck = strict.Check(Out("greet", "player", "고마워요! 어흠, 왔구나."), Tap(8));
+        Check(haoCheck.IsValid && haoCheck.Line == "고마워! 어흠, 왔구나.", "말발굽(반말)의 '~요'는 떼어 고쳐 통과 ← " + haoCheck.Line);
+        OutputCheck untouched = strict.Check(Out("greet", "player", "어흠, 왔구나."), Tap(8));
+        Check(untouched.IsValid && untouched.LineBeforeSpeechFix == null && untouched.ToResult("u").Note == null, "반말 인사는 고치지 않고 통과");
         ReactionRequest again = Tap(8);
-        again.RecentLines = new List<string> { "안녕하시오, 계시오?" };
-        Expect(strict, Out("greet", "player", "안녕하시오, 계시오? 주인께서 오셨구려."), again, OutputProblem.Repeated, "최근 대사와 같으면 걸림");
-        Expect(loose, Out("greet", "player", "안녕하시오, 계시오? 주인께서 오셨구려."), again, OutputProblem.Repeated,
+        again.RecentLines = new List<string> { "어흠, 왔구나, 기다렸어?" };
+        Expect(strict, Out("greet", "player", "어흠, 왔구나, 기다렸어? 어서 와."), again, OutputProblem.Repeated, "최근 대사와 같으면 걸림");
+        Expect(loose, Out("greet", "player", "어흠, 왔구나, 기다렸어? 어서 와."), again, OutputProblem.Repeated,
                 "반복은 페르소나 없이도 봄 (최근 대사만 있으면)");
 
         // 기본 대사와 이야기 대사도 페르소나 어미를 지킨다 (모델이 실패했을 때, 이야기 듣기 때 검사 없이 그대로 나가는 말이다)
@@ -726,7 +760,7 @@ public static class Program
         var backend = new FakeBackend();
         var generator = new SlmReactionGenerator(backend, new PromptAssembler(personas, actions), strict);
         generator.LoadAsync(CancellationToken.None).Wait();
-        backend.Replies.Enqueue(Out("greet", "player", "주인님, 이거 드세요!"));
+        backend.Replies.Enqueue(Out("greet", "player", "이거 어떠세요!"));
         backend.Replies.Enqueue(Out("greet", "player", "앗, 같이 놀자!"));
         ReactionRequest tap9 = Tap(9);
         tap9.RequestId = "r9";
@@ -737,7 +771,7 @@ public static class Program
                 && backend.LastPrompt.User.Contains(PromptAssembler.FlavorLine(tapFlavors[1])),
                 "어미가 섞이면 다음 곁들일 거리로 다시 만들어 통과한 것을 씀 ← " + retried.Note);
         backend.Calls = 0;
-        backend.Reply = Out("greet", "player", "주인님, 이거 드세요!");
+        backend.Reply = Out("greet", "player", "이거 어떠세요!");
         ReactionResult gaveUp = Run(generator, Tap(9));
         Check(!gaveUp.IsSuccess && gaveUp.FailReason == FailReason.InvalidOutput && backend.Calls == 2 && gaveUp.FailDetail.Contains("앞 시도 1번"),
                 "MaxAttempts(2)번 모두 걸리면 InvalidOutput (요청 관리자가 기본 대사로 대신) ← " + gaveUp.FailDetail);
@@ -820,10 +854,30 @@ public static class Program
         string[][] cases =
         {
             new[] { "반말", "관리해 주셔서 정말 고마워요!", "관리해 줘서 정말 고마워!" },
-            new[] { "반말", "주인아, 어디 가요?", "주인님, 어디 가?" },
+            new[] { "반말", "주인아, 어디 가요?", "어디 가?" },
+            new[] { "반말", "이틀 전 닦아주신 덕분에 선명해졌어요.", "이틀 전 닦아준 덕분에 선명해졌어." },
+            new[] { "반말", "오늘은 순찰 좀 같이 가실래요?", "오늘은 순찰 좀 같이 갈래?" },
+            new[] { "반말", "네가 정말 공 들이셨구나.", "네가 정말 공 들였구나." },
+            new[] { "반말", "좋은 곳에 오셨구나, 인사드려요.", "좋은 곳에 왔구나, 인사해." },
+            new[] { "반말", "부탁드려요, 조심해 주세요~", "부탁해, 조심해 줘~" },
+            new[] { "반말", "혹시 한 번 더 닦아주시면 좋겠어요.", "혹시 한 번 더 닦아줘." },
+            new[] { "반말", "안녕하세요, 순찰 나왔습니다!", "안녕, 순찰 나왔어!" },
+            new[] { "반말", "주인님, 고마워! 오늘도 반가워, 주인님.", "고마워! 오늘도 반가워." },
+            new[] { "반말", "응, 주인님이 왔네! 손님, 구경해.", "응 왔네! 친구, 구경해." },
+            new[] { "반말", "집주인이 왔어. 주인공이야.", "집주인이 왔어. 주인공이야." },
+            new[] { "반말", "손님께서 오셨네요. 손님께 인사할게요.", "친구가 왔네. 친구한테 인사할게." },
+            new[] { "반말", "좋은 하루 보내세요.", "좋은 하루 보내." },
+            new[] { "반말", "닦아달라고 부탁해.", "닦아 줘." },
+            new[] { "반말", "한 번 더 닦아 달라고 부탁드려요.", "한 번 더 닦아 줘." },
+            new[] { "반말", "어서 왔어!", "어서 와!" },
+            new[] { "반말", "내려주셔도 돼요.", "내려줘도 돼." },
+            new[] { "반말", "고마워, 관리해줘서 고마워", "관리해줘서 고마워" },
+            new[] { "반말", "고마워! 관리해줘서 고마워~", "관리해줘서 고마워~" },
+            new[] { "반말", "관리해줘서 고마워, 고마워!", "관리해줘서 고마워." },
+            new[] { "반말", "안녕하십네다! 반가워.", "안녕! 반가워." },
             new[] { "반말", "필요해요? 중요한 거야.", "필요해? 중요한 거야." },
             new[] { "반말", "주인아저씨, 요즘 어때?", "주인아저씨, 요즘 어때?" },
-            new[] { "하오체", "안녕하옵니까, 주인님.", "안녕하시오, 주인님." },
+            new[] { "하오체", "안녕하옵니까, 주인님.", "안녕하시오." },
             new[] { "하오체", "성실하게 모시겠습니다.", "성실하게 모시겠소." },
             new[] { "하오체", "어서 오세요. 수행원입니다.", "어서 오시오. 수행원이오." },
             new[] { "하게체", "관리해 주셔서 감사합니다.", "관리해 줘서 감사하네." },
@@ -1877,12 +1931,12 @@ public static class Program
             Check(builder.Build(Guest(5, input, 3)).Request.Candidates.Count == 0, "손님은 " + input + " 를 할 수 없음 (후보 없음)");
         }
         NpcContext first = builder.Build(Guest(2, NpcInputs.Visit, 1));
-        Check(first.KeyFact == "first_visit" && Acts(first) == "wander_greet" && first.Request.Situation.StartsWith("처음 온 손님")
+        Check(first.KeyFact == "first_visit" && Acts(first) == "wander_greet" && first.Request.Situation.StartsWith("처음 온 친구")
                 && FactsOf(first) == "visit_count_30d=1, awakening=각성+", "손님·첫 방문: 인사만, 선명도는 넣지 않음 ← " + FactsOf(first));
         NpcContext regular = builder.Build(Guest(5, NpcInputs.Visit, 4));
-        Check(regular.KeyFact == "regular_visit" && Acts(regular) == "wander_greet,wander_recall"
-                && regular.Request.Situation.StartsWith("최근 30일 동안 4번 온 손님") && !FactsOf(regular).Contains("clarity"),
-                "손님·단골: 단골 인사 후보까지, 방문 횟수를 상황 문장에");
+        Check(regular.KeyFact == "regular_visit" && Acts(regular) == "wander_recall"
+                && regular.Request.Situation.StartsWith("최근 30일 동안 4번 온 친구") && !FactsOf(regular).Contains("clarity"),
+                "손님·단골: 알아보기 후보만, 방문 횟수를 상황 문장에");
         Check(Acts(builder.Build(Guest(5, NpcInputs.Visit, null))) == "wander_greet", "방문 기록이 없으면 첫 방문으로");
         var ownerVisit = Owner(5, NpcInputs.Visit, "CLEAR", 1);
         Check(builder.Build(ownerVisit).Request.Candidates.Count == 0, "주인에게 손님 관람 장면은 없음");
