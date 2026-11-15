@@ -68,6 +68,9 @@ public class FriendVisitService {
         LocalDate today = gameClock.today();
         recordVisit(me.getId(), friend.getId(), today);
         ExhibitionSnapshotService.Snapshot snapshot = snapshotService.findOrEmpty(friend.getId());
+        // 방문 기록: 지금 이 열람이 오늘 방문으로 들어간 뒤에 읽는다 (첫 방문이면 오늘 하나)
+        List<LocalDate> visitDates = visitLogRepository.findVisitDates(
+                me.getId(), friend.getId(), today.minusDays(RECENT_VISIT_DAYS - 1));
 
         return new FriendExhibitionResponse(
                 playerCardAssembler.card(friend),
@@ -77,8 +80,9 @@ public class FriendVisitService {
                 snapshot.capturedAt(),
                 giftService.giftStates(me.getId(), List.of(friend.getId()), today).get(friend.getId()),
                 !visitLogRepository.existsByVisitorIdAndVisitDateAndRewardedTrue(me.getId(), today),
-                (int) visitLogRepository.countByVisitorIdAndHostIdAndVisitDateGreaterThanEqual(
-                        me.getId(), friend.getId(), today.minusDays(RECENT_VISIT_DAYS - 1)));
+                visitDates.size(),
+                me.getNickname(),
+                visitDates);
     }
 
     /**

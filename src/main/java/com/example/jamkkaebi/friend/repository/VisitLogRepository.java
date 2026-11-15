@@ -19,6 +19,11 @@ public interface VisitLogRepository extends JpaRepository<VisitLog, Long> {
     // 행 수가 곧 방문한 날 수
     long countByVisitorIdAndHostIdAndVisitDateGreaterThanEqual(Long visitorId, Long hostId, LocalDate from);
 
+    // 방문한 날들 (가까운 날부터). 같은 날은 한 행이라 날짜가 겹치지 않는다
+    @Query("SELECT v.visitDate FROM VisitLog v WHERE v.visitorId = :visitorId AND v.hostId = :hostId AND v.visitDate >= :from "
+            + "ORDER BY v.visitDate DESC")
+    List<LocalDate> findVisitDates(@Param("visitorId") Long visitorId, @Param("hostId") Long hostId, @Param("from") LocalDate from);
+
     @Query("SELECT v.hostId FROM VisitLog v WHERE v.visitorId = :visitorId AND v.visitDate = :visitDate")
     List<Long> findHostIdsVisited(@Param("visitorId") Long visitorId, @Param("visitDate") LocalDate visitDate);
 

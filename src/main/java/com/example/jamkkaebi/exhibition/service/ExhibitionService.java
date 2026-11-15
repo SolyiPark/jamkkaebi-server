@@ -84,6 +84,7 @@ public class ExhibitionService {
     public ExhibitionResponse exhibition(String friendCode) {
         User user = userProfileService.getByFriendCode(friendCode);
         return assemble(
+                user,
                 userRelicRepository.findAllByUserId(user.getId()),
                 userBuildingRepository.findAllByUserId(user.getId()));
     }
@@ -125,7 +126,7 @@ public class ExhibitionService {
         }
 
         eventPublisher.publishEvent(new ExhibitionChangedEvent(user.getId(), gameClock.now()));
-        return assemble(relics, buildings);
+        return assemble(user, relics, buildings);
     }
 
     /**
@@ -206,7 +207,7 @@ public class ExhibitionService {
         }
     }
 
-    private ExhibitionResponse assemble(List<UserRelic> relics, List<UserBuilding> buildings) {
+    private ExhibitionResponse assemble(User user, List<UserRelic> relics, List<UserBuilding> buildings) {
         LocalDateTime now = gameClock.now();
 
         List<UserRelic> completed = relics.stream()
@@ -230,7 +231,8 @@ public class ExhibitionService {
                 .toList();
 
         // 선명도와 같은 시각에서 날짜를 떼어, 자정 무렵에도 선명도와 날짜가 서로 어긋나지 않게 한다
-        return new ExhibitionResponse(properties.grid(), spirits, buildingViews, now.toLocalDate());
+        // 시각(now)과 닉네임도 함께 내린다 — 도깨비가 탭 인사에서 시간대를 말하고 나를 부르는 데 쓴다
+        return new ExhibitionResponse(properties.grid(), spirits, buildingViews, now.toLocalDate(), now, user.getNickname());
     }
 
     private record Slot(ExhibitItemType type, Integer id) {
