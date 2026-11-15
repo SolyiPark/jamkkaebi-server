@@ -156,7 +156,7 @@ public class UserRelic extends BaseTimeEntity {
      * 관리 플레이 한 판 성공으로 한 페이즈 복구한다. 순서의 마지막 페이즈면 선명도를 회복한다.
      *
      * @param phase   이 판의 페이즈 (세션 시작 때 정한 값)
-     * @param clarity 이 판을 시작할 때의 선명도
+     * @param clarity 이 판을 정산하는 순간의 선명도. 플레이 도중 떨어졌으면 떨어진 값
      */
     public void clearCarePlay(Phase phase, Clarity clarity, LocalDateTime now) {
         careCount++;

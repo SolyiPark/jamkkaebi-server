@@ -73,8 +73,8 @@ public class PlaySession extends BaseTimeEntity {
     private EntryRoute entryRoute;
 
     /**
-     * 관리 플레이를 시작할 때의 선명도. 최초 정화면 {@code null}.
-     * 정산은 이 값과 {@link #phase} 로 한다 — 플레이 도중 7·14일 경계를 넘어도 그 판은 시작 시점 계획대로 인정한다.
+     * 관리 플레이를 시작할 때의 선명도. 최초 정화면 {@code null}. 기록·분석용이다.
+     * 정산은 {@link #phase} 와 정산 순간의 선명도로 한다 ({@code PurificationService.settleCare}).
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "plan_clarity", length = 20)

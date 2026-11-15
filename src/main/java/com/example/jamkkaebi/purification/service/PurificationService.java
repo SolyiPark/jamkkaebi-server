@@ -277,19 +277,18 @@ public class PurificationService {
     }
 
     /**
-     * 관리 플레이 성공. 효과는 세션 난이도가, 페이즈·선명도는 <b>세션 시작 시점 계획</b>이 정한다.
-     * 플레이 도중 7·14일 경계를 넘어도 그 판은 시작할 때 계획한 대로 인정한다.
+     * 관리 플레이 성공. 효과는 세션 난이도가, 페이즈는 <b>세션 시작 시점 계획</b>이 정한다.
+     *
+     * <p>복구 진행은 <b>정산 순간의 선명도</b>로 저장한다. 플레이 도중 7·14일 경계를 넘어 선명도가 떨어졌어도
+     * 이번 판에 마친 페이즈를 그대로 인정하기 위해서다 (예: 흐려짐에서 기억 회복을 하던 중 재봉인 → 오염 관리만 남는다).
+     * 판과 판 사이에 방치해 떨어진 경우는 저장된 선명도와 달라 처음부터 다시 한다.
      */
     private void settleCare(PlaySession session, UserRelic userRelic, LocalDateTime now) {
         if (restorePolicy.effectOf(session.getDifficulty()) == RestoreEffect.FULL) {
             userRelic.restoreFully(now);
             return;
         }
-        // 이 변경 전에 발급된 세션에는 계획 선명도가 없다. 그때만 지금 선명도로 대신한다.
-        Clarity planned = session.getPlanClarity() != null
-                ? session.getPlanClarity()
-                : clarityPolicy.clarityOf(userRelic, now);
-        userRelic.clearCarePlay(session.getPhase(), planned, now);
+        userRelic.clearCarePlay(session.getPhase(), clarityPolicy.clarityOf(userRelic, now), now);
     }
 
     private PurificationResultResponse render(PlaySession session, User user) {

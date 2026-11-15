@@ -257,6 +257,34 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
     }
 
     @Test
+    @DisplayName("흐려짐에서 기억 회복을 하던 중 재봉인돼도 그 판은 인정되어 오염 관리만 남는다")
+    void 플레이_도중_재봉인돼도_진행_인정() throws Exception {
+        Player player = player("아슬아슬");
+        int relicId = completedRelic(player);
+        // 흐려짐의 마지막 순간에 기억 회복을 시작하고, 끝낼 때는 재봉인이다.
+        clock.advance(Duration.ofDays(14).minusSeconds(30));
+        String token = startPurification(player, relicId, Difficulty.NORMAL);
+        clock.advance(Duration.ofMinutes(1));
+
+        post(player, "/api/purifications/{token}/result", """
+                {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
+                 "bonusTiles":{"jeongseong":0}}
+                """, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.clarity").value("RESEALED"))
+                .andExpect(jsonPath("$.data.lastClearedPhase").value("RECALL"))
+                .andExpect(jsonPath("$.data.next.action").value("CONTINUE_RESTORE"))
+                .andExpect(jsonPath("$.data.next.phase").value("GUARD"))
+                .andExpect(jsonPath("$.data.next.remainingPhases.length()").value(1));
+
+        get(player, "/api/relics/{id}", relicId)
+                .andExpect(jsonPath("$.data.nextPlay.phase").value("GUARD"));
+
+        UserRelic stored = userRelicRepository.findByUserIdAndRelicId(player.id(), relicId).orElseThrow();
+        assertThat(stored.getRestoreClarity()).isEqualTo(Clarity.RESEALED);
+    }
+
+    @Test
     @DisplayName("성장·각성 API 는 없어졌다")
     void 각성_API_제거() throws Exception {
         Player player = player("옛사람");
@@ -265,7 +293,9 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
         post(player, "/api/relics/{id}/awaken", """
                 {"targetStage":"AWAKENED_PLUS"}
                 """, relicId)
-                .andExpect(result -> assertThat(result.getResponse().getStatus()).isGreaterThanOrEqualTo(400));
+                // 예전 구현은 게이지 부족으로 409(W003)를 줬다. 경로 자체가 없어졌는지 404 C004 로 확인한다.
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("C004"));
 
         get(player, "/api/relics/{id}", relicId)
                 .andExpect(jsonPath("$.data.awakeningStage").doesNotExist())
