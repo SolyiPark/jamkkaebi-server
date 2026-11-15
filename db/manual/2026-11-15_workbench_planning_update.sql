@@ -7,6 +7,7 @@
 --   - 복구 시작 선명도: user_relics.restore_clarity (restore_phase 와 함께 있거나 함께 NULL)
 --   - 세션 계획 선명도: play_sessions.plan_clarity (관리 플레이만)
 --   - VERY_EASY 난이도 삭제
+--   - relics.real_story: TINYTEXT → TEXT (@Lob 만 두면 MySQL 에서 255바이트로 만들어져 한글 실화 기록이 들어가지 않는다)
 --
 -- 왜 필요한가
 --   ddl-auto: update 는 새 컬럼은 만들지만 컬럼 삭제는 하지 않는다. 남은 growth_gauge(NOT NULL, 기본값 0) 는
@@ -33,3 +34,6 @@ ALTER TABLE play_sessions ADD COLUMN plan_clarity VARCHAR(20) NULL;
 -- [4] 복구 도중이던 행. 예전에는 시작 선명도를 저장하지 않아 알 수 없으므로 진행을 비운다
 --     (다음 관리 플레이는 지금 선명도가 정한 순서의 처음부터).
 UPDATE user_relics SET restore_phase = NULL WHERE restore_phase IS NOT NULL AND restore_clarity IS NULL;
+
+-- [5] 실화 기록 컬럼 크기. ddl-auto: update 는 이미 있는 컬럼의 타입을 바꾸지 않는다.
+ALTER TABLE relics MODIFY real_story TEXT NOT NULL;
