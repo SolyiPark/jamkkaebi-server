@@ -30,8 +30,24 @@ namespace Jamkkaebi.Npc
         /// <summary>마지막 플레이(관리) 시각</summary>
         public DateTime? LastPurifiedAt { get; set; }
 
-        /// <summary>친구 전시관의 recentVisitDays (지금 열람 포함, 첫 방문이면 1).</summary>
+        /// <summary>친구 전시관의 recentVisitDays (지금 열람 포함, 첫 방문이면 1). VisitDates 를 주면 그것으로 센다.</summary>
         public int? RecentVisitDays { get; set; }
+
+        /// <summary>
+        /// 서버 시각(KST, 시·분 포함). 탭 인사에 지금 시간대(새벽·아침·오전·낮·저녁·밤)를 말하게 하는 데 쓴다. 기기 시계를 쓰지 않는다.
+        /// 없으면 시간대 이야기를 하지 않는다.
+        /// </summary>
+        public DateTime? Now { get; set; }
+
+        /// <summary>지금 상대의 닉네임 (서버). 주인 장면은 주인, 손님 장면은 구경 온 친구. 없으면 늘 '발굴자'로 부른다.</summary>
+        public string Nickname { get; set; }
+
+        /// <summary>
+        /// 지금 상대가 최근 30일에 방문한 날들 (서버의 방문 기록, 지금 방문을 포함해도 된다). 같은 날 여러 번이면 하루로 센다.
+        /// 손님 장면은 그 친구가 내 전시관에 온 날, 주인 장면은 주인이 접속한 날을 서버가 가지고 있으면 넘긴다.
+        /// 30일에 3번 이상이면 친밀해져 닉네임으로 부르고, 아니면 '발굴자'로 부른다. 대사에는 이 날짜 그대로 "N일 전"이 들어간다.
+        /// </summary>
+        public List<DateTime> VisitDates { get; set; }
 
         /// <summary>기기에 저장한 대화 기억</summary>
         public List<MemoryEntry> Memory { get; set; }
@@ -169,6 +185,11 @@ namespace Jamkkaebi.Npc
             var context = new NpcContext { Request = request, KeyFact = "none" };
             bool owner = input.Mode == InteractionMode.Owner;
 
+            // 호칭: 30일에 3번 이상 방문했으면 친밀해져 닉네임, 아니면 '발굴자'
+            request.Nickname = CleanNickname(input.Nickname);
+            int? visitCount = VisitCount(input);
+            request.Familiar = request.Nickname != null && visitCount.HasValue && visitCount.Value >= NpcAddress.FamiliarVisits;
+
             if (input.Input == NpcInputs.Visit)
             {
                 if (!owner)
@@ -187,7 +208,20 @@ namespace Jamkkaebi.Npc
             switch (input.Input)
             {
                 case NpcInputs.Tap:
-                    request.Situation = "주인이 너를 탭했다. 화면이 너에게 가까이 다가왔다.";
+                    // 서버 시각의 시간대를 주인이 탭한 때로 녹인다 ("주인이 아침에 너를 탭했다"). 별도 문장으로 "인사에 시간대를 곁들인다"고 했더니
+                    // "오늘 아침이라 반가워"처럼 시간대를 반가운 이유로 말하고, "아침에 일찍 찾아뵈었어"처럼 주체를 바꿨다(2026-11-13 시험 S01).
+                    // 탭한 때로 적으면 "아침에 찾아줘서 반가워"처럼 자연스럽게 나온다. '화면이 너에게 가까이 다가왔다'는 "화면이 가까워져서"로 옮겨 뺐다
+                    if (input.Now.HasValue)
+                    {
+                        string when = TimeOfDay(input.Now.Value);
+                        // '찾아와'를 넣어 방문한 쪽이 주인임을 분명히 한다 ("아침에 날 깨워줘서", "아침부터 반갑게 맞이해줘서"처럼 주체가 뒤바뀐 말을 줄인다)
+                        request.Situation = "주인이 " + when + "에 찾아와 너를 탭했다.";
+                        request.Facts.Add(new Fact(NpcFactKeys.TimeOfDay, when));
+                    }
+                    else
+                    {
+                        request.Situation = "주인이 너를 탭했다.";
+                    }
                     AddAwakening(input, request);
                     Candidates(request, NpcActions.Greet);
                     break;
@@ -201,6 +235,8 @@ namespace Jamkkaebi.Npc
                     Story(input, context);
                     break;
                 case NpcInputs.Drag:
+                    // 끌려갈 때는 대사를 띄우지 않는다: 두 후보 모두 대사 없는 행동(NpcActions.IsSilent)이라 모델을 부르지 않고
+                    // 규칙 기반 생성기가 행동 하나를 골라 빈 대사로 돌려준다 (이 상황 문장은 프롬프트에 실리지 않는다)
                     request.Situation = "주인이 너를 손가락으로 끌어당겨 다른 자리로 옮기고 있다.";
                     Candidates(request, NpcActions.StruggleProtest, NpcActions.StrugglePlay);
                     break;
@@ -209,6 +245,39 @@ namespace Jamkkaebi.Npc
                     break;
             }
             return context;
+        }
+
+        /// <summary>
+        /// 미리 만들 요청들 (NpcRequestManager.Prefetch 에 넘긴다). 지금 상태(state)에서 곧 부를 가능성이 큰 선택지의 요청을 만든다:
+        /// 주인 장면은 탭 인사 · 안부 묻기 · 관리하기(관리 뒤 반응, 지금 선명도가 관리 전 값), 손님 장면은 손님 관람.
+        /// 이야기 듣기·끌어당기기는 모델을 쓰지 않아 넣지 않는다. state.Input 은 무시한다. 대화 기억을 저장하거나 이야기를 고르는 일은 하지 않는다.
+        /// </summary>
+        public List<ReactionRequest> PrefetchRequests(NpcContextInput state)
+        {
+            if (state == null)
+            {
+                throw new ArgumentNullException("state");
+            }
+            var requests = new List<ReactionRequest>();
+            string[] inputs = state.Mode == InteractionMode.Owner
+                    ? new[] { NpcInputs.Tap, NpcInputs.AskStatus, NpcInputs.Care }
+                    : new[] { NpcInputs.Visit };
+            foreach (string input in inputs)
+            {
+                var copy = new NpcContextInput
+                {
+                    RelicId = state.RelicId, Mode = state.Mode, Input = input, Today = state.Today, Clarity = state.Clarity,
+                    AwakeningStage = state.AwakeningStage, LastPurifiedAt = state.LastPurifiedAt, RecentVisitDays = state.RecentVisitDays,
+                    Now = state.Now, Nickname = state.Nickname, VisitDates = state.VisitDates, RealStory = state.RealStory,
+                    Memory = state.Memory != null ? new List<MemoryEntry>(state.Memory) : new List<MemoryEntry>()
+                };
+                ReactionRequest request = Build(copy).Request;
+                if (request.Candidates.Count > 0 && !NpcActions.SkipsModel(request.Candidates))
+                {
+                    requests.Add(request);
+                }
+            }
+            return requests;
         }
 
         // ---------- 선택지별 ----------
@@ -335,8 +404,10 @@ namespace Jamkkaebi.Npc
         private static void Visit(NpcContextInput input, NpcContext context)
         {
             ReactionRequest request = context.Request;
-            int visits = Math.Max(1, input.RecentVisitDays.HasValue ? input.RecentVisitDays.Value : 1);
-            const string watching = " 친구는 너를 건드릴 수 없고 구경만 한다. 너는 걸어 다니며 짧은 말풍선을 띄운다.";
+            int visits = Math.Max(1, VisitCount(input) ?? 1);
+            // 상황 문장은 짧게 둔다: "친구는 너를 건드릴 수 없고 구경만 한다. 너는 걸어 다니며 짧은 말풍선을 띄운다."를 달았더니 모델이 "너는 순찰을 돌며 친구에게 인사해."처럼
+            // 옮겼고, 읽을 글도 길어졌다 (구경만 한다는 것은 프롬프트의 '지금 상대: 친구(구경만 한다)' 에 있다)
+            const string watching = "";
             if (visits >= RegularVisitorDays)
             {
                 request.Situation = "최근 30일 동안 " + visits + "번 온 친구가 전시관을 둘러보고 있다." + watching;
@@ -353,7 +424,90 @@ namespace Jamkkaebi.Npc
             }
             // 선명도는 방치 상태라 손님에게 보여 주지 않는다
             request.Facts.Add(new Fact(NpcFactKeys.VisitCount30d, visits.ToString(CultureInfo.InvariantCulture)));
+            // 방문 기록이 있으면 며칠 전에 왔는지 그대로 싣는다 — 대사의 "N일 전"은 이 기록과 같아야 한다 (출력 검사가 본다)
+            string days = VisitDaysText(input);
+            if (days != null)
+            {
+                request.Facts.Add(new Fact(NpcFactKeys.VisitDays, days));
+            }
             AddAwakening(input, request);
+        }
+
+        // ---------- 시간대·호칭·방문 기록 ----------
+
+        /// <summary>
+        /// 서버 시각의 시간대: 새벽(0~5시) · 아침(5~9) · 오전(9~12) · 낮(12~17) · 저녁(17~21) · 밤(21~24).
+        /// run.py 의 time_of_day 와 같다.
+        /// </summary>
+        public static string TimeOfDay(DateTime now)
+        {
+            int hour = now.Hour;
+            return hour < 5 ? "새벽" : hour < 9 ? "아침" : hour < 12 ? "오전" : hour < 17 ? "낮" : hour < 21 ? "저녁" : "밤";
+        }
+
+        // 닉네임: 앞뒤 공백·줄바꿈·제어 문자를 없애고 20자로 자른다. 비면 null
+        private static string CleanNickname(string nickname)
+        {
+            if (string.IsNullOrEmpty(nickname))
+            {
+                return null;
+            }
+            var builder = new System.Text.StringBuilder();
+            foreach (char c in nickname)
+            {
+                if (!char.IsControl(c))
+                {
+                    builder.Append(c);
+                }
+            }
+            string clean = builder.ToString().Trim();
+            if (clean.Length > 20)
+            {
+                clean = clean.Substring(0, 20);
+            }
+            return clean.Length == 0 ? null : clean;
+        }
+
+        // 최근 30일(오늘 포함)의 방문한 날 수. 방문 기록(VisitDates)이 있으면 그것으로, 없으면 RecentVisitDays
+        private static int? VisitCount(NpcContextInput input)
+        {
+            List<int> ago = VisitDaysAgo(input);
+            return ago.Count > 0 ? ago.Count : input.RecentVisitDays;
+        }
+
+        // 방문한 날들을 며칠 전인지로 (0 = 오늘), 가까운 날부터, 같은 날은 하나. 30일 밖·미래는 뺀다
+        private static List<int> VisitDaysAgo(NpcContextInput input)
+        {
+            var result = new List<int>();
+            if (input.VisitDates != null)
+            {
+                foreach (DateTime date in input.VisitDates)
+                {
+                    int days = (input.Today.Date - date.Date).Days;
+                    if (days >= 0 && days < 30 && !result.Contains(days))
+                    {
+                        result.Add(days);
+                    }
+                }
+            }
+            result.Sort();
+            return result;
+        }
+
+        // "오늘, 3일 전, 9일 전" (가까운 10일까지). 기록이 없으면 null
+        private static string VisitDaysText(NpcContextInput input)
+        {
+            List<int> ago = VisitDaysAgo(input);
+            if (ago.Count == 0)
+            {
+                return null;
+            }
+            var parts = new List<string>();
+            foreach (int days in ago.GetRange(0, Math.Min(10, ago.Count)))
+            {
+                parts.Add(days == 0 ? "오늘" : days == 1 ? "어제" : days + "일 전");
+            }
+            return string.Join(", ", parts.ToArray());
         }
 
         // ---------- 곁들일 거리 ----------

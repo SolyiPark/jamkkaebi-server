@@ -57,6 +57,8 @@ namespace Jamkkaebi.Npc
                 Mode = Text(scene, "mode") == "owner" ? InteractionMode.Owner : InteractionMode.Visitor,
                 Input = Text(scene, "input"),
                 Situation = Text(scene, "event"),
+                Nickname = Text(scene, "nickname"),
+                Familiar = scene.ContainsKey("familiar") && scene["familiar"] is bool && (bool)scene["familiar"],
                 ContentVersion = "test"
             };
             foreach (object c in List(scene, "candidates"))

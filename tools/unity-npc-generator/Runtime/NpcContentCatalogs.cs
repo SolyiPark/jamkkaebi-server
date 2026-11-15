@@ -38,8 +38,6 @@ namespace Jamkkaebi.Npc
         public string origin;
         public string traits;
         public string values;
-        public string likes;
-        public string dislikes;
         public string toOwner;
         public string toVisitor;
 
@@ -48,12 +46,17 @@ namespace Jamkkaebi.Npc
         public string onCare;
         public string onStory;
         public string onRefuse;
-        public string onDrag;
 
+        /// <summary>
+        /// 캐릭터의 말씨(성격). 모든 도깨비가 반말이라 반말 규칙은 공통 규칙(PromptAssembler.RuleSpeech)에 있고, 여기에는 이 도깨비만의 말씨만 적는다.
+        /// 금지할 말은 적지 않는다 — 작은 모델이 금지 목록의 말을 그대로 옮긴다. 어긋난 어미는 endingHint 로 거른다.
+        /// </summary>
         public string speechStyle;
 
-        /// <summary>대사 줄 끝에 붙이는 짧은 말투 다짐 (예: "반말로만, '~요'·'~습니다' 없이"). 시스템 메시지에만 두면 작은 모델이 잊고 섞었다.</summary>
-        public string speechReminder;
+        /// <summary>
+        /// 이 도깨비 자신의 것(몸·무늬·자개처럼 생김새). 대사에서 "네 자개"처럼 '네'라고 부르면 '내'로 고친다 — 자기 것을 상대의 것처럼 말하지 않게 한다.
+        /// </summary>
+        public List<string> ownThings = new List<string>();
 
         public List<string> examples = new List<string>();
 
@@ -80,7 +83,6 @@ namespace Jamkkaebi.Npc
         public List<string> tap = new List<string>();     // 탭 인사
         public List<string> faded = new List<string>();   // 흐려짐·재봉인 안부
         public List<string> clear = new List<string>();   // 선명한 안부, 관리 감사
-        public List<string> drag = new List<string>();    // 끌려감
         public List<string> visit = new List<string>();   // 손님 관람
 
         /// <summary>PromptAssembler.FlavorKey 의 이름에 맞는 목록. 없으면 null.</summary>
@@ -91,7 +93,6 @@ namespace Jamkkaebi.Npc
                 case "tap": return tap;
                 case "faded": return faded;
                 case "clear": return clear;
-                case "drag": return drag;
                 case "visit": return visit;
                 default: return null;
             }
