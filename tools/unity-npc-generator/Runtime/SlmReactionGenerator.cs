@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -40,7 +41,7 @@ namespace Jamkkaebi.Npc
     /// <para>실패하면 예외 대신 Failed 를 돌려준다. 요청 관리자는 Failed 를 받으면 규칙 기반 생성기로 대신한다.</para>
     /// <list type="bullet">
     /// <item>NotReady: 모델이 아직 안 올라왔다.</item>
-    /// <item>Unsupported: 페르소나가 아직 없는 도깨비이거나, 정해진 대사를 쓰는 요청(이야기 듣기)이다. 모델을 부르지 않는다.</item>
+    /// <item>Unsupported: 페르소나가 아직 없는 도깨비이거나, 정해진 대사를 쓰는 요청(이야기 듣기)이거나, 대사가 없는 요청(끌려갈 때)이다. 모델을 부르지 않는다.</item>
     /// <item>NoCandidate: 후보가 없다.</item>
     /// <item>InvalidOutput: 출력 검사(JSON · 후보 포함 · 대사 길이 · 줄바꿈 · 금칙어)에 걸렸다. FailDetail 에 이유가 있다.</item>
     /// <item>Cancelled: 요청 관리자가 취소했다 (시간 초과 포함). 늦게 끝난 생성 결과도 버린다.</item>
@@ -71,11 +72,18 @@ namespace Jamkkaebi.Npc
             this.assembler = assembler;
             this.validator = validator;
             MaxAttempts = 2;
+            RetryOnlyWithin = TimeSpan.FromMilliseconds(1500);
         }
 
         /// <summary>
+        /// 한 번 만드는 데 이 시간보다 오래 걸렸으면 검사에 걸려도 다시 만들지 않는다 (기본 1.5초). 느린 기기에서는 한 번 만드는 데 몇 초가 걸려
+        /// 다시 만들면 두 배가 되고 응답이 늦게 뜨므로, 빨리 끝난 시도만 한 번 더 만든다. 걸리면 곧바로 기본 대사로 대신한다.
+        /// </summary>
+        public TimeSpan RetryOnlyWithin { get; set; }
+
+        /// <summary>
         /// 출력 검사에 걸렸을 때 몇 번까지 생성하는지 (처음 포함). 다시 할 때는 곁들일 거리를 다음 것으로 바꾼다(Variation + 1).
-        /// 기본 2. 요청 관리자의 SlmTimeout 안에서만 다시 하고, 넘으면 기본 대사로 대신된다.
+        /// 기본 2 (최근 대사와 80% 넘게 겹치거나 문장이 끝나지 않으면 새로 만든다). 요청 관리자의 SlmTimeout 안에서만 다시 하고, 넘으면 기본 대사로 대신된다.
         /// </summary>
         public int MaxAttempts { get; set; }
 
@@ -127,12 +135,17 @@ namespace Jamkkaebi.Npc
             {
                 return ReactionResult.Failed(id, FailReason.Unsupported, ReactionSource.Slm, "이야기는 정해진 대사를 쓴다");
             }
+            if (NpcActions.OnlySilent(request.Candidates))
+            {
+                return ReactionResult.Failed(id, FailReason.Unsupported, ReactionSource.Slm, "끌려갈 때는 대사가 없다");
+            }
 
             // 검사(자기 이름·어미·반복 등)에 걸리면 곁들일 거리를 바꿔 다시 만든다. 걸린 이유는 결과의 Note·FailDetail 에 남긴다
             var rejected = new List<string>();
             int attempts = Math.Max(1, MaxAttempts);
             for (int attempt = 1; ; attempt++)
             {
+                Stopwatch attemptWatch = Stopwatch.StartNew();
                 NpcPrompt prompt;
                 try
                 {
@@ -174,7 +187,7 @@ namespace Jamkkaebi.Npc
                 {
                     return ReactionResult.Failed(id, FailReason.Error, ReactionSource.Slm, "출력 검사 실패: " + e.Message);
                 }
-                if (check.IsValid || attempt >= attempts)
+                if (check.IsValid || attempt >= attempts || attemptWatch.Elapsed > RetryOnlyWithin)
                 {
                     ReactionResult result = check.ToResult(id);
                     return rejected.Count == 0 ? result : result.WithEarlierRejections(rejected);

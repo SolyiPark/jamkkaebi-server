@@ -16,11 +16,19 @@ namespace Jamkkaebi.Npc
         Newline,        // 대사에 줄바꿈이 있다
         TooLong,        // 첫 문장부터 길이 제한을 넘는다 (또는 토큰 한도에서 끊겼는데 끝난 문장이 없다)
         Forbidden,      // 대사가 공통 금칙어에 걸린다
+        Foreign,        // 영문·가나·한자가 섞였다 (영어, 행동 ID 를 그대로 적음)
+        Typo,           // 오타 ("쏟었군", "할께", "ㅋㅋ", "만먹었는지")
+        MissingAsk,     // 흐려진 안부에 닦아 달라는 부탁이 없다 ("조금 흐려졌어. 마지막 관리는 9일 전이었어.")
+        Incomplete,     // 문장이 끝나지 않았다 ("관리해 줘서", 끝의 '히힛!'을 뗀 뒤 이어 주는 말로 끝남)
         SelfName,       // 자기 이름을 말한다 ("반갑게요, 향산이") — 페르소나를 받은 검사기만 본다
         SpeechMismatch, // 그 도깨비의 어미로 끝나지 않는 문장이 있다 (존댓말·반말 섞기) — 페르소나를 받은 검사기만 본다
         TooPlain,       // 인사 행동의 대사가 인사말뿐이다 ("안녕!", "안녕.") — 부호를 뺀 글자가 MinGreetingCore 보다 적다. 페르소나를 받은 검사기만 본다
         InnerRepeat,    // 한 대사 안에서 같은 말을 되풀이한다 ("고마워, 관리해줘서 고마워") — 페르소나를 받은 검사기만 본다
-        WrongHistory,   // 방문 횟수와 어긋난다 (단골에게 "처음 온 친구", 첫 방문에 "또 왔구나")
+        WrongHistory,   // 기록과 어긋난다 (단골에게 "처음 온 친구", 첫 방문에 "또 왔구나", 기록 없는 주인에게 "오랜만이야")
+        SituationCopy,  // 상황 문장을 그대로 옮겼다 ("주인이 너를 탭했다. 화면이 너에게 가까이 다가왔다.")
+        PersonaCopy,    // 페르소나 설명문을 옮겼다 ("가장 친한 동료처럼 반긴다") — 페르소나를 받은 검사기만 본다
+        WrongTime,      // 지금 시간대와 어긋난다 (낮인데 "좋은 밤", 자료에 시간대가 없는데 "오늘 밤")
+        WrongAddress,   // 호칭이 규칙과 다르다 (친밀한데 '발굴자', 친밀하지 않은데 닉네임)
         Repeated        // 그 도깨비가 최근에 띄운 대사(request.RecentLines)와 같다
     }
 
@@ -107,7 +115,13 @@ namespace Jamkkaebi.Npc
     /// (NpcLineChecks.NormalizeSpeech — "고마워요" → 반말 "고마워", "모시겠습니다" → 하오체 "모시겠소"). NormalizeSpeech 로 끈다.</item>
     /// <item>대사: 비어 있지 않고, 줄바꿈이 없고, 길이 제한 안이다. 길면 다 버리지 않고 제한 안에 드는 앞 문장들만 남긴다
     /// (작은 모델은 두세 문장을 써서 넘기는 일이 많다). 첫 문장부터 넘치면 TooLong.</item>
-    /// <item>금칙어: 띄울 대사(자른 뒤)가 공통 금칙어(NpcLineFilter)에 걸리지 않는다.</item>
+    /// <item>금칙어: 띄울 대사(자른 뒤)가 공통 금칙어(NpcLineFilter)에 걸리지 않는다. 상황 설명문·몸짓 설명도 금칙어 묶음이 거른다.</item>
+    /// <item>외국어: 영문·가나·한자가 없다 (NpcLineChecks.HasForeign).</item>
+    /// <item>오타·끝맺음: 오타(NpcLineChecks.Typo)가 없고 문장이 이어 주는 말·조사로 끝나지 않는다(IncompleteEnding). 끝의 의성어("히힛!")는
+    /// 말투 다듬기가 먼저 뗀다.</item>
+    /// <item>기록: 손님 장면은 방문 횟수와, 주인 장면은 대화 기억·마지막 관리 사실이 없으면 '오랜만' 같은 말을 하지 않는다
+    /// (NpcLineChecks.HistoryContradiction · NoRecordContradiction).</item>
+    /// <item>상황 옮기기: 상황 문장의 한 구절을 그대로 옮기지 않는다 (NpcLineChecks.CopiedFromSituation).</item>
     /// <item>자기 이름·어미: 페르소나 카탈로그를 받았으면, 자기 이름을 말하지 않고 문장마다 그 도깨비의 어미(endingHint)로 끝난다
     /// (존댓말·반말 섞기를 막는다, NpcLineChecks.SpeechMatches).</item>
     /// <item>반복: 그 도깨비가 최근에 띄운 대사(request.RecentLines)와 같지 않다 (NpcLineChecks.Similar). 요청 관리자가 채운다.</item>
@@ -121,7 +135,7 @@ namespace Jamkkaebi.Npc
     {
         /// <summary>인사 행동의 대사는 부호를 뺀 글자가 이 수보다 적으면 인사말뿐이라 거른다. run.py 의 MIN_GREETING_CORE 와 같다.</summary>
         public const int MinGreetingCore = 4;
-        private static readonly string[] PlainCheckedActions = { "greet", "wander_greet" };
+        private static readonly string[] PlainCheckedActions = { "greet", "wander_greet", "thank_calm", "thank_joyful" };
 
         /// <summary>MaxChars 에 없는 선택지의 대사 길이 제한.</summary>
         public const int DefaultMaxChars = 40;
@@ -230,7 +244,8 @@ namespace Jamkkaebi.Npc
             Persona persona = personas != null ? personas.Find(request.RelicId) : null;
             if (NormalizeSpeech && persona != null)
             {
-                string fixedLine = NpcLineChecks.NormalizeSpeech(line, persona.endingHint != null ? persona.endingHint.label : null, persona.name);
+                string fixedLine = NpcLineChecks.NormalizeSpeech(line, persona.endingHint != null ? persona.endingHint.label : null, persona.name,
+                        persona.ownThings, request.Nickname, request.FindFact(NpcFactKeys.VisitDays));
                 if (fixedLine != line)
                 {
                     said = line;
@@ -286,18 +301,77 @@ namespace Jamkkaebi.Npc
             {
                 return new OutputCheck(OutputProblem.Forbidden, "금칙어 " + bad, action, target, fitted, line, truncated);
             }
+            if (NpcLineChecks.HasForeign(fitted))
+            {
+                return new OutputCheck(OutputProblem.Foreign, "영문·가나·한자가 섞임 '" + fitted + "'", action, target, fitted, line, truncated);
+            }
+            if (NpcLineChecks.NeedsAsk(request) && !NpcLineChecks.HasAsk(fitted))
+            {
+                return new OutputCheck(OutputProblem.MissingAsk, "닦아 달라는 부탁이 없다 '" + fitted + "'", action, target, fitted, line, truncated);
+            }
+            string typo = NpcLineChecks.Typo(fitted);
+            if (typo != null)
+            {
+                return new OutputCheck(OutputProblem.Typo, "오타 '" + typo + "'", action, target, fitted, line, truncated);
+            }
+            string dangling = NpcLineChecks.IncompleteEnding(fitted);
+            if (dangling != null)
+            {
+                return new OutputCheck(OutputProblem.Incomplete, "문장이 끝나지 않음 '" + dangling + "'", action, target, fitted, line, truncated);
+            }
+            string conflict;
             if (request.Input == NpcInputs.Visit)
             {
                 int visits;
-                string conflict = NpcLineChecks.HistoryContradiction(fitted,
+                conflict = NpcLineChecks.HistoryContradiction(fitted,
                         int.TryParse(request.FindFact(NpcFactKeys.VisitCount30d), out visits) ? visits : (int?)null);
-                if (conflict != null)
+                if (conflict == null)
                 {
-                    return new OutputCheck(OutputProblem.WrongHistory, "방문 기록과 어긋남 '" + conflict + "'", action, target, fitted, line, truncated);
+                    // 3일 전에도 온 친구에게 "오랜만이야"
+                    conflict = NpcLineChecks.LongAbsenceContradiction(fitted, request.FindFact(NpcFactKeys.VisitDays));
                 }
+            }
+            else
+            {
+                // 주인 장면: 대화 기억도 마지막 관리 사실도 없는데 '오랜만'이라고 하면 지어낸 말이다
+                bool hasRecord = (request.Memory != null && request.Memory.Count > 0)
+                        || request.FindFact(NpcFactKeys.LastCareDaysAgo) != null
+                        || request.FindFact(NpcFactKeys.VisitDays) != null;
+                conflict = hasRecord ? null : NpcLineChecks.NoRecordContradiction(fitted, request.Situation);
+            }
+            if (conflict == null)
+            {
+                // "이틀 전"·"어제"·"5일 전"은 자료(마지막 관리·방문한 날·기억·상황 문장)의 실제 기록에 있는 날일 때만 말한다
+                conflict = NpcLineChecks.DayRefContradiction(fitted, RecordedDays(request));
+            }
+            if (conflict != null)
+            {
+                return new OutputCheck(OutputProblem.WrongHistory, "기록과 어긋남 '" + conflict + "'", action, target, fitted, line, truncated);
+            }
+            string copied = NpcLineChecks.CopiedFromSituation(fitted, request.Situation);
+            if (copied != null)
+            {
+                return new OutputCheck(OutputProblem.SituationCopy, "상황 문장을 옮김 '" + copied + "'", action, target, fitted, line, truncated);
+            }
+            string timeWord = NpcLineChecks.TimeContradiction(fitted, request.FindFact(NpcFactKeys.TimeOfDay));
+            if (timeWord != null)
+            {
+                return new OutputCheck(OutputProblem.WrongTime, "지금 시간대와 어긋남 '" + timeWord + "' (지금 시간대: "
+                        + (request.FindFact(NpcFactKeys.TimeOfDay) ?? "알 수 없음") + ")", action, target, fitted, line, truncated);
+            }
+            string addressWord = NpcLineChecks.AddressContradiction(fitted, request.Nickname, request.Familiar);
+            if (addressWord != null)
+            {
+                return new OutputCheck(OutputProblem.WrongAddress, "호칭이 규칙과 다름 '" + addressWord + "' (부를 이름: " + request.AddressName + ")",
+                        action, target, fitted, line, truncated);
             }
             if (persona != null)
             {
+                string personaCopy = NpcLineChecks.CopiedFromPersona(fitted, persona);
+                if (personaCopy != null)
+                {
+                    return new OutputCheck(OutputProblem.PersonaCopy, "페르소나 설명문을 옮김 '" + personaCopy + "'", action, target, fitted, line, truncated);
+                }
                 if (NpcLineChecks.ContainsSelfName(fitted, persona.name))
                 {
                     return new OutputCheck(OutputProblem.SelfName, "자기 이름 '" + persona.name + "'", action, target, fitted, line, truncated);
@@ -325,6 +399,36 @@ namespace Jamkkaebi.Npc
                         action, target, fitted, line, truncated);
             }
             return new OutputCheck(OutputProblem.None, null, action, target, fitted, line, truncated);
+        }
+
+        // 자료에 적힌 실제 날수: 마지막 관리, 방문한 날, 대화 기억, 상황 문장에 나온 "N일 전"
+        private static HashSet<int> RecordedDays(ReactionRequest request)
+        {
+            var days = new HashSet<int>();
+            int last;
+            if (int.TryParse(request.FindFact(NpcFactKeys.LastCareDaysAgo), out last))
+            {
+                days.Add(last);
+            }
+            foreach (KeyValuePair<string, int> reference in NpcLineChecks.DayRefs(request.FindFact(NpcFactKeys.VisitDays), true))
+            {
+                days.Add(reference.Value);
+            }
+            foreach (KeyValuePair<string, int> reference in NpcLineChecks.DayRefs(request.Situation, true))
+            {
+                days.Add(reference.Value);
+            }
+            if (request.Memory != null)
+            {
+                foreach (MemoryEntry memory in request.Memory)
+                {
+                    if (memory != null)
+                    {
+                        days.Add(memory.DaysAgo);
+                    }
+                }
+            }
+            return days;
         }
 
         /// <summary>
@@ -446,7 +550,17 @@ namespace Jamkkaebi.Npc
             string tail = text.Substring(start);
             if (!EndsInString(tail))
             {
-                return false;
+                // 대사 문자열을 닫은 뒤 토큰 한도에서 끊겨 객체의 '}' 만 빠진 경우 ("…고마워요!\"" 로 끝남, 2026-11-14 시험 S08 #4)
+                try
+                {
+                    json = MiniJson.ParseObject(tail.TrimEnd() + "}");
+                    error = null;
+                    return true;
+                }
+                catch (FormatException)
+                {
+                    return false;
+                }
             }
             try
             {

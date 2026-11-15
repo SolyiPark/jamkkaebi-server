@@ -25,6 +25,7 @@ namespace Jamkkaebi.Npc
     /// <item>이야기 듣기(늘 이 생성기가 맡는다 — SLM 은 이야기를 만들지 않는다): 페르소나 도깨비는 실화를 담은 이야기 대사(stories) 중 요청의 story_index 번째를 쓰고, 번호가 없으면
     /// StoryRotation 으로 돌려 가며 고른다 — 다 들려줄 때까지 같은 이야기를 반복하지 않는다. 페르소나 없는 도깨비는
     /// 자료 문장(verified_story)을 바꾸지 않고 그대로 싣고 앞뒤에 말투를 붙인다.</item>
+    /// <item>끌려갈 때(struggle_protest · struggle_play)는 대사가 없다 — 행동만 고르고 Line 은 빈 글이다.</item>
     /// <item>같은 도깨비·같은 행동에서 바로 앞과 같은 대사는 피한다.</item>
     /// </list>
     /// </summary>
@@ -131,8 +132,9 @@ namespace Jamkkaebi.Npc
                 string target = chosen.TargetIds != null && chosen.TargetIds.Count > 0
                         ? chosen.TargetIds[0]
                         : NpcTargets.None;
-                string line = ComposeLine(request, spirit, chosen.ActionId);
-                if (string.IsNullOrEmpty(line))
+                // 끌려갈 때처럼 대사 없는 행동은 행동만 고르고 대사는 비운다 (말풍선 없이 애니메이션만)
+                string line = NpcActions.IsSilent(chosen.ActionId) ? "" : ComposeLine(request, spirit, chosen.ActionId);
+                if (line == null || (line.Length == 0 && !NpcActions.IsSilent(chosen.ActionId)))
                 {
                     return ReactionResult.Failed(request.RequestId, FailReason.Error, ReactionSource.Rule);
                 }
