@@ -10,7 +10,7 @@ public enum Clarity {
     FADED,    // 흐려짐 — 7일 이상
     RESEALED; // 재봉인 — 14일 이상
 
-    // 선명도를 복구하기 위해 재플레이 해야 하는 페이즈
+    // 선명도를 복구하기 위해 재플레이 해야 하는 첫 페이즈 (선명: 오염 관리만)
     public Phase restoreFrom() {
         return switch (this) {
             case CLEAR -> Phase.GUARD;

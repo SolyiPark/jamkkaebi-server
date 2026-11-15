@@ -1,6 +1,7 @@
 package com.example.jamkkaebi.purification.domain;
 
 import com.example.jamkkaebi.global.common.BaseTimeEntity;
+import com.example.jamkkaebi.relic.domain.Clarity;
 import com.example.jamkkaebi.relic.domain.Difficulty;
 import com.example.jamkkaebi.relic.domain.EntryRoute;
 import com.example.jamkkaebi.relic.domain.Phase;
@@ -71,6 +72,14 @@ public class PlaySession extends BaseTimeEntity {
     @Column(name = "entry_route", nullable = false, length = 20)
     private EntryRoute entryRoute;
 
+    /**
+     * 관리 플레이를 시작할 때의 선명도. 최초 정화면 {@code null}.
+     * 정산은 이 값과 {@link #phase} 로 한다 — 플레이 도중 7·14일 경계를 넘어도 그 판은 시작 시점 계획대로 인정한다.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "plan_clarity", length = 20)
+    private Clarity planClarity;
+
     // 보드 재현용 시드
     @Column(name = "board_seed", nullable = false)
     private long boardSeed;
@@ -119,20 +128,18 @@ public class PlaySession extends BaseTimeEntity {
     @Column(name = "jeongseong_earned")
     private Integer jeongseongEarned;
 
-    @Column(name = "gauge_earned")
-    private Integer gaugeEarned;
-
     @Column(name = "ended_at")
     private LocalDateTime endedAt;
 
     @Builder
-    private PlaySession(String sessionToken, Long userId, Long userRelicId, Phase phase, Difficulty difficulty,
-                        EntryRoute entryRoute, long boardSeed, int tapBudget, int scoutLimit,
+    private PlaySession(String sessionToken, Long userId, Long userRelicId, Phase phase, Clarity planClarity,
+                        Difficulty difficulty, EntryRoute entryRoute, long boardSeed, int tapBudget, int scoutLimit,
                         LocalDateTime startedAt, LocalDateTime expiresAt) {
         this.sessionToken = sessionToken;
         this.userId = userId;
         this.userRelicId = userRelicId;
         this.phase = phase;
+        this.planClarity = planClarity;
         this.difficulty = difficulty;
         this.entryRoute = entryRoute;
         this.boardSeed = boardSeed;
@@ -168,7 +175,6 @@ public class PlaySession extends BaseTimeEntity {
         this.bonusJeongseongTiles = settlement.bonusJeongseongTiles();
         this.perfect = settlement.perfect();
         this.jeongseongEarned = settlement.jeongseongEarned();
-        this.gaugeEarned = settlement.gaugeEarned();
         this.endedAt = endedAt;
     }
 
@@ -200,8 +206,7 @@ public class PlaySession extends BaseTimeEntity {
             int damage,
             int bonusJeongseongTiles,
             boolean perfect,
-            int jeongseongEarned,
-            int gaugeEarned
+            int jeongseongEarned
     ) {
     }
 }

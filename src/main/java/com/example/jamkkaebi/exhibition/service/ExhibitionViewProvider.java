@@ -79,7 +79,7 @@ public class ExhibitionViewProvider implements ExhibitionViewReader {
     private ExhibitionView.SpiritView spiritOf(RelicMaster master, UserRelic owned) {
         RelicCard card = RelicCard.of(master, owned);
         return new ExhibitionView.SpiritView(card.relicId(), card.era(), card.poeticAlias(), card.realName(),
-                card.spiritName(), owned.getAwakeningStage(),
+                card.spiritName(),
                 new ExhibitionView.Position(owned.getPosX(), owned.getPosY()));
     }
 

@@ -55,7 +55,7 @@ public class UserController {
     }
 
     /**
-     * 프로필 아바타 변경. 기본이거나 정령 수호까지 마친 도깨비 중에서 고른다.
+     * 프로필 아바타 변경. 기본이거나 오염 관리까지 마친 도깨비 중에서 고른다.
      */
     @PatchMapping("/me/avatar")
     public ResponseEntity<ApiResponse<MyProfileResponse>> updateAvatar(

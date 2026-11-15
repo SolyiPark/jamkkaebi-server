@@ -1,7 +1,6 @@
 package com.example.jamkkaebi.exhibition.dto.response;
 
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Clarity;
 import com.example.jamkkaebi.relic.domain.Era;
 import com.example.jamkkaebi.relic.domain.RelicMaster;
@@ -31,7 +30,6 @@ public record ExhibitSpiritView(
         String poeticAlias,
         String realName,
         String spiritName,
-        AwakeningStage awakeningStage,
         Clarity clarity,
         LocalDateTime lastPurifiedAt,
         boolean displayed,
@@ -43,7 +41,7 @@ public record ExhibitSpiritView(
         RelicCard card = RelicCard.of(master, owned);
         return new ExhibitSpiritView(card.relicId(), card.era(), card.revealLevel(),
                 card.poeticAlias(), card.realName(), card.spiritName(),
-                owned.getAwakeningStage(), clarity, owned.getLastPurifiedAt(),
+                clarity, owned.getLastPurifiedAt(),
                 owned.isDisplayed(), owned.isHidden(),
                 owned.isDisplayed() ? new ExhibitionView.Position(owned.getPosX(), owned.getPosY()) : null);
     }
