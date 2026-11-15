@@ -15,21 +15,48 @@
 --   enum 매핑에 실패해 그 세션을 읽는 순간 500 이 난다 — [1] 은 반드시 돌린다.
 --
 -- 언제 돌리나
---   새 서버를 띄우기 전이든 후든 한 번. 새로 만드는 DB(테스트의 H2 포함)에는 필요 없다.
+--   새 서버를 띄우기 전이든 후든 한 번. 여러 번 돌려도 안전하다 — 컬럼 추가·삭제는 있는지 확인한 뒤에만 한다
+--   (MySQL 8 은 ADD/DROP COLUMN IF [NOT] EXISTS 를 지원하지 않아 아래 프로시저로 대신한다).
+--   새로 만드는 DB(테스트의 H2 포함)에는 필요 없다.
 -- =====================================================================================================
+
+DELIMITER //
+DROP PROCEDURE IF EXISTS jk_drop_column_if_exists //
+CREATE PROCEDURE jk_drop_column_if_exists(IN tbl VARCHAR(64), IN col VARCHAR(64))
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.COLUMNS
+               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = tbl AND COLUMN_NAME = col) THEN
+        SET @sql = CONCAT('ALTER TABLE `', tbl, '` DROP COLUMN `', col, '`');
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+    END IF;
+END //
+DROP PROCEDURE IF EXISTS jk_add_column_if_missing //
+CREATE PROCEDURE jk_add_column_if_missing(IN tbl VARCHAR(64), IN col VARCHAR(64), IN def VARCHAR(255))
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = tbl AND COLUMN_NAME = col) THEN
+        SET @sql = CONCAT('ALTER TABLE `', tbl, '` ADD COLUMN `', col, '` ', def);
+        PREPARE stmt FROM @sql;
+        EXECUTE stmt;
+        DEALLOCATE PREPARE stmt;
+    END IF;
+END //
+DELIMITER ;
 
 -- [1] 없어진 난이도. 기록용 세션이라 쉬움으로 옮긴다.
 UPDATE play_sessions SET difficulty = 'EASY' WHERE difficulty = 'VERY_EASY';
 
--- [2] 성장·각성 컬럼 삭제
-ALTER TABLE user_relics DROP COLUMN awakening_stage;
-ALTER TABLE user_relics DROP COLUMN growth_gauge;
-ALTER TABLE play_sessions DROP COLUMN gauge_earned;
+-- [2] 성장·각성 컬럼 삭제 (없으면 건너뛴다)
+CALL jk_drop_column_if_exists('user_relics', 'awakening_stage');
+CALL jk_drop_column_if_exists('user_relics', 'growth_gauge');
+CALL jk_drop_column_if_exists('play_sessions', 'gauge_earned');
 
--- [3] 새 컬럼 — 서버를 먼저 띄웠다면 update 가 이미 만들었으니 건너뛴다.
-ALTER TABLE user_relics ADD COLUMN care_count INT NOT NULL DEFAULT 0;
-ALTER TABLE user_relics ADD COLUMN restore_clarity VARCHAR(20) NULL;
-ALTER TABLE play_sessions ADD COLUMN plan_clarity VARCHAR(20) NULL;
+-- [3] 새 컬럼 (서버를 먼저 띄워 update 가 이미 만들었으면 건너뛴다)
+CALL jk_add_column_if_missing('user_relics', 'care_count', 'INT NOT NULL DEFAULT 0');
+CALL jk_add_column_if_missing('user_relics', 'restore_clarity', 'VARCHAR(20) NULL');
+CALL jk_add_column_if_missing('play_sessions', 'plan_clarity', 'VARCHAR(20) NULL');
 
 -- [4] 복구 도중이던 행. 예전에는 시작 선명도를 저장하지 않아 알 수 없으므로 진행을 비운다
 --     (다음 관리 플레이는 지금 선명도가 정한 순서의 처음부터).
@@ -37,3 +64,7 @@ UPDATE user_relics SET restore_phase = NULL WHERE restore_phase IS NOT NULL AND 
 
 -- [5] 실화 기록 컬럼 크기. ddl-auto: update 는 이미 있는 컬럼의 타입을 바꾸지 않는다.
 ALTER TABLE relics MODIFY real_story TEXT NOT NULL;
+
+-- [6] 정리
+DROP PROCEDURE IF EXISTS jk_drop_column_if_exists;
+DROP PROCEDURE IF EXISTS jk_add_column_if_missing;
