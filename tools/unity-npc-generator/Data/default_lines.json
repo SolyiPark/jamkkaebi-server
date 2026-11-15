@@ -1,5 +1,5 @@
 {
-  "contentVersion": "lines-10",
+  "contentVersion": "lines-12",
   "storyPolicy": "stories 는 실화를 담은 이야기 대사로(잠깨비 목적에 맞춰 고른 실화), npc-prompt-test/data/personas.json 의 stories 와 같은 순서다. 사실은 그대로 두고 말투만 입혔다. 돌려 가며 써서 다 들려줄 때까지 같은 이야기를 반복하지 않는다. fallback(페르소나가 아직 없는 도깨비)은 stories 없이 자료 문장(verified_story) 앞뒤에 storyPrefix·storyTail 을 붙인다.",
   "spirits": [
     {
@@ -19,10 +19,8 @@
         { "actionId": "recall_talk", "variant": "", "lines": ["지난번 일은 장부에 적어 뒀어.", "그때 일, 나는 안 잊었어."] },
         { "actionId": "wander_greet", "variant": "", "lines": ["어흠, 누구야?", "처음 보는 얼굴이네."] },
         { "actionId": "wander_recall", "variant": "", "lines": ["안녕, 또 왔구나.", "단골이 왔네."] },
-        { "actionId": "thank_calm", "variant": "", "lines": ["이 은혜, 장부에 적어 둘게.", "어흠… 고마워."] },
-        { "actionId": "thank_joyful", "variant": "", "lines": ["엄청 개운해. 고마워!", "고마워! 체면이 다시 섰어."] },
-        { "actionId": "struggle_protest", "variant": "", "lines": ["어흠! 내 체면이 있으니까 살살 내려 줘.", "아이참, 내려 줘."] },
-        { "actionId": "struggle_play", "variant": "", "lines": ["이렇게 끌려가는 것도 순찰이지.", "어, 어디로 가는 거야?"] }
+        { "actionId": "thank_calm", "variant": "", "lines": ["이 은혜, 장부에 적어 둘게.", "어흠… 고마워.", "고맙다는 말은 꼭 하고 싶었어.", "약속대로 깨끗해졌네. 고마워.", "덕분에 순찰이 한결 가벼워지겠어."] },
+        { "actionId": "thank_joyful", "variant": "", "lines": ["엄청 개운해. 고마워!", "고마워! 체면이 다시 섰어.", "와, 몸이 가벼워! 정말 고마워!", "순찰 나가고 싶을 만큼 개운해! 고마워!", "이 기분이면 지킬 약속이 넘쳐! 고마워!"] }
       ]
     },
     {
@@ -42,10 +40,8 @@
         { "actionId": "recall_talk", "variant": "", "lines": ["어머, 그때 일이 떠오르네.", "지난번 이야기, 아직 기억하고 있어."] },
         { "actionId": "wander_greet", "variant": "", "lines": ["호호, 편히 구경해.", "어서 와. 편히 쉬었다 가."] },
         { "actionId": "wander_recall", "variant": "", "lines": ["어머, 또 왔구나!", "또 와 줬네, 반가워."] },
-        { "actionId": "thank_calm", "variant": "", "lines": ["고마워, 향이 다시 맑아졌어.", "호호, 덕분에 한결 개운해."] },
-        { "actionId": "thank_joyful", "variant": "", "lines": ["어머나! 이렇게 맑아지다니, 고마워!", "고마워! 향이 산마루까지 퍼지겠어."] },
-        { "actionId": "struggle_protest", "variant": "", "lines": ["어머, 살살 해 줘.", "아이고, 할머니 너무 흔들지 마."] },
-        { "actionId": "struggle_play", "variant": "", "lines": ["어머, 어디로 데려가는 거야?", "호호, 바람 쐬러 가는 거야?"] }
+        { "actionId": "thank_calm", "variant": "", "lines": ["고마워, 향이 다시 맑아졌어.", "호호, 덕분에 한결 개운해.", "천천히 퍼지는 향처럼 마음도 편안해. 고마워.", "호호, 손길이 참 다정해. 고마워.", "한결 포근해졌어. 고마워."] },
+        { "actionId": "thank_joyful", "variant": "", "lines": ["어머나! 이렇게 맑아지다니, 고마워!", "고마워! 향이 산마루까지 퍼지겠어.", "어머, 몸이 새털처럼 가벼워! 고마워!", "호호, 향이 가득 퍼지는 기분이야! 고마워!", "어머나, 정말 개운해! 고마워!"] }
       ]
     },
     {
@@ -65,10 +61,8 @@
         { "actionId": "recall_talk", "variant": "", "lines": ["그때 일, 아직 기억하고 있어.", "지난번 이야기, 구름처럼 떠올라."] },
         { "actionId": "wander_greet", "variant": "", "lines": ["어서 와..!", "천천히 구경해."] },
         { "actionId": "wander_recall", "variant": "", "lines": ["또 와 줬네.", "반가워, 또 왔구나."] },
-        { "actionId": "thank_calm", "variant": "", "lines": ["살살 닦아 줘서 고마워.", "덕분에 무늬가 맑아졌어."] },
-        { "actionId": "thank_joyful", "variant": "", "lines": ["하늘처럼 맑아졌어! 고마워!", "고마워! 학이 날아오를 것 같아."] },
-        { "actionId": "struggle_protest", "variant": "", "lines": ["앗, 깨질까 봐 무서워. 살살…", "조심해 줘… 부딪히면 안 돼."] },
-        { "actionId": "struggle_play", "variant": "", "lines": ["구름 타고 가는 것 같아…", "살살 데려가 주면 괜찮아."] }
+        { "actionId": "thank_calm", "variant": "", "lines": ["살살 닦아 줘서 고마워.", "덕분에 무늬가 맑아졌어.", "구름 무늬가 한결 또렷해졌어. 고마워.", "손길이 섬세해서 마음이 놓여. 고마워.", "덕분에 몸이 맑아졌어. 고마워."] },
+        { "actionId": "thank_joyful", "variant": "", "lines": ["하늘처럼 맑아졌어! 고마워!", "고마워! 학이 날아오를 것 같아.", "와, 구름이 걷힌 것처럼 맑아졌어! 고마워!", "날개까지 가벼워! 정말 고마워!", "학이 된 것처럼 기뻐! 고마워!"] }
       ]
     },
     {
@@ -88,10 +82,8 @@
         { "actionId": "recall_talk", "variant": "", "lines": ["그 자개 얘기, 기억하지?", "저번에 한 얘기, 잊진 않았어."] },
         { "actionId": "wander_greet", "variant": "", "lines": ["…구경 왔어?", "천천히 봐도 돼."] },
         { "actionId": "wander_recall", "variant": "", "lines": ["…또 왔네.", "…자주 오네."] },
-        { "actionId": "thank_calm", "variant": "", "lines": ["…고마워.", "…덕분에 좀 반짝이네."] },
-        { "actionId": "thank_joyful", "variant": "", "lines": ["꽤 마음에 들어… 고마워.", "…이 정도면 최고야. 고마워."] },
-        { "actionId": "struggle_protest", "variant": "", "lines": ["…살살 들어 줘.", "…옻칠 긁힐라. 조심히 옮겨 줘."] },
-        { "actionId": "struggle_play", "variant": "", "lines": ["흔들리니까 자개가 반짝이네.", "어디 가는데."] }
+        { "actionId": "thank_calm", "variant": "", "lines": ["…고마워.", "…덕분에 좀 반짝이네.", "…손길이 꼼꼼하네. 고마워.", "…이만하면 반짝이네. 고마워.", "…자개가 다시 반짝여. 고마워."] },
+        { "actionId": "thank_joyful", "variant": "", "lines": ["꽤 마음에 들어… 고마워.", "…이 정도면 최고야. 고마워.", "…생각보다 훨씬 반짝이네. 고마워!", "…솔직히 기뻐. 고마워.", "…이 정도면 만족이야. 고마워!"] }
       ]
     },
     {
@@ -111,10 +103,8 @@
         { "actionId": "recall_talk", "variant": "", "lines": ["앗, 그때 일 기억나! 히힛.", "킁킁, 저번에 그거 재밌었지?"] },
         { "actionId": "wander_greet", "variant": "", "lines": ["킁킁, 누구야?", "히힛, 새 얼굴이다!"] },
         { "actionId": "wander_recall", "variant": "", "lines": ["앗, 또 왔다! 히힛.", "킁킁, 아는 냄새다!"] },
-        { "actionId": "thank_calm", "variant": "", "lines": ["고마워! 히힛.", "킁킁, 개운하다. 고마워!"] },
-        { "actionId": "thank_joyful", "variant": "", "lines": ["히힛, 관리해 줘서 너무 좋아!", "앗싸, 반짝반짝! 고마워!"] },
-        { "actionId": "struggle_protest", "variant": "", "lines": ["앗, 간지러워! 히힛, 살살 안아 줘~", "히잉, 어지러워~"] },
-        { "actionId": "struggle_play", "variant": "", "lines": ["히힛, 날아간다~!", "킁킁, 어디 가? 같이 놀자!"] }
+        { "actionId": "thank_calm", "variant": "", "lines": ["고마워! 히힛.", "킁킁, 개운하다. 고마워!", "고마워! 꼬리까지 개운해.", "포근하다. 고마워!", "킁킁, 깨끗한 냄새가 나. 고마워!"] },
+        { "actionId": "thank_joyful", "variant": "", "lines": ["히힛, 관리해 줘서 너무 좋아!", "앗싸, 반짝반짝! 고마워!", "와, 털이 반짝반짝해! 고마워!", "신나서 폴짝 뛰고 싶어! 고마워!", "히힛, 기분 최고야! 고마워!"] }
       ]
     }
   ],
@@ -135,9 +125,7 @@
       { "actionId": "wander_recall", "variant": "", "lines": ["또 오셨네요."] },
       { "actionId": "thank_calm", "variant": "", "lines": ["고마워요."] },
       { "actionId": "thank_joyful", "variant": "", "lines": ["정말 고마워요!"] },
-      { "actionId": "tell_story", "variant": "", "lines": ["제게도 오래된 이야기가 있어요."] },
-      { "actionId": "struggle_protest", "variant": "", "lines": ["앗, 조심해 주세요."] },
-      { "actionId": "struggle_play", "variant": "", "lines": ["어디로 가요?"] }
+      { "actionId": "tell_story", "variant": "", "lines": ["제게도 오래된 이야기가 있어요."] }
     ]
   }
 }

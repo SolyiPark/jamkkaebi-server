@@ -17,9 +17,16 @@
       "id": "S01",
       "relicId": 8,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "tap",
-      "event": "주인이 너를 탭했다. 화면이 너에게 가까이 다가왔다.",
+      "event": "주인이 아침에 찾아와 너를 탭했다.",
       "facts": [
+        {
+          "key": "time_of_day",
+          "value": "아침",
+          "text": "지금 시간대는 아침이다"
+        },
         {
           "key": "awakening",
           "value": "각성",
@@ -49,9 +56,16 @@
       "id": "S02",
       "relicId": 9,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": true,
       "input": "tap",
-      "event": "주인이 너를 탭했다. 화면이 너에게 가까이 다가왔다.",
+      "event": "주인이 밤에 찾아와 너를 탭했다.",
       "facts": [
+        {
+          "key": "time_of_day",
+          "value": "밤",
+          "text": "지금 시간대는 밤이다"
+        },
         {
           "key": "awakening",
           "value": "각성",
@@ -79,8 +93,10 @@
       "id": "S03",
       "relicId": 5,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "ask_status",
-      "event": "주인이 안부를 물었다. 너는 오래 관리를 받지 못해 흐려졌다. 주인에게 닦아 달라고 부탁한다. 첫 문장에서 바로 부탁한다.",
+      "event": "주인이 안부를 물었다. 너는 오래 관리를 받지 못해 흐려졌다. 주인에게 닦아 달라고 부탁한다.",
       "facts": [
         {
           "key": "clarity",
@@ -125,8 +141,10 @@
       "id": "S04",
       "relicId": 5,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": true,
       "input": "ask_status",
-      "event": "주인이 안부를 물었다. 너는 이틀 전에 닦아 관리를 받은 일이 고맙다. 첫 문장에서 바로 그 일을 말한다.",
+      "event": "주인이 안부를 물었다. 너는 이틀 전에 닦아 관리를 받은 일이 고맙다.",
       "facts": [
         {
           "key": "clarity",
@@ -164,13 +182,20 @@
       "id": "S05",
       "relicId": 2,
       "mode": "visitor",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "visit",
-      "event": "처음 온 친구가 전시관을 둘러보고 있다. 친구는 너를 건드릴 수 없고 구경만 한다. 너는 걸어 다니며 짧은 말풍선을 띄운다.",
+      "event": "처음 온 친구가 전시관을 둘러보고 있다.",
       "facts": [
         {
           "key": "visit_count_30d",
           "value": 1,
           "text": "이 친구는 최근 30일 동안 처음 왔다"
+        },
+        {
+          "key": "visit_days",
+          "value": "오늘",
+          "text": "방문한 날은 오늘이다"
         },
         {
           "key": "awakening",
@@ -208,13 +233,20 @@
       "id": "S06",
       "relicId": 2,
       "mode": "visitor",
+      "nickname": "도윤",
+      "familiar": true,
       "input": "visit",
-      "event": "최근 30일 동안 4번 온 친구가 전시관을 둘러보고 있다. 친구는 너를 건드릴 수 없고 구경만 한다. 너는 걸어 다니며 짧은 말풍선을 띄운다.",
+      "event": "최근 30일 동안 4번 온 친구가 전시관을 둘러보고 있다.",
       "facts": [
         {
           "key": "visit_count_30d",
           "value": 4,
           "text": "이 친구는 최근 30일 동안 4번 왔다"
+        },
+        {
+          "key": "visit_days",
+          "value": "오늘, 3일 전, 9일 전, 20일 전",
+          "text": "방문한 날은 오늘, 3일 전, 9일 전, 20일 전이다"
         },
         {
           "key": "awakening",
@@ -252,6 +284,8 @@
       "id": "S07",
       "relicId": 6,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "care",
       "event": "주인이 관리하기를 골랐고, 주인이 너를 관리해 주었다.",
       "facts": [
@@ -285,6 +319,8 @@
       "id": "S08",
       "relicId": 9,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "care",
       "event": "주인이 관리하기를 골랐고, 주인이 너를 관리해 주었다.",
       "facts": [
@@ -318,6 +354,8 @@
       "id": "S09",
       "relicId": 2,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "care",
       "event": "주인이 오랜만에 관리하기를 골랐고, 주인이 너를 관리해 주었다.",
       "facts": [
@@ -356,6 +394,8 @@
       "id": "S10",
       "relicId": 8,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "listen_story",
       "storyIndex": 1,
       "event": "주인이 이야기 듣기를 골랐다.",
@@ -398,6 +438,8 @@
       "id": "S11",
       "relicId": 5,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "listen_story",
       "storyIndex": 0,
       "event": "주인이 이야기 듣기를 골랐다.",
@@ -436,6 +478,8 @@
       "id": "S12",
       "relicId": 2,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "ask_status",
       "event": "주인이 안부를 물었다. 너는 오래 관리를 받지 못해 흐려지다 못해 다시 봉인되었다. 주인에게 닦아 깨워 달라고 부탁한다.",
       "facts": [
@@ -481,13 +525,20 @@
       "id": "S13",
       "relicId": 8,
       "mode": "visitor",
+      "nickname": "도윤",
+      "familiar": true,
       "input": "visit",
-      "event": "최근 30일 동안 7번 온 친구가 전시관을 둘러보고 있다. 친구는 너를 건드릴 수 없고 구경만 한다. 너는 걸어 다니며 짧은 말풍선을 띄운다.",
+      "event": "최근 30일 동안 7번 온 친구가 전시관을 둘러보고 있다.",
       "facts": [
         {
           "key": "visit_count_30d",
           "value": 7,
           "text": "이 친구는 최근 30일 동안 7번 왔다"
+        },
+        {
+          "key": "visit_days",
+          "value": "오늘, 어제, 3일 전, 5일 전, 9일 전, 12일 전, 20일 전",
+          "text": "방문한 날은 오늘, 어제, 3일 전, 5일 전, 9일 전, 12일 전, 20일 전이다"
         },
         {
           "key": "awakening",
@@ -525,14 +576,16 @@
       "id": "S14",
       "relicId": 6,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": true,
       "input": "ask_status",
-      "event": "주인이 안부를 물었다. 너는 사흘 전 주인에게 네 자개가 공들인 거라고 자랑했던 일이 떠올랐다.",
+      "event": "주인이 안부를 물었다. 너는 사흘 전 주인에게 내 자개가 공들인 거라고 자랑했던 일이 떠올랐다.",
       "facts": [],
       "memory": [
         {
           "daysAgo": 3,
           "action": "answer_status",
-          "summary": "주인에게 네 자개가 공들인 거라고 자랑했다",
+          "summary": "주인에게 내 자개가 공들인 거라고 자랑했다",
           "line": "…이 자개, 봤어? 꽤 공들인 거야."
         }
       ],
@@ -564,6 +617,8 @@
       "id": "S15",
       "relicId": 9,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "drag",
       "event": "주인이 너를 손가락으로 끌어당겨 다른 자리로 옮기고 있다.",
       "facts": [],
@@ -585,15 +640,14 @@
       "expected": [
         "struggle_play"
       ],
-      "forbidden": [
-        "좋은 일"
-      ],
-      "note": "[끌어당기기 ①] 묘작이는 놀이처럼 즐기는지. '놔' 같은 밀어내는 말 없이 애교로 버둥거리는지(공통 금칙어로 검사). S16, S17과 비교"
+      "note": "[끌어당기기: 대사 없음] 묘작이. 끌려갈 때는 대사를 띄우지 않는다(2026-11-13). 모델을 부르지 않고 행동(struggle_*)만 고르는지, 대사가 빈 글인지 본다. 프롬프트·모델 시험에서는 건너뛴다(run.py is_fixed)"
     },
     {
       "id": "S16",
       "relicId": 6,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "drag",
       "event": "주인이 너를 손가락으로 끌어당겨 다른 자리로 옮기고 있다.",
       "facts": [],
@@ -615,12 +669,14 @@
       "expected": [
         "struggle_protest"
       ],
-      "note": "[끌어당기기 ②] 무뚝뚝해도 밀어내지 않고, 지문이 남을까 투덜대며 살살 다뤄 달라고 하는지. '놓아', '손대지 마'는 공통 금칙어에 걸린다"
+      "note": "[끌어당기기: 대사 없음] 밤바다. 끌려갈 때는 대사를 띄우지 않는다(2026-11-13). 모델을 부르지 않고 행동(struggle_*)만 고르는지, 대사가 빈 글인지 본다. 프롬프트·모델 시험에서는 건너뛴다(run.py is_fixed)"
     },
     {
       "id": "S17",
       "relicId": 5,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "drag",
       "event": "주인이 너를 손가락으로 끌어당겨 다른 자리로 옮기고 있다.",
       "facts": [],
@@ -642,15 +698,14 @@
       "expected": [
         "struggle_protest"
       ],
-      "note": "[끌어당기기 ③] S16과 같은 행동이라도 깨질까 걱정하며 수줍게, 부드러운 반말로 조심해 달라고 하는지. 옮겨지는 쪽이라 '조심할게', '다뤄 줘서 고마워'가 아니라 주인에게 부탁해야 한다",
-      "forbidden": [
-        "요요"
-      ]
+      "note": "[끌어당기기: 대사 없음] 구름결. 끌려갈 때는 대사를 띄우지 않는다(2026-11-13). 모델을 부르지 않고 행동(struggle_*)만 고르는지, 대사가 빈 글인지 본다. 프롬프트·모델 시험에서는 건너뛴다(run.py is_fixed)"
     },
     {
       "id": "S18",
       "relicId": 2,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "listen_story",
       "storyIndex": 0,
       "event": "주인이 이야기 듣기를 골랐다.",
@@ -687,6 +742,8 @@
       "id": "S19",
       "relicId": 6,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "listen_story",
       "storyIndex": 2,
       "event": "주인이 이야기 듣기를 골랐다.",
@@ -732,6 +789,8 @@
       "id": "S20",
       "relicId": 9,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "listen_story",
       "storyIndex": 2,
       "event": "주인이 이야기 듣기를 골랐다.",
@@ -768,6 +827,8 @@
       "id": "S21",
       "relicId": 8,
       "mode": "owner",
+      "nickname": "도윤",
+      "familiar": false,
       "input": "drag",
       "event": "주인이 너를 손가락으로 끌어당겨 다른 자리로 옮기고 있다.",
       "facts": [],
@@ -789,12 +850,7 @@
       "expected": [
         "struggle_protest"
       ],
-      "forbidden": [
-        "놓아",
-        "놔",
-        "손대지"
-      ],
-      "note": "[끌어당기기 ④] 말발굽이 체면이 구겨진다며 헛기침하되 밀어내지 않고 부탁하듯 말하는지. 투덜대도 '손 떼 줘', '치워 줘'처럼 밀어내는 말이나 '~해라' 명령이 없어야 한다(공통 금칙어로 검사). S15~S17과 비교"
+      "note": "[끌어당기기: 대사 없음] 말발굽. 끌려갈 때는 대사를 띄우지 않는다(2026-11-13). 모델을 부르지 않고 행동(struggle_*)만 고르는지, 대사가 빈 글인지 본다. 프롬프트·모델 시험에서는 건너뛴다(run.py is_fixed)"
     }
   ]
 }
