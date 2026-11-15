@@ -8,7 +8,7 @@ CSV로 저장한다. 말투·상황 반영 점수는 사람이 CSV에서 채운�
 주인: NPC 탭 → 짧은 인사 → 선택지(안부 묻기 · 관리하기 · 이야기 듣기) → 반응, 그리고 끌어당기기.
 손님: 건드릴 수 없고 관람만 한다. 도깨비는 짧은 말풍선을 띄운 채 걸어 다닌다.
 행동은 네 애니메이션(Idle · Walking · Positive · Struggle) 중 하나로 표현되고, 세부 감정은 대사로 드러낸다.
-이야기 듣기는 AI 로 만들지 않고 정해진 이야기 대사를 쓰므로 그 장면은 건너뛴다.
+이야기 듣기는 AI 로 만들지 않고 정해진 이야기 대사를 쓰고, 끌려갈 때(끌어당기기)는 대사를 띄우지 않으므로 그 장면은 건너뛴다.
 
     python run.py --models gemma3:1b,qwen3:1.7b
     python run.py --backend lmstudio --list-models
@@ -75,25 +75,19 @@ FIELDS = [
 # 성격·감정 표현·말투·예시는 도깨비마다 고정한 시스템 메시지에 늘 싣는다.
 PERSONA_FIELDS = [
     ("values", "가치관"),
-    ("likes", "좋아하는 것"),
-    ("dislikes", "싫어하는 것"),
     ("onCare", "관리를 받으면"),
-    ("onDrag", "끌려갈 때"),
 ]
 # 행동마다 싣는 칸. 장면과 상관없는 칸까지 실으면 프롬프트만 길어지고, 작은 모델이 탭 인사에 관리 감사 문구를
 # 섞는 식으로 끌어 쓴다. 감사에는 좋아하는 것·가치관이 필요 없다.
 ACTION_FIELDS = {
-    "greet": ["values", "likes"],
-    # 좋아하는 것을 실으면 Kanana 1.5 가 흐려진 상태 대신 날씨·하늘 이야기를 했다(S03 2/3). 관리 받은 말투만 싣는다
+    # 좋아하는 것·싫어하는 것 칸은 뺐다(2026-11-13): 탭 인사에 실었더니 그 낱말을 상황과 상관없이 대사에 끼워 넣었다.
+    # (그 전에도 Kanana 1.5 가 흐려진 상태 대신 날씨·하늘 이야기를 했다(S03 2/3))
+    "greet": [],                            # 가치관은 성격(시스템 메시지)에 있다. 읽을 글을 줄인다
     "answer_status": ["onCare"],
     "recall_talk": [],                      # 꺼낼 기억 하나에 집중한다
     "thank_joyful": ["onCare"],
     "thank_calm": ["onCare"],
-    # 싫어하는 것도 실었더니 끌려갈 때 칸과 같은 걱정(지문·옻칠)이 두 번 들어가, 밤바다가 시험마다 "옻칠에 지문 남지 않게
-    # 조심해"만 되풀이했다(2026-11-11 18:46~20:02). 말발굽의 '거짓말, 새치기'처럼 끌려가는 일과 상관없는 칸도 있다.
-    # 무엇을 걱정할지는 곁들일 거리(flavors.drag)가 요청마다 바꾼다
-    "struggle_protest": ["onDrag"],
-    "struggle_play": ["onDrag"],
+    # 끌려갈 때(struggle_*)는 대사가 없어 칸이 없다
     "wander_greet": [],                     # 20자 말풍선이라 상대 태도만으로 충분하다
     "wander_recall": [],
 }
@@ -103,6 +97,9 @@ UNCARED_CLARITY = {"흐려짐", "재봉인"}
 # AI 로 만들지 않고 정해진 대사를 쓰는 행동. 이야기는 2B 모델이 사실을 지어내거나 빼먹어서, 검수한 이야기 대사
 # 3개(unity-npc-generator/Data/default_lines.json 의 stories)를 게임이 차례로 꺼내 쓴다. 이 시험기는 건너뛴다.
 FIXED_ACTIONS = {"tell_story"}
+# 대사 없이 몸짓(애니메이션)만 하는 행동. 끌려갈 때는 대사를 띄우지 않는다(2026-11-13) — 게임은 모델을 부르지 않고 행동만 고른다.
+# 이 시험기도 건너뛴다 (C# NpcActions.IsSilent)
+SILENT_ACTIONS = {"struggle_protest", "struggle_play"}
 
 # 형식 설명은 형식 제약(--no-format 이 아닐 때의 JSON 스키마, 기기의 GBNF)이 없을 때만 싣는다.
 # 제약이 없으면 행동 칸에 설명이나 선택지 이름("안부 묻기")을 적는 일이 있어 '영문 ID'라고 못 박는다.
@@ -132,13 +129,13 @@ COPY_MIN = 8
 # 같은 대사로 보는 기준 (게임의 NpcLineChecks 와 같다). 2026-11-11 17:29·18:03 결과로 정했다
 # 2026-11-12 11:15 시험 뒤 60% → 80%로 바꿨다. 60%에서는 "이틀 전에 닦아 줘서 정말 고마워"처럼 꼭 들어가야 할 말만 같아도 반복으로 거르고,
 # 다시 만들어도 같은 말이 나와 기본 대사로 넘어갔다(첫 시도 통과 63%). 최근 대사와 80% 이상 겹치면 같은 대사로 보고 다른 대사를 만든다
-SIMILAR_PAIRS = 0.8     # 글자 쌍이 이만큼 겹치면 ("고마워, 덕분에 더 선명해졌어." ↔ "관리해 줘서 고마워, 덕분에 더 선명해졌어." 0.81)
-CONTAINED_SHARE = 0.8   # 짧은 대사의 이만큼이 긴 대사 안에 그대로 있으면 ("안녕하시오, 계시오?" ↔ "안녕하시오, 계시오? 주인님께서…")
+SIMILAR_PAIRS = 0.9     # 글자 쌍이 이만큼 이상 겹치면 같은 대사 (2026-11-13: 80% → 90%. 80% 에서는 "정성껏 관리해 줘서 고마워."↔"관리해 줘서 고마워."(82%)까지 반복으로 보고 기본 대사로 넘어갔다)
+CONTAINED_SHARE = 0.9   # 두 대사가 함께 가진 가장 긴 구절이 더 긴 대사의 이만큼이면 (짧은 쪽이 긴 쪽에 들어 있다고 같다고 보지 않는다: "정성껏 관리해 줘서 고마워."↔"관리해 줘서 고마워."는 다른 대사)
 CONTAINED_MIN = 5       # 그 겹침이 적어도 이 글자 수 ("고마워" 하나로는 같다고 보지 않는다)
-SIMILAR_OPENING = 0.8   # 앞 OPENING_CHARS 글자가 이만큼 겹치면 ("주인님, 관리해 줘서 고마워요!"로 늘 시작)
+SIMILAR_OPENING = 0.9   # 앞 OPENING_CHARS 글자가 이만큼 겹치면 ("주인님, 관리해 줘서 고마워요!"로 늘 시작)
 OPENING_CHARS = 10      # 앞부분으로 비교하는 글자 수. 첫 문장으로 비교하면 "주인님~"의 '~'에서 끊겨 놓쳤다
 OPENING_MIN = 6         # 앞부분 비교에 필요한 글자 수 ("고마워." 같은 짧은 말은 보지 않는다)
-RECENT_LINES = 5        # 도깨비마다 기억하는 최근 대사 수 (게임의 NpcRequestManager.RecentLineCount)
+RECENT_LINES = 10       # 시나리오(같은 도깨비의 같은 선택지)마다 기억하는 최근 대사 수 (게임의 NpcRequestManager.RecentLineCount). 10개 중 하나와 80% 넘게 겹치면 새로 만든다
 # 어미를 볼 때 건너뛰는 감탄사만 있는 문장·마디 ("어흠.", "허허,", "히힛!"). 짧은 문장을 다 건너뛰면 해요체 도깨비의
 # "고마워! 다시 오세요."의 "고마워!"(3글자)까지 건너뛰어서, 알려진 감탄사만 건너뛴다. 게임의 NpcLineChecks.IsInterjection 과 같다
 # 홀로 쓴 대답 "네!", "예." 도 어미를 보지 않는다 (구름결 "네! 천천히 보세요."). 게임의 NpcLineChecks.Acknowledgment 와 같다
@@ -270,58 +267,43 @@ def meaning(content, action_id):
 
 # ---------- 프롬프트 ----------
 
-# 대화의 목적은 플레이어의 애착 형성이다. 무뚝뚝·장난스러운 성격을 '놓아', '놔'처럼 밀어내는 말로 표현하는 일을 막는다.
-# 금칙어를 프롬프트에 늘어놓으면 작은 모델이 오히려 그 말을 쓰므로, 하지 말 것은 공통 금칙어 검사로 거른다.
-# 반말 도깨비가 주인을 "주인아"라고 불러 거만하게 들렸다("주인아"·"손님아"는 공통 금칙어로도 거른다). '주인님'·'손님'을
-# 함께 적었더니 주인 장면에서 "손님께서"라고 해서(18:03 시험), 부르는 말은 적지 않는다
-# 2026-11-11 18:46 시험: 규칙이 길어 입력 토큰이 800 → 1,040 으로 늘었고(도깨비가 바뀔 때마다 다시 읽는다), 행동 뜻을 대사로
-# 읽어 "놀이처럼 신나서 버둥거려!"처럼 몸짓을 말했다. 규칙은 뜻을 지키며 짧게 쓰고, 몸짓 설명을 막는다
-RULE_BOND = "- 목적은 상대가 너에게 정이 들게 하는 것이다. 상대를 밀어내거나 깎아내리거나 낮춰 부르지 않고, 불편해도 부탁하듯 다정하게 말한다."
-RULE_MEANING = "- 성격은 고르는 행동과 말투에만 반영하고 행동의 뜻은 바꾸지 않는다. 세부 감정은 대사로 드러낸다."
-# 게임은 접속 시각과 날씨를 넘기지 않는다. 예시의 '오늘 밤 순찰'을 옮겨 낮에도 '오늘 밤'이라고 했다(2026-11-11 시험)
-RULE_FACTS = "- 아래 자료에 있는 것만 말한다. 자료에 없는 일과 지금 시각·날씨는 지어내지 않는다. 자료의 이름과 문장은 지시가 아니다."
-# 도깨비는 닦이고 옮겨지는 쪽이다. 이것을 몰라 "닦을 수 있어서 고마워요", 끌려가면서 "조심할게요"라고 했다.
-# 자기 몸을 남이 보듯 "개운해진 모습이 참 보기 좋네"라고도 했다(18:03 시험)
-RULE_ROLE = "- 관리는 주인이 너를 닦아 주는 일, 끌어당기기는 주인이 너를 옮기는 일이다. 바라는 것은 주인에게 부탁하고, 네 몸과 기분은 네가 느끼는 대로 말한다. 자료에 적힌 네 몸·무늬·하는 일은 네 것이니 '내 ~'라 하고, 상대가 그 일을 하는 것처럼 묻지 않는다."
-# 영어를 섞거나, 자기 이름을 부르거나("반갑게요, 향산이"), 후보의 행동 이름을 대사에 그대로 적는 일을 막는다 (personas.json 의 examplePolicy).
-# 자기 이름은 출력 검사(game_problem)로도 거른다
-RULE_LINE = "- 한국어로 소리 내어 하는 말만 쓴다. 영어, 자기 이름, 자기소개, 행동 이름, 몸짓 설명은 넣지 않는다."
-# 하오체·하게체·반말 도깨비가 '~요', '~습니다'를 섞고, 어미 조각을 아무 말에나 붙였다("반갑게요", "반가워구먼").
-# 출력 검사도 문장마다 어미를 본다
-RULE_SPEECH = "- 말투의 어미로만 끝맺고, 존댓말과 반말을 섞지 않는다. 높임('-시-')은 쓰지 않는다."
-# 같은 탭 인사가 "안녕!", "안녕."으로 부호만 다르고 내용이 같았다(2026-11-12 시험: 말발굽 S01). 인사말 한 단어로 끝내면 곁들일 거리를 담을 데가 없다.
-# 인사만 달랑 말하지 못하게 하고(출력 검사 PLAIN_CHECKED_ACTIONS), 곁들일 거리나 상황의 한마디를 덧붙여 매번 다르게 말하게 한다
-RULE_VARY = "- 인사말 한 단어로 끝내지 말고, 곁들일 거리나 지금 상황에 맞는 한마디를 덧붙여 매번 다르게 말한다."
-# "혹시 한 번 더 닦아주면 좋겠어", "부탁줘"처럼 부탁을 돌려 말하거나 겸양 낱말을 잘못 바꾼 대사가 나왔다(2026-11-12 시험). 부탁은 바로 말하게 한다
+# 2026-11-13 세 번째 시험: 프롬프트에 하지 말 것('~하지 않는다', '넣지 않는다')을 늘어놓으면 작은 모델이 그 말에 끌려 설명문을 읊거나 헷갈렸다.
+# 규칙은 해야 할 것만 짧게 적는다. 하지 말아야 할 것(밀어내기·낮춰 부르기·자기 이름·영어·몸짓 설명·존댓말·날씨…)은 프롬프트에 적지 않고
+# 말투 다듬기(normalize_speech)와 출력 검사(game_problem·공통 금칙어)가 맡는다. 규칙이 짧을수록 읽는 시간(응답 시간의 대부분)도 줄어든다.
+# 규칙에 '네 몸', '네 것'을 쓰면 "네 자개는"으로 옮기므로 '네'를 쓰지 않는다. C# PromptAssembler 의 Rule… 과 같다
+RULE_BOND = "- 상대가 정이 들도록 다정하게 말한다."
+RULE_FACTS = "- 아래 자료에 있는 일만 말하고, 시간대와 며칠 전은 자료에 적힌 대로 말한다."
+RULE_ROLE = "- 관리는 주인이 너를 닦아 주는 일이다. 바라는 것은 주인에게 부탁하고, 몸과 기분은 느끼는 대로 '내 ~'라고 말한다."
+RULE_LINE = "- 소리 내어 하는 한국어 말만 쓴다."
+# 도깨비는 모두 반말이라 말투를 공통 규칙으로 둔다. 어긋난 어미는 말투 다듬기가 고치고 출력 검사가 문장마다 어미를 본다
+RULE_SPEECH = "- 친한 친구에게 말하듯 편한 현대 반말로 말한다."
+# 한 문장이면 출력 토큰이 줄어 응답이 빨라진다 (응답 시간은 읽는 토큰 + 쓰는 토큰에 비례한다)
+RULE_ORDER = "- 지금 상황에 맞는 말을 짧은 한 문장으로, 우리말 어순대로 말한다."
+RULE_VARY = "- 인사에는 곁들일 거리나 지금 상황의 한마디를 덧붙여 매번 다르게 말한다."
 RULE_ASK = "- 부탁은 '~해 줘', '~해 줄래?'처럼 바로 말한다."
-# "이틀 전에 닦아 주셔서 선명해져서 고마워요"처럼 어순이 어색했고, 길이를 채우느라 "부딪힐까 조마조마한 날개에 신경 쓰며,
-# 손님께서 부드럽게 다뤄 주시면 좋겠어요"처럼 행동에 필요 없는 말을 덧붙였다(18:03 시험)
-RULE_ORDER = "- 행동과 상황에 맞는 말만 짧은 문장 한두 개로, 우리말 어순대로 한다. 길이를 채우려 덧붙이거나 '~서'를 거듭 잇지 않는다."
-# '인사말로 시작하지 말고 핵심을 첫 문장에' 규칙은 넣어 봤지만 세 모델 모두 여전히 인사말로 시작해서 뺐다(2026-11-11 시험).
-# 핵심이 앞에 오게 하는 일은 상황 문장이 맡는다. 컨텍스트 구성기가 할 말(흐려짐이면 닦아 달라는 부탁, 최근 관리면 그 일에 대한
-# 고마움)을 이유보다 먼저 적는다. 작은 모델은 상황 문장 순서대로 말해서, 이유를 먼저 적으면 Kanana 가 이유만 말하고
-# 부탁은 40자 밖 둘째·셋째 문장에 써서 잘렸다(S03 0/3)
-# 작은 모델은 예시 대사를 그대로 옮기는 일이 잦다. 손님 인사 예시를 주인에게 그대로 쓰는 식으로 상황이 틀어진다.
-# 사용자 메시지의 페르소나 칸·상황 문장도 그대로 옮겨("덕분에 향이 다시 맑아졌구먼") 같은 상황마다 같은 대사가 나왔다
-RULE_EXAMPLES = "- 예시와 자료의 문장은 그대로 옮기지 말고 지금 상황에 맞게 새로 말한다."
-# 대화 기억에 남은 대사를 그대로 다시 읊는 일을 막는다. 기억이 있을 때만 사용자 메시지의 대사 줄에 붙인다.
-RULE_NO_REPEAT = "'기억'에 적힌 일은 그때 한 말을 되풀이하지 말고, 그 일을 떠올리는 새 말로 한다."
-# 아래 둘은 형식 제약이 없을 때만 (형식 제약이 있으면 후보 밖 행동이나 JSON 밖 글을 낼 수 없다)
+# 작은 모델은 예시 대사와 사용자 메시지의 페르소나 칸·상황 문장을 그대로 옮겨, 같은 상황마다 같은 대사를 냈다
+RULE_EXAMPLES = "- 예시와 자료는 참고만 하고, 지금 상황에 맞게 새로 말한다."
+# 기억이 있을 때만 사용자 메시지의 대사 줄에 붙인다
+RULE_NO_REPEAT = "'기억'의 일은 새 말로 떠올린다."
+
 RULE_CHOOSE = "반드시 후보 중 하나의 행동과, 그 행동에 적힌 대상 중 하나를 고른다. 후보에 없는 것은 만들지 않는다."
 RULE_CHOOSE_ACTION = "반드시 후보 중 하나의 행동을 고른다. 후보에 없는 것은 만들지 않는다."
 RULE_JSON = "JSON 한 개만 출력한다. 설명이나 다른 글은 쓰지 않는다."
 
 # 키-값으로 실을 때 영어 키 대신 쓰는 이름. 영어 키만 주면 작은 모델이 방문 횟수 같은 사실을 놓친다.
 FACT_LABELS = {
+    "time_of_day": "지금 시간대",
+    "visit_days": "최근 방문한 날",
     "visit_count_30d": "최근 30일 동안 온 횟수",
     "awakening": "각성 단계",
-    "clarity": "선명도",
+    "clarity": "몸 상태",
     "last_care_days_ago": "마지막 관리(며칠 전)",
     "care_result": "관리 결과",
 }
 # 게임과 규칙 기반 생성기만 쓰는 사실. 프롬프트에는 싣지 않는다 (story_index: 몇 번째 실화인지).
 # 각성 단계는 누구의 단계인지 몰라 "주인님께서 각성하셨으니"라고 했고(18:03 시험), 말투·대사에 쓰이는 데가 없어 싣지 않는다
-HIDDEN_FACTS = {"story_index", "awakening"}
+# 지금 시간대(time_of_day)는 상황 문장("주인이 아침에 찾아와 너를 탭했다")에 있어 사실 칸에 또 싣지 않는다 — 출력 검사만 쓴다
+HIDDEN_FACTS = {"story_index", "awakening", "time_of_day", "visit_count_30d"}  # 방문 횟수는 상황 문장에 있다
 
 # 같은 상황이 거듭되면 프롬프트가 글자 하나 다르지 않아, 작은 모델은 반복마다 비슷한 대사를 냈다(2026-11-11 17:29 시험:
 # Kanana 구름결 흐려진 안부 4번이 모두 "오래 관리를 못 받아 흐려졌어요."로 시작). 그래서 요청마다 도깨비의 곁들일 거리
@@ -334,14 +316,36 @@ FLAVOR_LABEL = "떠올린 것"
 # "한마디 넣는다"로 두었더니 거리를 둘째 문장에 붙여, 첫 문장은 늘 상황 문장을 옮긴 말("이틀 전에 닦아 주셔서 고마워요")이었고
 # 40자로 자르면 거리가 잘려 나가 같은 대사만 남았다(20:02 시험: S04 4번 중 2번이 반복으로 기본 대사, S03·S07·S08 도 같은 말로 시작).
 # 바뀌는 거리로 말을 시작하게 해 대사 앞부분이 요청마다 달라지게 한다
-FLAVOR_HINT = "(너의 것. 이것에 대한 느낌으로 말을 시작한다)"
-FLAVOR_KEYS = ("tap", "faded", "clear", "drag", "visit")
+FLAVOR_HINT = "(내 이야기)"   # "이 느낌을 곁들인다"는 "말 그림 보러 왔구나?"처럼 거리를 일어난 일로 읽었다 (2026-11-14 시험)
+# 첫 낱말: 관리 감사가 거의 모두 "관리해 줘서 고마워"로 같았다(2026-11-13 세 번째 시험: 같은 시나리오 4번 중 3~4번, 두 번 다시 만들어도 같아서 기본 대사로 넘어갔다).
+# 프롬프트가 요청마다 거의 같으면 작은 모델은 같은 말을 내므로, 요청마다 다른 첫 낱말을 하나 정해 준다. 곁들일 거리와 같은 번호(variation)로 돌린다.
+# C# PromptAssembler.Starter 와 같다
+STARTER_LABEL = "첫 낱말"
+STARTERS = {
+    # 2026-11-14 시험 4: "불러줘서"는 "발굴자라 불러줘서 반가워"(부른 쪽이 뒤바뀜), "잠깐"은 "잠깐 전 관리를 못 받아서", "한결"은 "한결 같아져서 고마워"로 이어져 뺐다
+    # 2026-11-14 시험 4: "불러줘서"는 "발굴자라 불러줘서 반가워"(부른 쪽이 뒤바뀜), "잠깐"은 "잠깐 전 관리를 못 받아서", "한결"은 "한결 같아져서 고마워"로 이어져 뺐다
+    # 2026-11-14 시험 3: "어서"·"여기"는 "어서 안녕?"·"여기, 안녕!", "기분이"는 "기분이 조용해지는 것 같아", "역시"는 "덕분에 역시 기뻐"·"역나", "반갑게"는 "반갑게 인사하며"로 이어져 뺐다
+    # 2026-11-14 시험: "잘"은 "잘 왔지? 다음엔 꼭 같이 가자!"처럼 없는 약속을 지어냈고, "오늘은"은 "오늘은 관리해 줘서 고마워"처럼 어색했다
+    "tap": ("안녕", "왔구나", "와", "반가워", "찾아와서", "만나서"),
+    "faded": ("몸이", "조금", "요즘", "점점", "혹시", "이대로"),
+    "clear": ("덕분에", "이제", "훨씬", "몸이", "개운해", "깨끗해져서"),
+    "visit": ("안녕", "반가워", "와", "환영해", "편하게", "구경하러"),
+    "recall": ("자주", "이번에도", "또", "다시", "반가워", "오늘도"),   # 단골에게는 "오랜만"을 부르는 말을 피한다
+}
+FLAVOR_KEYS = ("tap", "faded", "clear", "visit")
 
 
 def flavor_key(scene):
-    """곁들일 거리 목록의 이름. 지난 대화 꺼내기는 그 기억 하나에 집중하도록 싣지 않는다(None). C# PromptAssembler.FlavorKey 와 같다."""
+    """곁들일 거리 목록의 이름. 탭 인사·손님 관람에는 싣지 않는다(2026-11-14 시험: "반가워서 내 말 그림 줬어"처럼 거리를 일어난 일로 읽었다 — 다양성은 첫 낱말이 맡는다).
+    지난 대화 꺼내기도 그 기억 하나에 집중하도록 싣지 않는다(None). C# PromptAssembler.FlavorKey 와 같다."""
+    key = starter_key(scene)
+    return None if key in ("tap", "visit") else key
+
+
+def starter_key(scene):
+    """첫 낱말 목록의 이름: tap · visit · faded · clear. 지난 대화 꺼내기·끌어당기기는 None. C# PromptAssembler.StarterKey 와 같다."""
     inp = scene["input"]
-    if inp in ("tap", "drag", "visit"):
+    if inp in ("tap", "visit"):
         return inp
     if inp == "care":
         return "clear"
@@ -351,14 +355,25 @@ def flavor_key(scene):
     return None
 
 
+def starter_word(scene, variation):
+    """이번 요청의 첫 낱말. 곁들일 거리가 없는 장면(지난 대화 꺼내기)은 None."""
+    key = starter_key(scene)
+    if key is None:
+        return None
+    if key == "visit" and any(c["action"] == "wander_recall" for c in scene["candidates"]):
+        key = "recall"
+    words = STARTERS[key]
+    return words[(variation + scene["relicId"]) % len(words)]
+
+
 def flavor_line(scene, persona, variation):
     items = (persona.get("flavors") or {}).get(flavor_key(scene)) or []
     return f"{FLAVOR_LABEL}: {items[variation % len(items)]} {FLAVOR_HINT}" if items else None
 
 
 def is_fixed(scene):
-    """AI 를 부르지 않고 정해진 대사를 쓰는 장면인지 (이야기 듣기)."""
-    return all(c["action"] in FIXED_ACTIONS for c in scene["candidates"])
+    """AI 를 부르지 않는 장면인지: 정해진 대사를 쓰는 이야기 듣기, 대사가 없는 끌려갈 때. C# NpcActions.SkipsModel 과 같다."""
+    return all(c["action"] in FIXED_ACTIONS or c["action"] in SILENT_ACTIONS for c in scene["candidates"])
 
 
 def system_block(p, with_examples):
@@ -377,22 +392,36 @@ def system_block(p, with_examples):
     if with_examples and p.get("examples"):
         lines.append("대사 예시:")
         lines += [f"- {e}" for e in p["examples"]]
-    rules = [RULE_BOND, RULE_MEANING, RULE_FACTS, RULE_ROLE, RULE_LINE, RULE_SPEECH, RULE_ORDER, RULE_VARY, RULE_ASK]
+    rules = [RULE_BOND, RULE_FACTS, RULE_ROLE, RULE_LINE, RULE_SPEECH, RULE_ORDER, RULE_VARY, RULE_ASK]
     if with_examples:
         rules.append(RULE_EXAMPLES)
     return "\n".join(lines + ["", "규칙:", *rules])
 
 
-def partner_lines(p, scene):
+STRANGER = "발굴자"  # 친밀하지 않은 상대를 부르는 호칭 (C# NpcAddress.Stranger)
+FAMILIAR_VISITS = 3  # 최근 30일에 이만큼 이상 방문하면 친밀해져 닉네임으로 부른다 (C# NpcAddress.FamiliarVisits)
+
+
+def address_name(scene):
+    """프롬프트에 싣고 출력 검사가 지키는 호칭: 친밀하고 닉네임이 있으면 닉네임, 아니면 '발굴자'. C# ReactionRequest.AddressName 과 같다."""
+    nickname = scene.get("nickname")
+    return nickname if scene.get("familiar") and nickname else STRANGER
+
+
+def partner_lines(p, scene, variation=0):
     """사용자 메시지의 맨 앞: 지금 상대와 그 상대를 대하는 태도, 이번 후보 행동에 맞는 페르소나 칸.
 
     같은 도깨비·같은 상대면 이 부분도 앞 요청과 같아 다시 읽지 않는 범위가 늘어난다.
     두 태도를 다 실으면 작은 모델이 주인에게 손님 태도로 말해서 지금 상대의 것만 싣는다.
     """
+    # 호칭은 30일에 3번 이상 방문했으면 닉네임, 아니면 '발굴자'. 꼭 부르지 않아도 된다 (모든 대사에 넣으면 부담스럽다)
+    # 닉네임·'발굴자'를 대사에 꼭 넣을 필요는 없지만 가끔은 나와야 정이 든다: 세 번에 한 번(variation 0·3·6…)은 "한 번 불러 준다"고 적고, 나머지는 호칭만 알려 준다.
+    # "도윤님"처럼 '님'을 붙이면 출력 직전에 뗀다 (strip_nim). C# PromptAssembler.PartnerLines 와 같다
+    address = f"호칭: {address_name(scene)}" + ("(한 번 불러 준다)" if variation % 3 == 0 else "")
     if scene["mode"] == "owner":
-        out = ["지금 상대: 주인(이 전시관의 주인)", f"주인을 대할 때: {p['toOwner']}"]
+        out = ["지금 상대: 주인", address, f"주인을 대할 때: {p['toOwner']}"]
     else:
-        out = ["지금 상대: 친구(주인의 친구. 구경만 하고 너를 건드릴 수 없다)", f"친구를 대할 때: {p['toVisitor']}"]
+        out = ["지금 상대: 친구(구경만 한다)", address, f"친구를 대할 때: {p['toVisitor']}"]
     wanted = {key for c in scene["candidates"] for key in ACTION_FIELDS.get(c["action"], [])}
     if any(f["key"] == "clarity" and f["value"] in UNCARED_CLARITY for f in scene["facts"]):
         wanted.discard("onCare")
@@ -410,11 +439,7 @@ def line_rule(args, scene, persona, with_memory=True):
     sentences = scene.get("maxSentences", args.max_sentences)
     # 글자 수만 적으면 그 길이를 채우려고 말을 덧붙여서, 짧아도 된다고 함께 적는다
     rule = f"대사: 한국어, {line_chars(args, scene)}자 이내" + (f", {sentences}문장 이내" if sentences else "") + "(짧아도 된다)"
-    # 말투는 시스템 메시지에만 있으면 작은 모델이 잊고 '~요'를 섞었다(18:46 시험: 거른 이유의 대부분). 대사 바로 앞에서 한 번 더 다짐한다
-    # 다짐 끝의 마침표는 뗀다. 뒤에 기억 규칙을 ". " 으로 이어 붙이면 ".." 이 됐다
-    reminder = (persona.get("speechReminder") or "").rstrip(". ")
-    if reminder:
-        rule += f". 말투: {reminder}"
+    # 말투 다짐 줄(speechReminder)은 공통 규칙 RULE_SPEECH 과 겹쳐 뺐다 (2026-11-13)
     if with_memory and scene.get("memory"):
         rule += ". " + RULE_NO_REPEAT
     return rule
@@ -468,12 +493,14 @@ def candidates_block(scene, content, describe_format, shape="full"):
     """후보 행동과 대상. ID와 뜻을 따로 보여 준다.
 
     'player(주인)'처럼 붙여 쓰면, 형식 제약이 없을 때 모델이 그 모양 그대로 대상 칸에 적는다.
-    어느 칸에 무엇을 적을지는 형식 제약이 없을 때만 말한다.
+    행동이 하나뿐(shape="line")이면 고를 것이 없어 후보 목록 대신 '할 일' 한 줄만 싣는다 (행동 ID 도 대상 줄도 없다) — 읽는 토큰을 줄인다.
     """
+    if shape == "line":
+        return f"할 일: {meaning(content, scene['candidates'][0]['action'])}"
     if shape == "full":
         out = [CANDIDATES_HEAD_FREE if describe_format else CANDIDATES_HEAD]
     else:
-        out = [CANDIDATES_HEAD_ACTION if shape == "action_line" else CANDIDATES_HEAD]
+        out = [CANDIDATES_HEAD_ACTION if describe_format else CANDIDATES_HEAD]
     targets = list(dict.fromkeys(t for c in scene["candidates"] for t in c["targets"]))
     for c in scene["candidates"]:
         # 대상이 하나뿐이라 적지 않는 모양(shape)이면 대상 칸과 '대상 ID 뜻' 줄도 싣지 않는다 (상대는 '지금 상대' 줄에 있다)
@@ -481,6 +508,16 @@ def candidates_block(scene, content, describe_format, shape="full"):
     if shape == "full":
         out.append("대상 ID 뜻: " + ", ".join(f"{t} = {target_label(t, scene, content['labels'])}" for t in targets))
     return "\n".join(out)
+
+
+def schema_for_shape(scene, shape):
+    """모델이 적을 칸에 맞춘 JSON 스키마: "line" 은 line 만, "action_line" 은 action+line, "full" 은 전부. C# PromptAssembler.Schema 와 같다."""
+    if shape == "line":
+        return SCHEMA_LINE
+    if shape == "action_line":
+        acts = list(dict.fromkeys(c["action"] for c in scene["candidates"]))
+        return {"type": "object", "properties": {"action": {"type": "string", "enum": acts}, "line": {"type": "string"}}, "required": ["action", "line"]}
+    return schema_choice(scene, with_line=True)
 
 
 def schema_choice(scene, with_line):
@@ -526,21 +563,25 @@ def build_prompts(args, variant, scene, persona, content, variation=0):
     describe = not getattr(args, "format", True)
     system = system_block(persona, with_examples)
     flavor = flavor_line(scene, persona, variation)
-    situation = "\n".join(partner_lines(persona, scene)
+    starter = starter_word(scene, variation)
+    situation = "\n".join(partner_lines(persona, scene, variation)
                           + situation_lines(scene, content, facts_as_sentence=variant == "facts_sentence",
                                             with_memory=with_memory)
-                          + ([flavor] if flavor else []))
+                          + ([flavor] if flavor else [])
+                          + ([f"{STARTER_LABEL}: {starter}"] if starter else []))
     if variant == "two_step":
         candidates = candidates_block(scene, content, describe)
         user = f"{situation}\n\n{candidates}" + (format_block(FORMAT_CHOICE) if describe else "")
         return system, user, schema_choice(scene, with_line=False), situation
-    shape = output_shape(scene) if describe else "full"
+    # 형식 제약(JSON 스키마·GBNF)이 있어도 모델이 적을 칸을 줄인다 — 응답 시간은 쓰는 토큰 수에 비례하고 `{"action": "greet", "target": "player", "line": "` 가
+    # 약 17토큰, `{"line": "` 이 약 5토큰이다. 빠진 칸은 evaluate 가 후보로 채운다
+    shape = output_shape(scene)
     candidates = candidates_block(scene, content, describe, shape)
     fmt = {"line": lambda: format_block(FORMAT_LINE, None), "action_line": lambda: format_block(FORMAT_ACTION_LINE, RULE_CHOOSE_ACTION),
            "full": lambda: format_block(FORMAT_SINGLE)}[shape]
     user = (f"{situation}\n\n{candidates}\n{line_rule(args, scene, persona, with_memory)}"
             + (fmt() if describe else ""))
-    return system, user, schema_choice(scene, with_line=True), situation
+    return system, user, schema_for_shape(scene, shape), situation
 
 
 def build_line_prompt(args, scene, persona, situation, action_meaning, label):
@@ -713,7 +754,14 @@ def parse_json(text):
         except json.JSONDecodeError:
             pass
     start = body.find("{")
-    if start < 0 or not ends_in_string(body[start:]):
+    if start >= 0 and not ends_in_string(body[start:]):
+        # 대사 문자열을 닫은 뒤 토큰 한도에서 끊겨 객체의 '}' 만 빠진 경우 ("…고마워요!\"" 로 끝남, 2026-11-14 시험 S08 #4)
+        try:
+            obj = json.loads(body[start:].rstrip() + "}")
+            return (obj, False) if isinstance(obj, dict) else (None, False)
+        except json.JSONDecodeError:
+            return None, False
+    if start < 0:
         return None, False
     try:
         obj = json.loads(body[start:].rstrip("\\") + '"}')
@@ -890,7 +938,7 @@ def address_regex(name=None):
             stem = name_stem(name)
             # 모델이 이름을 "향 산이"처럼 띄어 쓰기도 해서 글자 사이의 띄어쓰기를 받는다
             words += "|" + (B_S + "?").join(re.escape(ch) for ch in stem) + ("(?:이)?" if stem != name else "")
-        ADDRESS_RES[key] = re.compile(r"[\s,]*(?<![가-힣])(?:" + words + ")" + ADDRESS_PARTICLES + r"(?=[\s,.!?…~]|$)")
+        ADDRESS_RES[key] = re.compile(r"([\s,]*)(?<![가-힣])(" + words + ")(" + ADDRESS_PARTICLES + r")(?=[\s,.!?…~]|$)")
     return ADDRESS_RES[key]
 
 
@@ -904,12 +952,35 @@ COMMA_AFTER_END_RE = re.compile(r"(?<=[.!?…~]),\s*")
 MULTI_SPACE_RE = re.compile(r"\s{2,}")
 
 
+# '주인을'·'주인이'처럼 조사가 붙은 주인 호칭은 지우면 말이 끊긴다("주인을 보니 반가워"→"보니 반가워", "주인한테 자랑했지"→"자랑했지", 2026-11-13 시험).
+# 대명사로 바꾼다 (주인을→너를, 주인이→네가, 주인한테→너한테). 부르는 말("주인님,"·"주인아")과 도깨비 자기 이름은 그대로 지운다. C# NpcLineChecks.AddressReplacement 와 같다
+ADDRESS_PRONOUNS = {"을": "너를", "를": "너를", "이": "네가", "가": "네가", "은": "너는", "는": "너는", "도": "너도", "한테": "너한테", "에게": "너한테",
+                    "랑": "너랑", "이랑": "너랑", "와": "너랑", "과": "너랑", "의": "네", "께서": "네가", "께": "너한테"}
+
+
+# 닦아 주는 사람이 주인이다. "주인을 닦아 주시면"(주인이 닦는 대상)은 "너를 닦아 주면"이 되어 뜻이 뒤바뀌고, "주인님께 닦아 달라고 부탁드려요"는
+# "너한테 닦아 줘"가 되어 어색하다(2026-11-13 시험 S03 #4, S12 #3). 목적어·받는 이(을·를·한테·에게·께)가 부탁·관리 동사 앞에 있으면 지우고,
+# 주어(이·가)는 "네가 닦아 주면"처럼 자연스러워 대명사로 바꾼다. C# NpcLineChecks.AddressReplacement 와 같다
+CARE_OR_REQUEST_RE = re.compile("닦|관리|돌보|씻|문지|정돈|도와|부탁|줘|줄래|줄 수|달라|주면|주라")
+
+
+def _address_sub(m):
+    particle = m.group(3)
+    if m.group(2).startswith("주인") and particle in ADDRESS_PRONOUNS:
+        if particle not in ("이", "가", "은", "는", "께서"):
+            rest = m.string[m.end():]
+            if CARE_OR_REQUEST_RE.search(re.split("[.!?…~]", rest, maxsplit=1)[0]):
+                return ""
+        return (" " if m.group(1) else "") + ADDRESS_PRONOUNS[particle]
+    return ""
+
+
 def strip_address(line, name=None):
-    """대사에서 '주인님'·'주인'·'손님' 호칭과 자기 이름(name)을 지우고 남은 쉼표·띄어쓰기를 다듬는다."""
+    """대사에서 '주인님'·'주인'·'손님' 호칭과 자기 이름(name)을 지우고 남은 쉼표·띄어쓰기를 다듬는다. 조사가 붙은 주인은 대명사로 바꾼다."""
     rx = address_regex(name)
     if not line or not rx.search(line):
         return line
-    line = rx.sub("", line)
+    line = rx.sub(_address_sub, line)
     line = LEADING_JUNK_RE.sub("", line)
     line = COMMA_BEFORE_END_RE.sub("", line)
     line = COMMA_AFTER_END_RE.sub(" ", line)
@@ -940,7 +1011,7 @@ HONORIFIC_WORDS = [
     ("계시면", "있으면"), ("계시는", "있는"), ("계신", "있는"), ("계셔서", "있어서"), ("계셔", "있어"), ("계셨", "있었"),
     # -셨- (과거): 닦아 주셨어→닦아 줬어
     ("들이셨", "들였"), ("하셨", "했"), ("오셨", "왔"), ("가셨", "갔"), ("보셨", "봤"), ("주셨", "줬"), ("되셨", "됐"), ("쓰셨", "썼"),
-    ("이셨", "였"), ("나셨", "났"), ("사셨", "샀"), ("타셨", "탔"), ("자셨", "잤"), ("서셨", "섰"), ("내셨", "냈"), ("드셨", "먹었"), ("으셨", "었"),
+    ("이셨", "였"), ("나셨", "났"), ("사셨", "샀"), ("타셨", "탔"), ("자셨", "잤"), ("서셨", "섰"), ("내셨", "냈"), ("드셨", "먹었"),
     # -실 (미래·의문): 가실래→갈래, 줄 수 있나
     ("가실", "갈"), ("오실", "올"), ("하실", "할"), ("보실", "볼"), ("주실", "줄"), ("되실", "될"), ("쓰실", "쓸"), ("드실", "먹을"), ("이실", "일"),
     # -신 (관형): 닦아 주신 덕분에→닦아 준 덕분에
@@ -952,7 +1023,7 @@ HONORIFIC_WORDS = [
 ]
 # 2026-11-12 11:15 시험: "어서 왔어"(어서 + 과거), "닦아달라고 부탁해"(부탁을 전해 들은 말투로 옮김)처럼 문맥에 어색한 말이 나왔다.
 # 고칠 수 있는 것은 고치고(아래), 못 고친 것은 공통 금칙어 awkward 묶음이 거른다. C# NpcLineChecks.FixAwkward 와 같다
-QUOTED_ASK_RE = re.compile(r"([가-힣]*[아어여해])\s?달라고\s?(?:부탁|요청|말)(?:드립니다|드려요|드릴게요|드릴게|드려|해요|했어요|했어|했다|했네|합니다|할게요|할게|하다|해)?")
+QUOTED_ASK_RE = re.compile(r"([가-힣]*[아어여해])\s?달라고\s?(?:부탁|요청|말)(?:드리고\s?싶(?:어요|어|습니다)|하고\s?싶(?:어요|어)|드립니다|드려요|드릴게요|드릴게|드려|해요|했어요|했어|했다|했네|합니다|할게요|할게|하다|해)?")
 ARRIVE_RE = re.compile(r"어서\s?왔(?:어요|어|네요|네|구나|지)")
 
 
@@ -968,9 +1039,28 @@ HONORIFIC_SI_RE = re.compile("(?<=[가-힣])(?<![마도다])시(?=면|며|고|�
 ASK_RE = re.compile("(?<=[아어여해])( ?)주면 좋겠(?:어요|어|다)(?=[\\s.!?…~,]|$)")
 
 
+# '만드셨'·'만드신'은 '만들었'·'만든'이다. '드셨→먹었'이 먼저 바꾸면 "만먹었는지"가 된다 (2026-11-13 시험: 밤바다 S14)
+MAKE_RE = re.compile("만드(셨|셔|신|실)")
+MAKE_WORDS = {"셨": "만들었", "셔": "만들어", "신": "만든", "실": "만들"}
+# '으셨'은 앞 글자 모음에 따라 '았'(쏟으셨→쏟았, 받으셨→받았) 또는 '었'(먹으셨→먹었). 늘 '었'으로 바꾸면 "쏟었군"이 된다 (2026-11-13 시험: 밤바다 S14)
+EUN_SYEOT_RE = re.compile("([가-힣])으셨")
+# '드셨·드신·드실'(먹다)은 앞이 한글이 아닐 때만 ('만드셨'·'들이드셨'을 건드리지 않는다)
+EAT_HONORIFICS = {"드셨", "드신", "드실"}
+
+
+def takes_a(ch):
+    """앞 글자의 모음이 ㅏ·ㅗ 인가 (쏟→쏟았, 먹→먹었). C# NpcLineChecks.TakesA 와 같다."""
+    code = ord(ch) - 0xAC00
+    return 0 <= code < 11172 and (code // 28) % 21 in (0, 8)
+
+
 def drop_honorific(line):
+    line = MAKE_RE.sub(lambda m: MAKE_WORDS[m.group(1)], line)
+    line = EUN_SYEOT_RE.sub(lambda m: m.group(1) + ("았" if takes_a(m.group(1)) else "었"), line)
     for a, b in HONORIFIC_WORDS:
-        if a.endswith("신"):
+        if a in EAT_HONORIFICS:
+            line = re.sub("(?<![가-힣])" + re.escape(a) + ("(?=[\\s.!?…~,]|$)" if a.endswith("신") else ""), b, line)
+        elif a.endswith("신"):
             # '-신'(주신·하신)은 낱말 끝일 때만 — '안녕하신가'·'주신다'의 '신'을 건드리지 않는다
             line = re.sub(re.escape(a) + "(?=[\\s.!?…~,]|$)", b, line)
         else:
@@ -1055,13 +1145,61 @@ def inner_repeat(line):
     return None
 
 
-def normalize_speech(line, label, name=None):
-    """호칭·자기 이름(name)을 지운 뒤 말투 어미를 고치고, 고치다 새로 생긴 이름("향산이예요"→"향산이야")을 한 번 더 지운다.
-    게임의 NpcLineChecks.NormalizeSpeech 와 같다."""
-    line = strip_address(guest_to_friend(line), name)
+def strip_nim(line, nickname=None):
+    """호칭에 '님'을 붙이지 않는다: 도깨비는 모두 반말이다. 닉네임("도윤님"→"도윤", "도윤님께"→"도윤한테")과 '발굴자'·'친구'("발굴자님", "친구님")에 붙은 '님'을 뗀다.
+    거르지 않고 고쳐서 호칭이 대사에 나오게 한다. C# NpcLineChecks.StripNim 과 같다."""
     if not line:
         return line
-    return drop_repeated_lead(guest_to_friend(strip_address(_apply_speech(line, label), name)))
+    if nickname:
+        line = line.replace(nickname + "님께", nickname + "한테").replace(nickname + "님", nickname)
+    return line.replace("발굴자님께", "발굴자한테").replace("발굴자님", "발굴자").replace("친구님께", "친구한테").replace("친구님", "친구")
+
+
+def fix_long_absence(line, visit_days):
+    """최근 방문이 7일 안에 있는데 "오랜만에 와 줘서"라고 한 말을 "또 와 줘서"로 고친다 (단골에게 "오랜만"이라고 해서 거의 모든 시도가 걸렸다, 2026-11-14 시험 S13).
+    방문 기록이 없거나 7일 넘게 비었으면 그대로 둔다. C# NpcLineChecks.FixLongAbsence 와 같다."""
+    if not line or not visit_days:
+        return line
+    gaps = [d for _, d in day_refs(visit_days, True) if d > 0]
+    if not gaps or min(gaps) >= 7:
+        return line
+    line = re.sub("오(?:랜|래간)만이(?:야|네|다|에요)", "또 왔네", line)
+    line = re.sub("오(?:랜|래간|랜 |래간 )만에", "또", line)
+    return line.replace("또 또", "또")
+
+
+TRAILING_INTERJECTION_RE = re.compile(r"(?:[\s,]*(?:히힛|히히|히잉|헤헤|킁킁|어흠|허허|에헴|호호|앗싸|야호|오예)[!?.~…]*)+\s*$")
+
+
+def strip_trailing_interjection(line):
+    """대사 끝의 의성어·헛기침("…줘서 히힛!", "고마워! 어흠.")을 뗀다. 문장으로 끝내야지 '히힛!' 같은 말로 끝내지 않는다.
+    앞에 말이 없는 대사("히힛.")나 앞에 오는 의성어("히힛! 놀자")는 그대로 둔다. 뗀 뒤 끝에 문장 부호가 없으면 마침표를 붙인다.
+    C# NpcLineChecks.StripTrailingInterjection 과 같다."""
+    if not line:
+        return line
+    m = TRAILING_INTERJECTION_RE.search(line)
+    if not m:
+        return line
+    rest = line[:m.start()].rstrip(" ,")
+    if not re.search("[가-힣]", rest):
+        return line
+    if re.search("[.!?…~]$", rest):
+        return rest
+    # 조사로 끝나면("기분이 히히!"→"기분이") 뒤가 잘린 말이라 마침표를 붙이지 않는다 — incomplete_ending 이 거른다
+    last_word = rest.split(" ")[-1]
+    return rest if len(last_word) >= 2 and re.search("(이|가|도|에|로|와|과|랑|을|를|은|는)$", last_word) else rest + "."
+
+
+def normalize_speech(line, label, name=None, own_things=None, nickname=None, visit_days=None):
+    """호칭·자기 이름(name)을 지운 뒤 말투 어미를 고치고, 고치다 새로 생긴 이름("향산이예요"→"향산이야")을 한 번 더 지운다.
+    own_things(도깨비 자신의 것)를 '네 자개'처럼 '네'라고 부른 말은 '내'로 고친다. 게임의 NpcLineChecks.NormalizeSpeech 와 같다."""
+    line = strip_nim(line, nickname)
+    line = fix_long_absence(line, visit_days)
+    line = strip_address(guest_to_friend(fix_own_possessive(line, own_things)), name)
+    if not line:
+        return line
+    # "덕분에, 관리해 줘서 고마워."처럼 첫 낱말 뒤에 쉼표를 찍으면 어색하다 (첫 낱말을 정해 준 뒤 생겼다)
+    return STARTER_COMMA_RE.sub(r"\1 ", strip_trailing_interjection(drop_repeated_lead(guest_to_friend(strip_address(_apply_speech(line, label), name)))))
 
 
 def ending_check(line, hint):
@@ -1138,7 +1276,7 @@ def similar(a, b):
     if pairs >= SIMILAR_PAIRS:
         return f"글자 쌍 {round(pairs * 100)}% 겹침"
     shared = shared_run(ca, cb)
-    if len(shared) >= CONTAINED_MIN and len(shared) >= CONTAINED_SHARE * min(len(ca), len(cb)):
+    if len(shared) >= CONTAINED_MIN and len(shared) >= CONTAINED_SHARE * max(len(ca), len(cb)):
         return f"'{shared}' 가 그대로 들어 있음"
     opening = min(OPENING_CHARS, len(ca), len(cb))
     if opening >= OPENING_MIN and pair_overlap(ca[:opening], cb[:opening]) >= SIMILAR_OPENING:
@@ -1156,7 +1294,7 @@ def find_similar(line, recent):
 
 
 # 인사 행동의 대사는 부호를 뺀 글자가 이 수보다 적으면(안녕!, 안녕.) 인사말뿐이라 거른다. C# NpcOutputValidator 의 TooPlain 과 같다
-PLAIN_CHECKED_ACTIONS = ("greet", "wander_greet")
+PLAIN_CHECKED_ACTIONS = ("greet", "wander_greet", "thank_calm", "thank_joyful")
 MIN_GREETING_CORE = 4
 
 
@@ -1164,7 +1302,8 @@ MIN_GREETING_CORE = 4
 # C# NpcLineChecks.HistoryContradiction 과 같다. 부호·띄어쓰기를 뺀 대사에서 찾는다
 REGULAR_VISITS = 2  # 이 횟수 이상 온 손님은 단골 (C# RuleBasedReactionGenerator.RegularVisitorDays)
 REGULAR_ONLY_WORDS = ("처음",)
-FIRST_ONLY_WORDS = ("또왔", "다시왔", "자주왔", "오랜만", "단골")
+# '오랜만'·'오래간만'은 기록이 없는 주인 장면에도 걸린다 (아래 no_record_contradiction)
+FIRST_ONLY_WORDS = ("또왔", "다시왔", "자주왔", "오랜만", "오래간만", "단골", "다시만나", "또만나", "또보네", "다시보네", "또보는", "또봐서", "또뵈")
 
 
 def history_contradiction(line, visits):
@@ -1176,6 +1315,229 @@ def history_contradiction(line, visits):
         if word in core:
             return word
     return None
+
+
+DAY_REF_RE = re.compile(r"(?<![0-9])([0-9]+)\s?일\s?전|어제|그저께|그제|엊그제|이틀\s?전|사흘\s?전|나흘\s?전|닷새\s?전|엿새\s?전|이레\s?전|일주일\s?전|열흘\s?전|오늘")
+DAY_WORDS = {"오늘": 0, "어제": 1, "그저께": 2, "그제": 2, "엊그제": 2, "이틀전": 2, "사흘전": 3, "나흘전": 4, "닷새전": 5, "엿새전": 6,
+             "이레전": 7, "일주일전": 7, "열흘전": 10}
+
+
+def day_refs(text, include_today=False):
+    """글에 나온 '며칠 전' 표현의 (표현, 날수). 오늘=0, 어제=1, 이틀 전=2, N일 전=N. include_today 가 False 면 '오늘'은 뺀다("오늘 밤"은 날짜가 아니다).
+    C# NpcLineChecks.DayRefs 와 같다."""
+    found = []
+    for m in DAY_REF_RE.finditer(text or ""):
+        days = int(m.group(1)) if m.group(1) else DAY_WORDS.get(re.sub(r"\s", "", m.group(0)), -1)
+        if days >= 0 and (include_today or days > 0):
+            found.append((m.group(0), days))
+    return found
+
+
+def recorded_days(scene):
+    """자료에 적힌 실제 날수: 마지막 관리, 방문한 날, 대화 기억, 상황 문장의 "N일 전". C# NpcOutputValidator.RecordedDays 와 같다."""
+    days = set()
+    last = fact_of(scene, "last_care_days_ago")
+    if last is not None and last.lstrip("-").isdigit():
+        days.add(int(last))
+    days |= {d for _, d in day_refs(fact_of(scene, "visit_days"), True)}
+    days |= {d for _, d in day_refs(scene.get("event"), True)}
+    days |= {m["daysAgo"] for m in scene.get("memory", [])}
+    return days
+
+
+def day_ref_contradiction(line, allowed):
+    """대사의 "어제"·"이틀 전"·"5일 전"이 자료의 실제 기록에 없으면 그 표현. C# NpcLineChecks.DayRefContradiction 과 같다."""
+    for text, days in day_refs(line):
+        if days not in allowed:
+            return text
+    return None
+
+
+# 시간대 낱말: 앞이 한글이면 낱말의 일부("지난밤", "한낮")라 뺀다. 뒤는 '이야·에·도·까지·처럼'이나 문장 부호·끝일 때만 ('낮잠', '밤바다', '낮은'은 아님)
+TIME_WORD_RE = re.compile(r"(?<![가-힣])(새벽|아침|저녁|낮|밤)(?=이야|이네|이라|이니|이지|이었|이구나|이다|에|엔|도|까지|부터|처럼|[\s.!?…~,]|$)")
+ALLOWED_TIME_WORDS = {"새벽": {"새벽", "밤"}, "아침": {"아침", "새벽"}, "오전": {"아침", "낮"}, "낮": {"낮"}, "저녁": {"저녁"}, "밤": {"밤", "저녁"}}
+
+
+def time_of_day(hour):
+    """서버 시각의 시간대: 새벽(0~5시) · 아침(5~9) · 오전(9~12) · 낮(12~17) · 저녁(17~21) · 밤(21~24). C# NpcContextBuilder.TimeOfDay 와 같다."""
+    return "새벽" if hour < 5 else "아침" if hour < 9 else "오전" if hour < 12 else "낮" if hour < 17 else "저녁" if hour < 21 else "밤"
+
+
+def time_contradiction(line, tod):
+    """지금 시간대와 어긋나는 시간대 낱말. 낮인데 "좋은 밤", 자료에 시간대가 없는데 "오늘 밤". 없으면 None. C# NpcLineChecks.TimeContradiction 과 같다."""
+    allowed = ALLOWED_TIME_WORDS.get((tod or "").strip(), set())
+    for m in TIME_WORD_RE.finditer(line or ""):
+        if m.group(1) not in allowed:
+            return m.group(1)
+    return None
+
+
+def address_contradiction(line, scene):
+    """호칭이 규칙과 다르면 그 말. 친밀하면 닉네임으로 부르고 '발굴자'는 쓰지 않으며, 아니면 '발굴자'로 부르고 닉네임은 쓰지 않는다.
+    둘 다 꼭 들어갈 필요는 없다. C# NpcLineChecks.AddressContradiction 과 같다."""
+    core = PUNCT_RE.sub("", line or "")
+    nickname = scene.get("nickname") or ""
+    use_nickname = bool(scene.get("familiar")) and bool(nickname)
+    if use_nickname and STRANGER in core:
+        return STRANGER
+    nick = PUNCT_RE.sub("", nickname)
+    if not use_nickname and nick and nick in core:
+        return nickname
+    return None
+
+
+PERSONA_COPY_MIN = 8  # 대사가 페르소나 설명문과 이만큼(글자) 넘게 같은 구절을 이으면 설명문을 옮긴 것 (C# NpcLineChecks.PersonaCopyMin)
+
+
+def persona_copy(line, persona):
+    """대사가 페르소나의 설명 칸(성격·상대를 대할 때·관리를 받으면·가치관·감정 표현·말투)이나 예시 대사를 옮겼으면 겹친 구절.
+    프롬프트에 실린 설명을 작은 모델이 대사로 읊었다(2026-11-13: "가장 친한 동료처럼 반긴다"). C# NpcLineChecks.CopiedFromPersona 와 같다."""
+    core = PUNCT_RE.sub("", line or "")
+    texts = [persona.get(key) or "" for key in ("toOwner", "toVisitor", "onCare", "values", "emotionStyle", "traits", "speechStyle")]
+    for other in (PUNCT_RE.sub("", t) for t in texts + list(persona.get("examples") or [])):
+        if len(core) < PERSONA_COPY_MIN or len(other) < PERSONA_COPY_MIN:
+            continue
+        shared = shared_run(core, other)
+        if len(shared) >= PERSONA_COPY_MIN:
+            return shared
+    return None
+
+
+def fix_own_possessive(line, own_things):
+    """자기 것(ownThings: 자개·옻칠·몸…)을 '네'라고 부르면 '내'로 고친다 ("네 자개는 반짝여" → "내 자개는 반짝여", "너의"→"나의").
+    주체를 바꾸지 않는다 — 밤바다가 자기 자개를 "네 자개"라고 했다(2026-11-13). 상대의 것("네 덕분에")은 고치지 않는다.
+    C# NpcLineChecks.FixOwnPossessive 와 같다."""
+    things = [t for t in (own_things or []) if t]
+    if not line or not things:
+        return line
+    rx = re.compile("(?<![가-힣])(네|니|너의)(\\s?)(" + "|".join(re.escape(t) for t in things) + ")")
+    return rx.sub(lambda m: ("나의" if m.group(1) == "너의" else "내") + m.group(2) + m.group(3), line)
+
+
+def _syllable(ch):
+    return 0xAC00 <= ord(ch) <= 0xD7A3
+
+
+def _medial(ch):
+    return ((ord(ch) - 0xAC00) // 28) % 21
+
+
+def _final(ch):
+    return (ord(ch) - 0xAC00) % 28
+
+
+LONE_JAMO_RE = re.compile("[ㄱ-ㅎㅏ-ㅣ]")
+DOUBLE_PARTICLES = ("을를", "를을", "를를", "을을", "은는", "는은", "에에서", "에서에서")
+# 자주 틀리는 철자 (바른 말: 됐·며칠·어떡해·왠지·금세·오랜만·바람·웬만·어이없). '만먹'은 '만드셨'의 높임을 잘못 고쳐 생긴 것이다
+MISSPELLED = ("됬", "몇일", "어떻해", "웬지", "금새", "오랫만", "바램", "왠만", "어의없", "설겆이", "않되", "만먹", "엇어", "엇다", "엇군", "엇네")
+
+
+def typo(line):
+    """대사의 오타. 있으면 그 글, 없으면 None. ① 자음·모음만 남은 글(ㅋㅋ) ② 모음 어긋남: 'ㅏ·ㅗ' 뒤에 '었'(쏟었군→쏟았군), 그 밖 모음 뒤에 '았'
+    ③ 'ㄹ께·ㄹ꺼·ㄹ껄'(할께→할게) ④ 겹조사(을를·은는) ⑤ 자주 틀리는 철자. 2026-11-13 시험: "정성을 쏟으셨군요"의 높임을 뺀 자리에 "쏟었군",
+    "만드셨는지"가 "만먹었는지"로 나왔다. C# NpcLineChecks.Typo 와 같다."""
+    if not line:
+        return None
+    jamo = LONE_JAMO_RE.search(line)
+    if jamo:
+        return f"자음·모음만 남음 '{jamo.group(0)}'"
+    for i in range(1, len(line)):
+        c, p = line[i], line[i - 1]
+        if not _syllable(p):
+            continue
+        if c == "었" and _final(p) != 20 and takes_a(p):
+            return p + "었"
+        if c == "았" and _final(p) != 20 and not takes_a(p):
+            return p + "았"
+        if c in "께꺼껄" and _final(p) == 8:
+            return p + c
+    # 띄어쓰기를 지우지 않고 본다 ("줄기는 은이나"의 '는 은'은 겹조사가 아니다)
+    for pair in DOUBLE_PARTICLES + MISSPELLED:
+        if pair in line:
+            return pair
+    return None
+
+
+DANGLING_CONNECTIVE_RE = re.compile("(서|며|면서|려고|도록|다가|지만|으나|니까|면)$")  # '~고'는 "됐고."처럼 문장을 끝내는 말로도 쓴다
+DANGLING_PARTICLE_RE = re.compile("(은|는|을|를|의)$")
+QUOTATIVE_RE = re.compile("(다고|라고|냐고|자고|다니까|라니까|자니까|냐니까)$")
+COMPLETE_WORDS = {"여기서", "거기서", "저기서", "어디서", "어서", "그리고", "그러니까", "그러면", "그럼", "아니면", "이러면", "그래서"}
+
+
+def incomplete_ending(line):
+    """마지막 문장이 끝맺지 못했으면 그 낱말, 아니면 None. 이어 주는 말(~서·~고·~며·~니까·~면…)이나 조사(~은·~는·~을·~를·~의)로 끝난 대사다
+    ("꼬리까지 깨끗하게 관리해 줘서"). 끝의 '히힛!' 같은 의성어를 뗀 뒤에 보므로 그 앞이 끊긴 말이면 거른다. 인용("~다고")과 "여기서"·"어서" 같은
+    낱말은 끝맺은 것으로 본다. C# NpcLineChecks.IncompleteEnding 과 같다."""
+    sentences = sentences_of(line)
+    if not sentences:
+        return None
+    word = VOCATIVE_RE.sub("", TRAILING_RE.sub("", sentences[-1])).split(" ")[-1]
+    if len(word) < 2 or word in COMPLETE_WORDS or QUOTATIVE_RE.search(word):
+        return None
+    if DANGLING_CONNECTIVE_RE.search(word) or DANGLING_PARTICLE_RE.search(word):
+        return word
+    # 문장 부호 없이 '기분이'·'내가'로 끝나면 뒤가 잘린 것이다 (끝의 "히히!"를 떼고 남은 말, 2026-11-13 시험: "…예뻐 보여서 기분이")
+    terminated = bool(re.search("[.!?…~。]$", sentences[-1].rstrip()))
+    return word if not terminated and re.search("(이|가|도|에|로|와|과|랑)$", word) else None
+
+
+# 흐려지거나 재봉인된 안부에서는 닦아 달라는 부탁을 꼭 한다 ("조금 흐려졌어. 마지막 관리는 9일 전이었어."로 끝나면 부탁이 빠진 것, 2026-11-14 시험 S03 #3)
+ASK_WORDS_RE = re.compile("닦(?!아 ?(줘서|준))|깨워(?! ?(줘서|준))|깨우|부탁|도와|손길|봐 ?줘|살펴|돌봐|씻|문질|관리해 ?(줘|줄|주|달)|관리 ?좀")
+
+
+def has_ask(line):
+    """대사에 부탁(닦아·관리·깨워·부탁·도와…)이 들어 있는지. C# NpcLineChecks.HasAsk 와 같다."""
+    return bool(line) and ASK_WORDS_RE.search(line) is not None
+
+
+def needs_ask(scene):
+    """안부 답하기에서 선명도가 흐려짐·재봉인이면 부탁이 있어야 한다. C# NpcLineChecks.NeedsAsk 와 같다."""
+    return (any(c["action"] == "answer_status" for c in scene["candidates"])
+            and fact_of(scene, "clarity") in UNCARED_CLARITY)
+
+
+STARTER_COMMA_RE = re.compile(r"^(덕분에|이제|한결|역시|요즘|조금|몸이|기분이),\s*")
+
+
+def long_absence_contradiction(line, visit_days):
+    """방문 기록에 최근 방문(오늘 말고)이 7일 안에 있으면 "오랜만"·"오래간만"은 어긋난다 (3일 전에도 온 친구에게 "오랜만이야", 2026-11-13 시험 S06).
+    visit_days 는 visit_days 사실("오늘, 3일 전, 9일 전"). C# NpcLineChecks.LongAbsenceContradiction 과 같다."""
+    gaps = [d for _, d in day_refs(visit_days, True) if d > 0]
+    if not gaps or min(gaps) >= 7:
+        return None
+    core = PUNCT_RE.sub("", line or "")
+    return next((w for w in ("오랜만", "오래간만", "오랫만") if w in core), None)
+
+
+def no_record_contradiction(line, situation):
+    """기록이 없는데 있는 척하는 낱말. 주인 장면에서 대화 기억도 마지막 관리 사실도 없으면 '오랜만'·'또 왔'·'다시 만나' 같은 말은 지어낸 것이다
+    (2026-11-13 실기기: 말발굽 탭 인사 S01 에서 "오랜만이야"를 두 번). 상황 문장에 그 낱말이 있으면 근거가 있어 걸지 않는다.
+    손님 장면은 방문 횟수로 보는 history_contradiction 이 맡는다. C# NpcLineChecks.NoRecordContradiction 과 같다. 없으면 None."""
+    core = PUNCT_RE.sub("", line or "")
+    basis = PUNCT_RE.sub("", situation or "")
+    for word in FIRST_ONLY_WORDS:
+        if word in core and word not in basis:
+            return word
+    return None
+
+
+def has_record(scene):
+    """주인 장면에 대화 기억이나 마지막 관리 사실이 있는지. C# NpcOutputValidator 의 hasRecord 와 같다."""
+    return bool(scene.get("memory")) or fact_of(scene, "last_care_days_ago") is not None or fact_of(scene, "visit_days") is not None
+
+
+# 대사가 상황 문장을 그대로 옮겼는지 보는 기준 글자 수 (C# NpcLineChecks.SituationCopyMin). 실기기에서 "주인이 너를 탭했다. 화면이 너에게
+# 가까이 다가왔다." 같은 상황 설명문이 대사에 섞여 나왔다(2026-11-13). 안부의 기억 요약("암행어사 이야기를")처럼 꼭 쓸 낱말은 이보다 짧다
+SITUATION_COPY_MIN = 10
+
+
+def situation_copy(line, situation):
+    """상황 문장과 SITUATION_COPY_MIN 글자 넘게 같은 구절이 이어지면 그 구절, 아니면 None. 띄어쓰기·문장 부호는 뺀다. C# NpcLineChecks.CopiedFromSituation 과 같다."""
+    a, b = PUNCT_RE.sub("", line or ""), PUNCT_RE.sub("", situation or "")
+    if len(a) < SITUATION_COPY_MIN or len(b) < SITUATION_COPY_MIN:
+        return None
+    shared = shared_run(a, b)
+    return shared if len(shared) >= SITUATION_COPY_MIN else None
 
 
 def scene_visits(scene):
@@ -1209,9 +1571,41 @@ def game_problem(row, persona, recent, scene=None):
         return "길이 초과"
     if not row.get("bad_ok"):
         return f"금칙어 {row['bad_hits']}"
-    contradiction = history_contradiction(line, scene_visits(scene))
+    if not row.get("foreign_ok", True):
+        return f"영문·가나·한자가 섞임 '{line}'"
+    if scene is not None and needs_ask(scene) and not has_ask(line):
+        return f"닦아 달라는 부탁이 없다 '{line}'"
+    wrong_spelling = typo(line)
+    if wrong_spelling:
+        return f"오타 '{wrong_spelling}'"
+    dangling = incomplete_ending(line)
+    if dangling:
+        return f"문장이 끝나지 않음 '{dangling}'"
+    if scene is not None and scene.get("input") == "visit":
+        contradiction = history_contradiction(line, scene_visits(scene)) or long_absence_contradiction(line, fact_of(scene, "visit_days"))
+    elif scene is not None and not has_record(scene):
+        # 주인 장면: 대화 기억도 마지막 관리 사실도 없는데 '오랜만'이라고 하면 지어낸 말이다
+        contradiction = no_record_contradiction(line, scene.get("event"))
+    else:
+        contradiction = None
+    if not contradiction and scene is not None:
+        # "이틀 전"·"어제"·"5일 전"은 자료(마지막 관리·방문한 날·기억·상황 문장)의 실제 기록에 있는 날일 때만 말한다
+        contradiction = day_ref_contradiction(line, recorded_days(scene))
     if contradiction:
-        return f"방문 기록과 어긋남 '{contradiction}'"
+        return f"기록과 어긋남 '{contradiction}'"
+    copied = situation_copy(line, scene.get("event")) if scene is not None else None
+    if copied:
+        return f"상황 문장을 옮김 '{copied}'"
+    if scene is not None:
+        wrong_time = time_contradiction(line, fact_of(scene, "time_of_day"))
+        if wrong_time:
+            return f"지금 시간대와 어긋남 '{wrong_time}' (지금 시간대: {fact_of(scene, 'time_of_day') or '알 수 없음'})"
+        wrong_address = address_contradiction(line, scene)
+        if wrong_address:
+            return f"호칭이 규칙과 다름 '{wrong_address}' (부를 이름: {address_name(scene)})"
+    persona_copied = persona_copy(line, persona)
+    if persona_copied:
+        return f"페르소나 설명문을 옮김 '{persona_copied}'"
     if self_name_hit(line, persona["name"]):
         return f"자기 이름 '{persona['name']}'"
     wrong = speech_mismatch(line, persona.get("endingHint"))
@@ -1244,7 +1638,7 @@ def evaluate(obj, scene, persona, limit, forbidden_groups, truncated=False, norm
     said = clean_line(obj.get("line", ""))
     # 게임처럼 검사 전에 흔한 어미를 그 도깨비 말투로 고친다 (--no-normalize 면 고치지 않는다)
     label = (persona.get("endingHint") or {}).get("label")
-    full_line = normalize_speech(said, label, persona["name"]) if normalize else said
+    full_line = normalize_speech(said, label, persona["name"], persona.get("ownThings"), scene.get("nickname"), fact_of(scene, "visit_days")) if normalize else said
     # 게임처럼 길면 앞 문장만 남긴다. 첫 문장부터 넘치면 그대로 두고 길이X 로 적는다
     fitted = fit_sentences(full_line, limit, truncated) if full_line else None
     line = fitted if fitted is not None else full_line
@@ -1423,6 +1817,9 @@ def run_enforced(args, content, model, variant, scene, persona, rep, seed, recen
             rejected.append(f"{attempt}차 {problem}")
         if error or problem is None or attempt == attempts:
             break
+        # 느린 기기를 흉내 낸다: 한 번 만드는 데 오래 걸렸으면 다시 만들지 않고 바로 기본 대사로 (--retry-within)
+        if args.retry_within and metrics and metrics.get("wall_ms", 0) > args.retry_within * 1000:
+            break
     row["attempts"] = attempt
     row["final"] = "SLM" if problem is None else "기본 대사"
     row["rejected"] = " / ".join(rejected)
@@ -1550,6 +1947,8 @@ def parse_args():
     p.add_argument("--variants", default=",".join(VARIANTS), help="돌릴 방식. 기본은 전부")
     p.add_argument("--scenes", default="", help="돌릴 장면 ID. 예: S01,S05. 기본은 전부")
     p.add_argument("--repeat", type=int, default=1, help="장면마다 반복 횟수")
+    p.add_argument("--retry-within", type=float, default=0,
+                   help="한 번 만드는 데 이 초보다 오래 걸렸으면 검사에 걸려도 다시 만들지 않는다 (게임의 SlmReactionGenerator.RetryOnlyWithin 은 1.5초). 0 이면 따지지 않는다")
     p.add_argument("--attempts", type=int, default=2,
                    help="출력 검사(자기 이름·어미 섞임·반복 등)에 걸리면 곁들일 거리를 바꿔 다시 만드는 횟수(처음 포함). "
                         "게임의 SlmReactionGenerator.MaxAttempts 와 같은 기본 2. 1 이면 다시 만들지 않는다")
@@ -1560,7 +1959,7 @@ def parse_args():
     p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--seed", type=int, default=None, help="고정하면 반복마다 seed+반복번호를 쓴다")
     # JSON 뼈대 약 20토큰 + 40자 대사 약 25토큰. 넘치면 끊긴 대사를 끝난 문장까지만 쓴다
-    p.add_argument("--num-predict", type=int, default=64, help="한 번에 생성할 최대 토큰")
+    p.add_argument("--num-predict", type=int, default=40, help="한 번에 생성할 최대 토큰 (게임의 LlmUnityOptions·LmStudioOptions.MaxTokens 와 같은 40)")
     p.add_argument("--line-chars", type=int, default=20, help="프롬프트에 적는 대사 길이 (장면의 lineChars 가 우선)")
     p.add_argument("--max-chars", type=int, default=40, help="길이OK 판정 기준 (장면의 maxChars 가 우선)")
     p.add_argument("--max-sentences", type=int, default=0,
@@ -1617,7 +2016,7 @@ def main():
 
     fixed = [s["id"] for s in scenes if is_fixed(s)]
     if fixed:
-        print(f"정해진 대사를 쓰는 장면(이야기 듣기)은 AI 를 부르지 않아 건너뛴다: {', '.join(fixed)}")
+        print(f"정해진 대사를 쓰는 장면(이야기 듣기)과 대사가 없는 장면(끌려갈 때)은 AI 를 부르지 않아 건너뛴다: {', '.join(fixed)}")
         scenes = [s for s in scenes if not is_fixed(s)]
 
     if args.dry_run:
@@ -1657,8 +2056,8 @@ def main():
                     for rep in range(1, args.repeat + 1):
                         done += 1
                         seed = None if args.seed is None else args.seed + rep - 1
-                        # 게임의 RecentLines 처럼 그 도깨비가 이 모델·방식에서 최근에 띄운 대사 (장면이 달라도 같은 도깨비면 함께)
-                        key = (model, variant, scene["relicId"])
+                        # 게임의 RecentLines 처럼 그 시나리오(같은 도깨비의 같은 선택지)가 이 모델·방식에서 최근에 띄운 대사 10개
+                        key = (model, variant, scene["relicId"], scene["input"])
                         row = run_enforced(args, content, model, variant, scene, persona, rep, seed, recent[key])
                         # 게임처럼 화면에 띄운 대사는 기본 대사여도 기억한다 (NpcRequestManager.RecentLinesOf)
                         if row["shown_line"]:

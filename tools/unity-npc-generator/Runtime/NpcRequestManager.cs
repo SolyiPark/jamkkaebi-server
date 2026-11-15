@@ -46,6 +46,9 @@ namespace Jamkkaebi.Npc
     ///
     /// <para><b>정해진 대사를 쓰는 경우</b>: 이야기 듣기는 SLM 을 부르지 않고 검수한 이야기 대사를 차례로 쓴다 (Note 가 FixedLinesNote).</para>
     ///
+    /// <para><b>대사 없이 몸짓만 하는 경우</b>: 끌려갈 때(struggle_*)는 SLM 을 부르지 않고, 행동만 고른 반응을 돌려준다 (Note 가 SilentNote).
+    /// <c>Reaction.Line</c> 이 빈 글이면 말풍선 없이 그 행동의 애니메이션만 재생한다.</para>
+    ///
     /// <para><b>기본 대사로 대신하는 경우</b>: SLM 을 끈 기기(저사양), 모델을 아직 안 받았거나 안 올라옴, 시간 초과,
     /// 출력 검사 실패, 페르소나 없는 도깨비, 런타임 오류. 앞의 둘은 SLM 을 부르지도 않는다.</para>
     ///
@@ -55,7 +58,7 @@ namespace Jamkkaebi.Npc
     /// <para><b>아무것도 띄우지 않는 경우</b>: 부르는 쪽이 취소함(화면 종료), Cancel(relicId)(NPC 전환), CancelAll,
     /// 같은 도깨비에게 새 요청이 와서 옛 요청이 밀림, 후보가 없음. 늦게 끝난 옛 요청의 결과는 버린다.</para>
     ///
-    /// <para><b>같은 대사 막기</b>: 도깨비마다 이번 실행에서 띄운 대사 RecentLineCount 개를 기억해 요청의 RecentLines 에 넣는다.
+    /// <para><b>같은 대사 막기</b>: 시나리오(같은 도깨비의 같은 선택지)마다 이번 실행에서 띄운 대사 RecentLineCount(10)개를 기억해 요청의 RecentLines 에 넣는다.
     /// 출력 검사기는 그와 같은 대사를 거르고(SLM 생성기가 다시 만든다), 기본 대사도 그와 다른 것을 고른다.</para>
     ///
     /// <para>도깨비(relicId)마다 진행 중인 요청을 하나만 둔다. 손님 관람처럼 여러 도깨비가 동시에 말풍선을 띄우는 것은 된다.
@@ -66,13 +69,27 @@ namespace Jamkkaebi.Npc
         /// <summary>정해진 대사(이야기)를 띄웠을 때의 Note. SLM 을 부르지 않았다.</summary>
         public const string FixedLinesNote = "이야기는 정해진 대사";
 
+        /// <summary>대사 없이 몸짓만 한 경우(끌려갈 때)의 Note. SLM 을 부르지 않았고 Reaction.Line 은 빈 글이다 — 말풍선을 띄우지 않는다.</summary>
+        public const string SilentNote = "끌려갈 때는 대사 없음";
+
+        /// <summary>미리 만들어 둔 대사를 꺼내 쓴 경우의 Note. 그 요청에서는 SLM 을 부르지 않았다 (응답이 바로 뜬다).</summary>
+        public const string PrefetchedNote = "미리 만든 대사";
+
         private readonly INpcReactionGenerator slm;
         private readonly INpcReactionGenerator rule;
         private readonly object gate = new object();
         private readonly Dictionary<int, Session> sessions = new Dictionary<int, Session>();
 
-        // 도깨비마다 최근에 띄운 대사 (오래된 것부터)
-        private readonly Dictionary<int, List<string>> shown = new Dictionary<int, List<string>>();
+        // 시나리오(도깨비 + 선택지)마다 최근에 띄운 대사 (오래된 것부터). 같은 도깨비의 같은 상황에서 같은 말이 거듭되는 것을 막으려는 것이라
+        // 관리하기 대사는 관리하기 대사끼리만 비교한다
+        private readonly Dictionary<string, List<string>> shown = new Dictionary<string, List<string>>();
+
+        // 미리 만들기: 보관함, 할 일 줄, 일꾼, 진행 중인 요청 수
+        private readonly Queue<PrefetchJob> prefetchJobs = new Queue<PrefetchJob>();
+        private CancellationTokenSource prefetchCts;
+        private Task prefetchWorker = Task.FromResult(true);
+        private bool prefetchRunning;
+        private int activeRequests;
 
         // 진행 중인 시스템 프롬프트 미리 읽기. 모델은 하나라 한 번에 하나만 둔다
         private Session preparing;
@@ -89,11 +106,48 @@ namespace Jamkkaebi.Npc
             this.slm = slm;
             this.rule = rule;
             SlmEnabled = slm != null;
-            SlmTimeout = TimeSpan.FromSeconds(3);
-            RecentLineCount = 5;
+            SlmTimeout = TimeSpan.FromSeconds(4);
+            RecentLineCount = 10;
+            Cache = new NpcLineCache();
+            UsePrefetched = true;
+            PrefetchTimeout = TimeSpan.FromSeconds(30);
         }
 
-        /// <summary>도깨비마다 기억해 두고 다시 쓰지 않을 최근 대사 수. 기본 5. 0 이면 기억하지 않는다.</summary>
+        /// <summary>미리 만들어 둔 대사 보관함 (Prefetch 가 채우고 요청이 꺼내 쓴다).</summary>
+        public NpcLineCache Cache { get; private set; }
+
+        /// <summary>미리 만들어 둔 대사가 있으면 SLM 을 부르지 않고 바로 꺼내 쓰는지. 기본 true.</summary>
+        public bool UsePrefetched { get; set; }
+
+        /// <summary>미리 만들 때 한 번 만드는 데 기다리는 최대 시간. 기본 30초 — 사용자가 기다리지 않는 시간이라 요청 때(SlmTimeout)보다 넉넉하다.</summary>
+        public TimeSpan PrefetchTimeout { get; set; }
+
+        /// <summary>
+        /// 지금 진행 중인 미리 만들기가 끝날 때까지 기다리는 작업 (할 일이 없으면 이미 끝난 작업). 시험과 화면 종료에서 쓴다.
+        /// </summary>
+        public Task PrefetchCompletion
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return prefetchWorker;
+                }
+            }
+        }
+
+        private sealed class PrefetchJob
+        {
+            public ReactionRequest Template;
+            public int Count;
+            public int NextVariation;
+            public int Failures;
+        }
+
+        /// <summary>
+        /// 시나리오(같은 도깨비의 같은 선택지)마다 기억해 두고 다시 쓰지 않을 최근 대사 수. 기본 10 — 최근 10개 중 하나와 80% 넘게 겹치면
+        /// 출력 검사가 거르고 SLM 생성기가 새로 만든다. 0 이면 기억하지 않는다.
+        /// </summary>
         public int RecentLineCount { get; set; }
 
         /// <summary>
@@ -102,7 +156,7 @@ namespace Jamkkaebi.Npc
         public bool SlmEnabled { get; set; }
 
         /// <summary>
-        /// SLM 을 기다리는 시간. 넘으면 기본 대사로 대신한다. 기본 3초이고, 실기기의 첫 응답·전체 생성 시간을 재서 정한다.
+        /// SLM 을 기다리는 시간. 넘으면 기본 대사로 대신한다. 기본 4초이고, 실기기의 첫 응답·전체 생성 시간을 재서 정한다.
         /// 모델 런타임이 취소에 늦게 반응해도 이 시간이 지나면 기다리지 않는다.
         /// </summary>
         public TimeSpan SlmTimeout { get; set; }
@@ -131,6 +185,9 @@ namespace Jamkkaebi.Npc
                 request.InteractionId = NewId();
             }
 
+            // 진행 중인 요청이 있는 동안에는 미리 만들기를 멈춘다 (모델은 하나라 요청이 먼저다). 만들던 것은 취소하고 요청이 끝나면 이어 만든다
+            Interlocked.Increment(ref activeRequests);
+            CancelCurrentPrefetch();
             Session session = Begin(request.RelicId, ct);
             try
             {
@@ -140,12 +197,30 @@ namespace Jamkkaebi.Npc
                 }
                 AttachRecent(request);
 
+                // 0) 미리 만들어 둔 대사가 있으면 바로 꺼내 쓴다 (같은 상황에서 만든 것, 최근 대사와 90% 넘게 겹치지 않는 것)
+                if (UsePrefetched && !NpcActions.SkipsModel(request.Candidates))
+                {
+                    ReactionResult ready = Cache.TryTake(request, request.RecentLines);
+                    if (ready != null)
+                    {
+                        request.RequestId = NewId();
+                        ReactionResult served = ReactionResult.Success(request.RequestId, ready.ActionId, ready.TargetId, ready.Line, ReactionSource.Slm,
+                                ready.Note);
+                        Remember(request, served.Line);
+                        return NpcResponse.Show(served, null, PrefetchedNote);
+                    }
+                }
+
                 // 1) SLM
                 ReactionResult slmAttempt = null;
                 string fallbackNote;
                 if (NpcActions.OnlyFixedLines(request.Candidates))
                 {
                     fallbackNote = FixedLinesNote;
+                }
+                else if (NpcActions.OnlySilent(request.Candidates))
+                {
+                    fallbackNote = SilentNote;
                 }
                 else if (!SlmEnabled || slm == null)
                 {
@@ -164,7 +239,7 @@ namespace Jamkkaebi.Npc
                     }
                     if (!session.TimedOut && slmAttempt.IsSuccess && slmAttempt.RequestId == request.RequestId)
                     {
-                        Remember(request.RelicId, slmAttempt.Line);
+                        Remember(request, slmAttempt.Line);
                         return NpcResponse.Show(slmAttempt, slmAttempt, slmAttempt.Note != null ? "SLM (" + slmAttempt.Note + ")" : "SLM");
                     }
                     fallbackNote = session.TimedOut
@@ -190,7 +265,7 @@ namespace Jamkkaebi.Npc
                 }
                 if (fallback.IsSuccess && fallback.RequestId == request.RequestId)
                 {
-                    Remember(request.RelicId, fallback.Line);
+                    Remember(request, fallback.Line);
                     return NpcResponse.Show(fallback, slmAttempt, fallbackNote);
                 }
                 return NpcResponse.Discard(slmAttempt, "기본 대사도 실패 " + fallback.FailReason + " (" + fallbackNote + ")");
@@ -198,16 +273,234 @@ namespace Jamkkaebi.Npc
             finally
             {
                 End(request.RelicId, session);
+                Interlocked.Decrement(ref activeRequests);
             }
         }
 
-        // 이 도깨비의 최근 대사를 요청에 넣는다. 게임이 미리 넣어 둔 것은 그대로 두고 뒤에 붙인다
+        // ---------- 미리 만들기 ----------
+
+        /// <summary>
+        /// 이 상황의 대사를 count 개 미리 만들어 보관함(Cache)에 둔다 — 백그라운드로, 기다리지 않는다. 요청이 오면 바로 꺼내 쓰므로 기기가 느려도 응답이 바로 뜬다.
+        /// template 은 요청과 같은 모양이어야 한다 (NpcContextBuilder.PrefetchRequests 가 만든다: 탭 인사·안부·관리 감사·손님 관람).
+        /// 한가할 때(진행 중인 요청이 없을 때)만 만들고, 요청이 오면 멈췄다가 끝난 뒤 이어 만든다. 만든 대사는 서로, 그리고 이미 띄운 최근 대사와
+        /// 90% 넘게 겹치지 않아야 보관한다(NpcLineChecks.Similar). SLM 을 쓰지 않거나 이야기·끌려갈 때처럼 모델을 안 쓰는 요청이면 아무것도 하지 않는다.
+        /// </summary>
+        public void Prefetch(ReactionRequest template, int count)
+        {
+            if (template == null || count <= 0 || !SlmEnabled || slm == null || template.Candidates == null || template.Candidates.Count == 0
+                    || NpcActions.SkipsModel(template.Candidates))
+            {
+                return;
+            }
+            lock (gate)
+            {
+                // 같은 상황이 이미 줄에 있으면 더하지 않는다
+                string key = NpcLineCache.KeyOf(template);
+                foreach (PrefetchJob queued in prefetchJobs)
+                {
+                    if (NpcLineCache.KeyOf(queued.Template) == key)
+                    {
+                        queued.Count = Math.Max(queued.Count, count);
+                        return;
+                    }
+                }
+                prefetchJobs.Enqueue(new PrefetchJob { Template = template, Count = Math.Min(count, Math.Max(1, Cache.MaxPerKey)), NextVariation = template.Variation });
+                if (!prefetchRunning)
+                {
+                    prefetchRunning = true;
+                    prefetchWorker = RunPrefetchWorker();
+                }
+            }
+        }
+
+        /// <summary>줄에 있는 미리 만들기를 모두 버리고 진행 중인 것을 취소한다 (화면 종료·NPC 전환). 보관함의 대사는 그대로 둔다.</summary>
+        public void CancelPrefetch()
+        {
+            lock (gate)
+            {
+                prefetchJobs.Clear();
+            }
+            CancelCurrentPrefetch();
+        }
+
+        private void CancelCurrentPrefetch()
+        {
+            CancellationTokenSource running;
+            lock (gate)
+            {
+                running = prefetchCts;
+            }
+            if (running != null)
+            {
+                try
+                {
+                    running.Cancel();
+                }
+                catch (ObjectDisposedException)
+                {
+                    // 이미 끝난 생성
+                }
+            }
+        }
+
+        private async Task RunPrefetchWorker()
+        {
+            try
+            {
+                while (true)
+                {
+                    PrefetchJob job;
+                    lock (gate)
+                    {
+                        if (prefetchJobs.Count == 0)
+                        {
+                            prefetchRunning = false;
+                            return;
+                        }
+                        job = prefetchJobs.Peek();
+                    }
+                    // 요청이 진행 중이거나 모델이 아직 안 올라왔으면 기다린다
+                    while (Volatile.Read(ref activeRequests) > 0 || slm == null || !slm.IsReady)
+                    {
+                        if (!SlmEnabled || slm == null)
+                        {
+                            CancelPrefetch();
+                            lock (gate)
+                            {
+                                prefetchRunning = false;
+                            }
+                            return;
+                        }
+                        lock (gate)
+                        {
+                            if (prefetchJobs.Count == 0)
+                            {
+                                prefetchRunning = false;
+                                return;
+                            }
+                        }
+                        await Task.Delay(25).ConfigureAwait(false);
+                    }
+                    bool finished = await RunPrefetchJob(job).ConfigureAwait(false);
+                    if (finished)
+                    {
+                        lock (gate)
+                        {
+                            if (prefetchJobs.Count > 0 && prefetchJobs.Peek() == job)
+                            {
+                                prefetchJobs.Dequeue();
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // 미리 만들기는 덤이다. 예외가 나도 요청 처리에는 영향이 없고, 다음 Prefetch 가 새로 시작한다
+                lock (gate)
+                {
+                    prefetchRunning = false;
+                }
+            }
+        }
+
+        // 한 상황의 대사를 목표 수만큼 만든다. 요청 때문에 취소되면 false(나중에 이어 만든다), 다 만들었거나 포기했으면 true
+        private async Task<bool> RunPrefetchJob(PrefetchJob job)
+        {
+            while (Cache.Count(job.Template) < job.Count && job.Failures < 3)
+            {
+                if (Volatile.Read(ref activeRequests) > 0)
+                {
+                    return false;
+                }
+                ReactionRequest request = CopyForPrefetch(job);
+                using (var cts = new CancellationTokenSource())
+                {
+                    lock (gate)
+                    {
+                        prefetchCts = cts;
+                    }
+                    cts.CancelAfter(PrefetchTimeout);
+                    if (Volatile.Read(ref activeRequests) > 0)
+                    {
+                        cts.Cancel();
+                    }
+                    ReactionResult result;
+                    try
+                    {
+                        result = await slm.GenerateAsync(request, cts.Token).ConfigureAwait(false);
+                    }
+                    catch (Exception)
+                    {
+                        result = ReactionResult.Failed(request.RequestId, FailReason.Error, ReactionSource.Slm);
+                    }
+                    lock (gate)
+                    {
+                        prefetchCts = null;
+                    }
+                    if (result.FailReason == FailReason.Cancelled)
+                    {
+                        // 요청이 왔거나(다시 이어 만든다) 시간이 넘었다
+                        if (Volatile.Read(ref activeRequests) > 0)
+                        {
+                            return false;
+                        }
+                        job.Failures++;
+                        continue;
+                    }
+                    if (!result.IsSuccess || !Cache.Add(job.Template, result))
+                    {
+                        // 검사에 걸렸거나 보관한 대사·최근 대사와 90% 넘게 겹침 → 다음 곁들일 거리·첫 낱말로 다시
+                        job.Failures++;
+                    }
+                }
+            }
+            return true;
+        }
+
+        // 미리 만들 요청: 템플릿을 베끼고 곁들일 거리 번호를 바꾼다. 이미 보관한 대사와 그 시나리오의 최근 대사를 RecentLines 로 넣어
+        // 출력 검사가 90% 넘게 겹치는 대사를 거르게 한다 (프롬프트에는 싣지 않는다)
+        private ReactionRequest CopyForPrefetch(PrefetchJob job)
+        {
+            ReactionRequest t = job.Template;
+            var copy = new ReactionRequest
+            {
+                RequestId = NewId(),
+                InteractionId = t.InteractionId,
+                RelicId = t.RelicId,
+                Mode = t.Mode,
+                Input = t.Input,
+                Situation = t.Situation,
+                Candidates = t.Candidates,
+                Facts = t.Facts,
+                Memory = t.Memory,
+                ContentVersion = t.ContentVersion,
+                Variation = job.NextVariation++,
+                Nickname = t.Nickname,
+                Familiar = t.Familiar,
+                RecentLines = new List<string>()
+            };
+            if (t.RecentLines != null)
+            {
+                copy.RecentLines.AddRange(t.RecentLines);
+            }
+            copy.RecentLines.AddRange(RecentLinesOf(t.RelicId, t.Input));
+            copy.RecentLines.AddRange(Cache.LinesFor(t));
+            return copy;
+        }
+
+        private static string ScenarioKey(int relicId, string input)
+        {
+            return relicId + ":" + (input ?? "");
+        }
+
+        // 이 시나리오(도깨비 + 선택지)의 최근 대사를 요청에 넣는다. 게임이 미리 넣어 둔 것은 그대로 두고 뒤에 붙인다
         private void AttachRecent(ReactionRequest request)
         {
             List<string> lines;
             lock (gate)
             {
-                lines = shown.TryGetValue(request.RelicId, out lines) ? new List<string>(lines) : new List<string>();
+                lines = shown.TryGetValue(ScenarioKey(request.RelicId, request.Input), out lines) ? new List<string>(lines) : new List<string>();
             }
             if (request.RecentLines == null)
             {
@@ -222,7 +515,7 @@ namespace Jamkkaebi.Npc
             }
         }
 
-        private void Remember(int relicId, string line)
+        private void Remember(ReactionRequest request, string line)
         {
             if (RecentLineCount <= 0 || string.IsNullOrEmpty(line))
             {
@@ -230,11 +523,12 @@ namespace Jamkkaebi.Npc
             }
             lock (gate)
             {
+                string key = ScenarioKey(request.RelicId, request.Input);
                 List<string> lines;
-                if (!shown.TryGetValue(relicId, out lines))
+                if (!shown.TryGetValue(key, out lines))
                 {
                     lines = new List<string>();
-                    shown[relicId] = lines;
+                    shown[key] = lines;
                 }
                 lines.Remove(line);
                 lines.Add(line);
@@ -245,13 +539,30 @@ namespace Jamkkaebi.Npc
             }
         }
 
-        /// <summary>도깨비마다 기억해 둔 최근 대사 (오래된 것부터). 게임이 저장해 두었다가 다음 실행에 RecentLines 로 넘길 때 쓴다.</summary>
+        /// <summary>그 도깨비가 모든 선택지에서 띄운 최근 대사. 게임이 저장해 두었다가 다음 실행에 RecentLines 로 넘길 때 쓴다 (선택지마다 이어 붙인다).</summary>
         public List<string> RecentLinesOf(int relicId)
+        {
+            var all = new List<string>();
+            lock (gate)
+            {
+                foreach (KeyValuePair<string, List<string>> entry in shown)
+                {
+                    if (entry.Key.StartsWith(relicId + ":", StringComparison.Ordinal))
+                    {
+                        all.AddRange(entry.Value);
+                    }
+                }
+            }
+            return all;
+        }
+
+        /// <summary>그 도깨비가 그 선택지(시나리오)에서 띄운 최근 대사 (오래된 것부터).</summary>
+        public List<string> RecentLinesOf(int relicId, string input)
         {
             lock (gate)
             {
                 List<string> lines;
-                return shown.TryGetValue(relicId, out lines) ? new List<string>(lines) : new List<string>();
+                return shown.TryGetValue(ScenarioKey(relicId, input), out lines) ? new List<string>(lines) : new List<string>();
             }
         }
 

@@ -216,7 +216,7 @@ namespace Jamkkaebi.Npc
 
                     // 게임에서 탭해 확대할 때처럼 시스템 프롬프트를 먼저 읽힌다. 같은 도깨비가 이어지면 바로 끝난다
                     long prepareMs = -1;
-                    if (prepareSystemPrompt && slm != null && slm.IsReady && !NpcActions.OnlyFixedLines(request.Candidates))
+                    if (prepareSystemPrompt && slm != null && slm.IsReady && !NpcActions.SkipsModel(request.Candidates))
                     {
                         Stopwatch preparing = Stopwatch.StartNew();
                         await manager.PrepareAsync(scene.RelicId, ct);
@@ -230,9 +230,10 @@ namespace Jamkkaebi.Npc
 
                     long memory = MemoryMb();
                     peak = Math.Max(peak, memory);
-                    bool isFixed = response.Note == NpcRequestManager.FixedLinesNote;
+                    bool isSilent = response.Note == NpcRequestManager.SilentNote;
+                    bool isFixed = response.Note == NpcRequestManager.FixedLinesNote || isSilent;
                     bool fromSlm = response.ShouldShow && !response.UsedFallback;
-                    string source = !response.ShouldShow ? "없음" : (fromSlm ? "SLM" : (isFixed ? "정해진" : "기본"));
+                    string source = !response.ShouldShow ? "없음" : (fromSlm ? "SLM" : (isSilent ? "대사없음" : (isFixed ? "정해진" : "기본")));
                     string action = response.ShouldShow ? response.Reaction.ActionId : "";
                     string line = response.ShouldShow ? response.Reaction.Line : "";
                     bool expected = scene.Expected.Contains(action);

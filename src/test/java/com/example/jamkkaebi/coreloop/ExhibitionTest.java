@@ -98,6 +98,17 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
+    @DisplayName("서버 시각(now)과 내 닉네임을 함께 내린다 — 도깨비가 탭 인사에서 시간대를 말하고 나를 부르는 데 쓴다")
+    void 서버_시각과_닉네임() throws Exception {
+        Player player = player("신입");
+
+        clock.set(LocalDateTime.of(2026, 9, 12, 21, 30));
+        get(player, "/api/exhibition")
+                .andExpect(jsonPath("$.data.now").value(org.hamcrest.Matchers.startsWith("2026-09-12T21:30")))
+                .andExpect(jsonPath("$.data.nickname").value("신입"));
+    }
+
+    @Test
     @DisplayName("정령 수호까지 마친 도깨비와 받은 건물만 담기고, 배치 전에는 좌표 키가 없다")
     void 조회() throws Exception {
         Player player = player("학예사");

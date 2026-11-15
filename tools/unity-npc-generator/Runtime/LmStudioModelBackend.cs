@@ -17,7 +17,7 @@ namespace Jamkkaebi.Npc
             BaseUrl = "http://127.0.0.1:1234";
             Model = "google/gemma-4-e2b";
             Temperature = 0.7;
-            MaxTokens = 64;
+            MaxTokens = 40;
             UseJsonSchema = true;
             DisableThinking = true;
             SystemInUser = false;

@@ -1,5 +1,6 @@
 #if UNITY_5_3_OR_NEWER && JAMKKAEBI_LLMUNITY
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using LLMUnity;
 using UnityEngine;
@@ -122,7 +123,7 @@ namespace Jamkkaebi.Npc
             return new Session(holder, agent);
         }
 
-        private sealed class Session : ILlmUnitySession
+        private sealed class Session : ILlmUnitySession, ILlmUnityStateStore
         {
             private readonly GameObject holder;
             private readonly LLMAgent agent;
@@ -154,6 +155,67 @@ namespace Jamkkaebi.Npc
                     }
                 };
                 return await agent.Chat(user, partial, null, false);
+            }
+
+            // ---------- 시스템 메시지 기억(KV 캐시) 저장·복원 ----------
+            // LLMUnity 의 LLMAgent.Save / Load(이름) 으로 대화 기록과 llama.cpp 슬롯의 캐시를 파일로 남기고 되살린다 (파일은
+            // Application.persistentDataPath). 앱 버전이 바뀌면 내장 llama.cpp 도 바뀌었을 수 있어 이름에 앱 버전을 붙여 옛 기억을 쓰지 않는다.
+            // 저장 여부는 PlayerPrefs 표시로 알아, 없는 파일을 읽으려 하지 않는다.
+            // 이 API 이름이 LLMUnity 버전에 따라 달라 컴파일이 안 되면, Scripting Define Symbols 에 JAMKKAEBI_NO_KVSTATE 를 넣어 끄고
+            // 아래 두 메서드만 고친다 (끄면 항상 false 라서 백엔드는 그냥 시스템 메시지를 읽는다).
+
+            private static string FileName(string key)
+            {
+                return key + "-" + new string(Application.version.Where(char.IsLetterOrDigit).ToArray());
+            }
+
+            private static string Marker(string name)
+            {
+                return "jamkkaebi.npc.kv." + name;
+            }
+
+            public async Task<bool> SaveStateAsync(string key)
+            {
+#if JAMKKAEBI_NO_KVSTATE
+                await Task.CompletedTask;
+                return false;
+#else
+                try
+                {
+                    string name = FileName(key);
+                    await agent.Save(name);
+                    PlayerPrefs.SetInt(Marker(name), 1);
+                    return true;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+#endif
+            }
+
+            public async Task<bool> LoadStateAsync(string key)
+            {
+#if JAMKKAEBI_NO_KVSTATE
+                await Task.CompletedTask;
+                return false;
+#else
+                string name = FileName(key);
+                if (PlayerPrefs.GetInt(Marker(name), 0) != 1)
+                {
+                    return false;
+                }
+                try
+                {
+                    await agent.Load(name);
+                    return true;
+                }
+                catch (Exception)
+                {
+                    PlayerPrefs.DeleteKey(Marker(name)); // 깨졌거나 모델이 달라 못 읽는 파일은 다시 만들게 한다
+                    return false;
+                }
+#endif
             }
 
             public void CancelRequests()
