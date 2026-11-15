@@ -37,7 +37,7 @@ public enum ErrorCode {
 
     // User
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "U001", "사용자를 찾을 수 없습니다."),
-    // 미획득과 정령 수호 전을 한 코드로 묶는다. 둘 다 할 일은 "그 도깨비를 끝까지 깨우기"로 같다.
+    // 미획득과 오염 관리 전을 한 코드로 묶는다. 둘 다 할 일은 "그 도깨비를 끝까지 깨우기"로 같다.
     SPIRIT_NOT_AWAKENED(HttpStatus.CONFLICT, "U002", "아직 깨우지 않은 도깨비는 아바타로 쓸 수 없습니다."),
 
     // Box — 일일 상자
@@ -51,12 +51,9 @@ public enum ErrorCode {
     NOT_ENOUGH_JEONGSEONG(HttpStatus.CONFLICT, "B003", "정성이 부족합니다."),
     BOX_PURCHASE_LIMIT_REACHED(HttpStatus.CONFLICT, "B004", "오늘은 더 이상 상자를 구매할 수 없습니다."),
 
-    // Workbench — 작업대 · 도깨비 성장
+    // Workbench — 작업대 · 도깨비
     RELIC_NOT_OWNED(HttpStatus.NOT_FOUND, "W001", "보유하지 않은 유물입니다."),
-    RELIC_NOT_COMPLETED(HttpStatus.CONFLICT, "W002", "정령 수호까지 마친 유물만 할 수 있습니다."),
-    GROWTH_GAUGE_NOT_FULL(HttpStatus.CONFLICT, "W003", "성장 게이지가 아직 가득 차지 않았습니다."),
-    AWAKENING_STAGE_MISMATCH(HttpStatus.CONFLICT, "W004",
-            "도깨비의 각성 단계가 바뀌었습니다. 새로고침 후 다시 시도해주세요."),
+    RELIC_NOT_COMPLETED(HttpStatus.CONFLICT, "W002", "오염 관리까지 마친 유물만 할 수 있습니다."),
 
     // Building — 건물 강화 (작업대)
     // 미지급과 없는 번호를 한 코드로 묶는다. 유물(W001)과 같은 규칙이다.
@@ -66,12 +63,13 @@ public enum ErrorCode {
             "건물 레벨이 바뀌었습니다. 새로고침 후 다시 시도해주세요."),
 
     // Exhibition — 전시관
-    // 정령 수호를 마치지 않은 유물과 받지 않은 건물을 한 코드로 묶는다. 클라이언트가 둘 수 있는 목록은
+    // 오염 관리를 마치지 않은 유물과 받지 않은 건물을 한 코드로 묶는다. 클라이언트가 둘 수 있는 목록은
     // 전시관 조회 응답에서 이미 알고 있어, 어긋났다면 새로고침이 해결책이라는 점이 같다.
     EXHIBIT_ITEM_NOT_PLACEABLE(HttpStatus.CONFLICT, "E001", "전시관에 둘 수 없는 항목이 있습니다."),
 
     // Purification — 유물 정화
-    DIFFICULTY_LOCKED(HttpStatus.CONFLICT, "P001", "아직 열리지 않은 난이도입니다."),
+    // 이번 판에 고를 수 없는 난이도. 최초 정화는 보통만, 흐려짐·재봉인은 쉬움을 고를 수 없다.
+    DIFFICULTY_NOT_ALLOWED(HttpStatus.CONFLICT, "P001", "지금은 고를 수 없는 난이도입니다."),
     // 없는 토큰·남의 토큰·만료·무효화를 한 코드로 묶는다. 나누면 남의 세션 토큰을 찍어 볼 수 있다.
     PURIFICATION_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "P002", "정화 세션이 없거나 만료되었습니다."),
     PURIFICATION_RESULT_REJECTED(HttpStatus.BAD_REQUEST, "P003", "정화 결과를 확인할 수 없습니다."),

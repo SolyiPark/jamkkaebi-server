@@ -1,6 +1,5 @@
 package com.example.jamkkaebi.purification.config;
 
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Difficulty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
@@ -21,7 +20,6 @@ import java.util.stream.Stream;
  * @param clearJeongseong    클리어 기본 정성. 난이도 배율을 곱한다
  * @param bonusTileJeongseong 정성 보너스 타일 1개당 정성
  * @param perfectBonusRate   완벽 정화 시 추가 정성 비율
- * @param growthGaugePerClear 관리 플레이 1회 클리어가 주는 성장 게이지
  * @param shapeSizeMin       목표 형상 하나의 최소 칸 수
  * @param shapeSizeMax       목표 형상 하나의 최대 칸 수
  * @param difficulties       난이도별 파라미터
@@ -34,25 +32,23 @@ public record PurificationProperties(
         Integer clearJeongseong,
         Integer bonusTileJeongseong,
         BigDecimal perfectBonusRate,
-        Integer growthGaugePerClear,
         Integer shapeSizeMin,
         Integer shapeSizeMax,
         Map<Difficulty, DifficultyParams> difficulties
 ) {
 
-    //  - 탭·위협: 위협 3개에 실패할 때 보통 플레이어 성공률이 약 100 · 84 · 71 · 49% 로 고르게 내려가도록 맞춘 값
-    //  - 강화: 2 · 2 · 3 · 4칸 중 절반은 형상 안에.
+    //  - 탭·위협: 위협 3개에 실패할 때 보통 플레이어 성공률이 약 84 · 71 · 49% 로 고르게 내려가도록 맞춘 값
+    //  - 강화: 2 · 3 · 4칸 중 절반은 형상 안에.
     //  - 도움 1칸 (어려움만 2칸)
-    //  - 보너스: 정성 타일만 1 · 1 · 2 · 3칸
+    //  - 보너스: 정성 타일만 1 · 2 · 3칸
+    //  - 난이도는 선명도로만 제한한다(RestorePolicy). 해금 조건은 없다.
     private static final Map<Difficulty, DifficultyParams> DEFAULT_DIFFICULTIES = Map.of(
-            Difficulty.VERY_EASY, new DifficultyParams(
-                    5, 6, 2, 1, 1, 1, 1, 2, 7, 12, 3, new BigDecimal("0.8"), null),
             Difficulty.EASY, new DifficultyParams(
-                    6, 7, 4, 1, 1, 1, 1, 3, 10, 16, 3, new BigDecimal("1.0"), null),
+                    6, 7, 4, 1, 1, 1, 1, 3, 10, 16, 3, new BigDecimal("1.0")),
             Difficulty.NORMAL, new DifficultyParams(
-                    7, 8, 6, 2, 1, 1, 2, 3, 12, 19, 3, new BigDecimal("1.2"), null),
+                    7, 8, 6, 2, 1, 1, 2, 3, 12, 19, 3, new BigDecimal("1.2")),
             Difficulty.HARD, new DifficultyParams(
-                    8, 9, 8, 2, 2, 2, 3, 4, 14, 20, 3, new BigDecimal("1.5"), AwakeningStage.AWAKENED_PLUS));
+                    8, 9, 8, 2, 2, 2, 3, 4, 14, 20, 3, new BigDecimal("1.5")));
 
     public PurificationProperties {
         sessionTtl = sessionTtl == null ? Duration.ofMinutes(30) : sessionTtl;
@@ -61,7 +57,6 @@ public record PurificationProperties(
         clearJeongseong = orDefault(clearJeongseong, 30);
         bonusTileJeongseong = orDefault(bonusTileJeongseong, 5);
         perfectBonusRate = perfectBonusRate == null ? new BigDecimal("0.5") : perfectBonusRate;
-        growthGaugePerClear = orDefault(growthGaugePerClear, 20);
         shapeSizeMin = orDefault(shapeSizeMin, 2);
         shapeSizeMax = orDefault(shapeSizeMax, 5);
         if (shapeSizeMin < 1 || shapeSizeMin > shapeSizeMax) {

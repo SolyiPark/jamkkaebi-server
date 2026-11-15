@@ -1,7 +1,6 @@
 package com.example.jamkkaebi.codex.dto.response;
 
 import com.example.jamkkaebi.codex.domain.CodexCardState;
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Clarity;
 import com.example.jamkkaebi.relic.domain.RelicMaster;
 import com.example.jamkkaebi.relic.domain.UserRelic;
@@ -13,7 +12,6 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  *
  * @param relicId     슬롯 위치용. 항상 싣는다
  * @param relic       유물 카드. {@code LOCKED} 면 생략
- * @param awakeningStage 각성 단계 배지. {@code FULL_COLOR} 만
  * @param clarity        선명도 배지. {@code FULL_COLOR} 만
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -21,7 +19,6 @@ public record CodexCardView(
         Integer relicId,
         CodexCardState cardState,
         RelicCard relic,
-        AwakeningStage awakeningStage,
         Clarity clarity
 ) {
 
@@ -32,11 +29,10 @@ public record CodexCardView(
     public static CodexCardView of(RelicMaster master, UserRelic owned, Clarity clarity) {
         CodexCardState state = CodexCardState.of(owned);
         if (state == CodexCardState.LOCKED) {
-            return new CodexCardView(master.getId(), state, null, null, null);
+            return new CodexCardView(master.getId(), state, null, null);
         }
         boolean completed = state == CodexCardState.FULL_COLOR;
         return new CodexCardView(master.getId(), state, RelicCard.of(master, owned),
-                completed ? owned.getAwakeningStage() : null,
                 completed ? clarity : null);
     }
 }

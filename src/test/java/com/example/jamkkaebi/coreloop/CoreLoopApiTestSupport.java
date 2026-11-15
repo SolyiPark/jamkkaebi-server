@@ -121,7 +121,7 @@ abstract class CoreLoopApiTestSupport {
     }
 
     /**
-     * 정령 수호까지 마친 유물을 쥐여 준다.
+     * 오염 관리까지 마친 유물을 쥐여 준다.
      *
      * <p>API 로 3페이즈를 돌리면 판당 요청 두 번이라 아홉 종을 채우는 데 스물일곱 판이 든다. 여기서
      * 확인하려는 것이 정화 자체가 아닐 때는 도메인의 진행 메서드를 직접 불러 같은 상태를 만든다.
@@ -129,9 +129,9 @@ abstract class CoreLoopApiTestSupport {
     protected UserRelic giveCompleted(Player player, int relicId) {
         LocalDateTime now = LocalDateTime.now(clock);
         UserRelic userRelic = UserRelic.acquired(player.id(), relicId, now);
-        userRelic.clearFirstPhase(now);
-        userRelic.clearFirstPhase(now);
-        userRelic.clearFirstPhase(now);
+        userRelic.clearFirstPlay(now);
+        userRelic.clearFirstPlay(now);
+        userRelic.clearFirstPlay(now);
         return userRelicRepository.save(userRelic);
     }
 

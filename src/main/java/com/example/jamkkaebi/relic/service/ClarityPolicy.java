@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.relic.service;
 
-import com.example.jamkkaebi.relic.config.GrowthProperties;
+import com.example.jamkkaebi.relic.config.ClarityProperties;
 import com.example.jamkkaebi.relic.domain.Clarity;
 import com.example.jamkkaebi.relic.domain.Phase;
 import com.example.jamkkaebi.relic.domain.UserRelic;
@@ -19,13 +19,13 @@ import java.util.List;
 @Component
 public class ClarityPolicy {
 
-    private final GrowthProperties properties;
+    private final ClarityProperties properties;
 
-    public ClarityPolicy(GrowthProperties properties) {
+    public ClarityPolicy(ClarityProperties properties) {
         this.properties = properties;
     }
 
-    // 현재 선명도. 아직 정령 수호를 마치지 않은 유물은 {@code null}
+    // 현재 선명도. 아직 오염 관리를 마치지 않은 유물은 {@code null}
     public Clarity clarityOf(UserRelic userRelic, LocalDateTime now) {
         if (!userRelic.isCompleted()) {
             return null;

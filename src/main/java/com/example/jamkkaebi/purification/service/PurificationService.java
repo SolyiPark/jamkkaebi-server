@@ -18,7 +18,6 @@ import com.example.jamkkaebi.purification.dto.response.DifficultyView;
 import com.example.jamkkaebi.purification.dto.response.PurificationResultResponse;
 import com.example.jamkkaebi.purification.dto.response.PurificationStartResponse;
 import com.example.jamkkaebi.purification.repository.PlaySessionRepository;
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Clarity;
 import com.example.jamkkaebi.relic.domain.Difficulty;
 import com.example.jamkkaebi.relic.domain.EntryRoute;
@@ -27,12 +26,10 @@ import com.example.jamkkaebi.relic.domain.RelicMaster;
 import com.example.jamkkaebi.relic.domain.RevealLevel;
 import com.example.jamkkaebi.relic.domain.UserRelic;
 import com.example.jamkkaebi.relic.dto.response.BuildingView;
-import com.example.jamkkaebi.relic.dto.response.GaugeView;
 import com.example.jamkkaebi.relic.dto.response.RelicCard;
 import com.example.jamkkaebi.relic.repository.UserRelicRepository;
 import com.example.jamkkaebi.relic.service.BuildingAwardService;
 import com.example.jamkkaebi.relic.service.ClarityPolicy;
-import com.example.jamkkaebi.relic.service.GrowthPolicy;
 import com.example.jamkkaebi.relic.service.RelicOwnership;
 import com.example.jamkkaebi.user.domain.User;
 import com.example.jamkkaebi.user.repository.UserRepository;
@@ -57,7 +54,7 @@ public class PurificationService {
     private final DifficultyCatalog difficulties;
     private final RewardCalculator rewardCalculator;
     private final ClarityPolicy clarityPolicy;
-    private final GrowthPolicy growthPolicy;
+    private final RestorePolicy restorePolicy;
     private final BuildingAwardService buildingAwardService;
     private final SessionTokens sessionTokens;
     private final PurificationProperties properties;
@@ -71,7 +68,7 @@ public class PurificationService {
                                DifficultyCatalog difficulties,
                                RewardCalculator rewardCalculator,
                                ClarityPolicy clarityPolicy,
-                               GrowthPolicy growthPolicy,
+                               RestorePolicy restorePolicy,
                                BuildingAwardService buildingAwardService,
                                SessionTokens sessionTokens,
                                PurificationProperties properties,
@@ -84,7 +81,7 @@ public class PurificationService {
         this.difficulties = difficulties;
         this.rewardCalculator = rewardCalculator;
         this.clarityPolicy = clarityPolicy;
-        this.growthPolicy = growthPolicy;
+        this.restorePolicy = restorePolicy;
         this.buildingAwardService = buildingAwardService;
         this.sessionTokens = sessionTokens;
         this.properties = properties;
@@ -107,8 +104,7 @@ public class PurificationService {
         RelicOwnership.Owned owned = ownership.require(user.getId(), request.relicId());
         LocalDateTime now = gameClock.now();
         PlayPlan plan = planner.planFor(owned.userRelic(), now);
-        Difficulty difficulty = resolveDifficulty(plan, request.difficulty(),
-                owned.userRelic().getAwakeningStage());
+        Difficulty difficulty = resolveDifficulty(plan, request.difficulty());
         DifficultyParams params = difficulties.params(difficulty);
 
         sessionRepository.findAllByUserIdAndStatus(user.getId(), SessionStatus.ISSUED)
@@ -119,6 +115,7 @@ public class PurificationService {
                 .userId(user.getId())
                 .userRelicId(owned.userRelic().getId())
                 .phase(plan.phase())
+                .planClarity(plan.clarity())
                 .difficulty(difficulty)
                 .entryRoute(plan.entryRoute())
                 .boardSeed(sessionTokens.newBoardSeed())
@@ -187,17 +184,18 @@ public class PurificationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
     }
 
-    private Difficulty resolveDifficulty(PlayPlan plan, Difficulty requested, AwakeningStage stage) {
-        if (!plan.difficultySelectable()) {
-            if (requested != null) {
-                throw invalidDifficulty("최초 정화는 난이도를 고를 수 없습니다.");
-            }
-            return plan.fixedDifficulty();
-        }
+    // 계획이 허용한 난이도만 받는다. 하나뿐이면(최초 정화 등) 생략해도 그 난이도로 정한다.
+    private static Difficulty resolveDifficulty(PlayPlan plan, Difficulty requested) {
         if (requested == null) {
-            throw invalidDifficulty("필수 값입니다.");
+            Difficulty fixed = plan.fixedDifficulty();
+            if (fixed == null) {
+                throw invalidDifficulty("필수 값입니다.");
+            }
+            return fixed;
         }
-        difficulties.requireUnlocked(requested, stage);
+        if (!plan.allows(requested)) {
+            throw new BusinessException(ErrorCode.DIFFICULTY_NOT_ALLOWED);
+        }
         return requested;
     }
 
@@ -239,17 +237,15 @@ public class PurificationService {
         boolean success = request.result() == PlayResult.SUCCESS;
         boolean perfect = success && request.damage() == 0 && session.getEntryRoute().allowsPerfectBonus();
         RewardCalculator.Reward reward = rewardCalculator.calculate(
-                difficulties.params(session.getDifficulty()), session.getEntryRoute(),
-                success, perfect, bonusJeongseong);
+                difficulties.params(session.getDifficulty()), success, perfect, bonusJeongseong);
 
         boolean completedNow = false;
         if (success) {
             if (session.getEntryRoute() == EntryRoute.FIRST) {
-                userRelic.clearFirstPhase(now);
+                userRelic.clearFirstPlay(now);
                 completedNow = userRelic.isCompleted() && session.getPhase().isLast();
             } else {
-                userRelic.clearCarePhase(session.getPhase(), now);
-                userRelic.chargeGrowth(reward.gauge());
+                settleCare(session, userRelic, now);
             }
         }
         if (session.getEntryRoute() == EntryRoute.CARE) {
@@ -268,7 +264,6 @@ public class PurificationService {
                 .bonusJeongseongTiles(bonusJeongseong)
                 .perfect(perfect)
                 .jeongseongEarned(reward.jeongseong())
-                .gaugeEarned(reward.gauge())
                 .build(), now);
 
         // 시대의 마지막 유물을 끝냈다면 건물 지급
@@ -279,6 +274,21 @@ public class PurificationService {
                 : null;
 
         return render(session, userRelic, master, awarded);
+    }
+
+    /**
+     * 관리 플레이 성공. 효과는 세션 난이도가, 페이즈는 <b>세션 시작 시점 계획</b>이 정한다.
+     *
+     * <p>복구 진행은 <b>정산 순간의 선명도</b>로 저장한다. 플레이 도중 7·14일 경계를 넘어 선명도가 떨어졌어도
+     * 이번 판에 마친 페이즈를 그대로 인정하기 위해서다 (예: 흐려짐에서 기억 회복을 하던 중 재봉인 → 오염 관리만 남는다).
+     * 판과 판 사이에 방치해 떨어진 경우는 저장된 선명도와 달라 처음부터 다시 한다.
+     */
+    private void settleCare(PlaySession session, UserRelic userRelic, LocalDateTime now) {
+        if (restorePolicy.effectOf(session.getDifficulty()) == RestoreEffect.FULL) {
+            userRelic.restoreFully(now);
+            return;
+        }
+        userRelic.clearCarePlay(session.getPhase(), clarityPolicy.clarityOf(userRelic, now), now);
     }
 
     private PurificationResultResponse render(PlaySession session, User user) {
@@ -299,15 +309,14 @@ public class PurificationService {
                 session.getResult(),
                 Boolean.TRUE.equals(session.getPerfect()),
                 first ? null : userRelic.getPerfectStreak(),
-                new PurificationResultResponse.Rewards(
-                        session.getJeongseongEarned(), session.getGaugeEarned()),
+                new PurificationResultResponse.Rewards(session.getJeongseongEarned()),
                 RelicCard.of(master, userRelic),
                 userRelic.getStatus(),
                 // 관리 플레이(!first)는 공개 단계가 오르지 않는다.
                 success && first ? userRelic.revealLevel() : null,
                 nextStep(session, userRelic, success, clarity),
-                userRelic.getRestorePhase(),
-                awakeningView(userRelic),
+                userRelic.restorePhaseFor(clarity),
+                userRelic.isCompleted() ? userRelic.getCareCount() : null,
                 clarity,
                 buildingAwarded,
                 null);
@@ -326,22 +335,12 @@ public class PurificationService {
             Phase next = userRelic.getCurrentPhase();
             return new PurificationResultResponse.NextStep(NextAction.NEXT_PHASE, next, Phase.from(next));
         }
-        if (session.getPhase().isLast()) {
+        if (session.getPhase().isLast() || restorePolicy.effectOf(session.getDifficulty()) == RestoreEffect.FULL) {
             return PurificationResultResponse.NextStep.of(NextAction.DONE);
         }
-        List<Phase> remaining = clarityPolicy.remainingPhases(clarity, userRelic.getRestorePhase());
+        // 지금 선명도 기준으로 남은 순서. 복구 도중 선명도가 바뀌었으면 처음부터다.
+        List<Phase> remaining = clarityPolicy.remainingPhases(clarity, userRelic.restorePhaseFor(clarity));
         return new PurificationResultResponse.NextStep(
-                NextAction.CONTINUE_RESTORE, remaining.isEmpty() ? null : remaining.getFirst(), remaining);
-    }
-
-    private PurificationResultResponse.AwakeningView awakeningView(UserRelic userRelic) {
-        if (!userRelic.isCompleted()) {
-            return null;
-        }
-        GaugeView gauge = growthPolicy.hasNextStage(userRelic)
-                ? new GaugeView(userRelic.getGrowthGauge(), growthPolicy.requiredFor(userRelic))
-                : null;
-        return new PurificationResultResponse.AwakeningView(
-                userRelic.getAwakeningStage(), gauge, growthPolicy.growthReady(userRelic));
+                NextAction.CONTINUE_RESTORE, remaining.getFirst(), remaining);
     }
 }

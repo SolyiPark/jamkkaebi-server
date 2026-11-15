@@ -9,7 +9,8 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 /**
  * 유물 한 개.
  *
- * <p><b>정체 공개는 서버가 담당한다.</b> 도달하지 않은 단계의 이름은 {@code null}
+ * <p><b>정체 공개는 서버가 담당한다.</b> 도달하지 않은 단계의 이름은 {@code null}.
+ * 시적 별칭은 항상, 도깨비 이름은 완료 후에만 담는다.
  */
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -34,9 +35,10 @@ public record RelicCard(
                 master.getId(),
                 master.getEra(),
                 revealLevel,
-                revealLevel.showsAlias() ? master.getPoeticAlias() : null,
+                master.getPoeticAlias(),
                 revealLevel.showsRealName() ? master.getRealName() : null,
-                revealLevel.showsRealName() ? spiritNameOf(master, owned) : null);
+                // 도깨비 이름은 최초 정화를 끝까지 마친 뒤에만 공개한다.
+                owned.isCompleted() ? spiritNameOf(master, owned) : null);
     }
 
     // 사용자가 지어준 이름 (없으면 기본 이름)

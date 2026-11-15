@@ -57,7 +57,8 @@ public class RelicMaster {
 
     // 실제 발굴·복원 기록
     @Lob
-    @Column(name = "real_story", nullable = false)
+    // @Lob 만 두면 MySQL 에서 TINYTEXT(255바이트)로 만들어져 한글 실화 기록이 들어가지 않는다.
+    @Column(name = "real_story", nullable = false, columnDefinition = "TEXT")
     private String realStory;
 
     @Column(name = "heritage_url", length = 500)

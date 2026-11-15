@@ -1,7 +1,6 @@
 package com.example.jamkkaebi.codex.dto.response;
 
 import com.example.jamkkaebi.codex.domain.CodexCardState;
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Clarity;
 import com.example.jamkkaebi.relic.domain.RelicMaster;
 import com.example.jamkkaebi.relic.domain.UserRelic;
@@ -15,7 +14,6 @@ import com.fasterxml.jackson.annotation.JsonInclude;
  * 카드를 돌려준다.
  *
  * @param relic       유물 카드. {@code LOCKED} 면 생략
- * @param awakeningStage 각성 단계 배지. {@code FULL_COLOR} 만
  * @param clarity        선명도 배지. {@code FULL_COLOR} 만
  * @param record         실화 기록. {@code FULL_COLOR} 가 아니면 생략
  */
@@ -24,7 +22,6 @@ public record CodexRelicResponse(
         Integer relicId,
         CodexCardState cardState,
         RelicCard relic,
-        AwakeningStage awakeningStage,
         Clarity clarity,
         CodexRecordView record
 ) {
@@ -39,6 +36,6 @@ public record CodexRelicResponse(
                 ? new CodexRecordView(master.getRealStory(), master.getHeritageUrl(), master.getReportUrl())
                 : null;
         return new CodexRelicResponse(card.relicId(), card.cardState(), card.relic(),
-                card.awakeningStage(), card.clarity(), record);
+                card.clarity(), record);
     }
 }

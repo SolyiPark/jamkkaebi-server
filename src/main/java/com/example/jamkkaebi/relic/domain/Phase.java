@@ -11,7 +11,7 @@ public enum Phase {
 
     UNSEAL,  // 1페이즈 봉인 해제 — 봉인의 열쇠 조각
     RECALL,  // 2페이즈 기억 회복 — 기억의 조각
-    GUARD;   // 3페이즈 정령 수호 — 오염 덩어리
+    GUARD;   // 3페이즈 오염 관리 — 오염 덩어리
 
     private static final List<Phase> ORDER = List.of(values());
 

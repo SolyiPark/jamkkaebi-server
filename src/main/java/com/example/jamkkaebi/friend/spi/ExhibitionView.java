@@ -1,6 +1,5 @@
 package com.example.jamkkaebi.friend.spi;
 
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Era;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -29,7 +28,7 @@ public record ExhibitionView(Grid grid, List<SpiritView> spirits, List<BuildingV
     }
 
     /**
-     * 전시관의 도깨비. 친구 전시관에 나오는 도깨비는 전부 이름이 공개된(정령 수호 완료) 도깨비다.
+     * 전시관의 도깨비. 친구 전시관에 나오는 도깨비는 전부 이름이 공개된(오염 관리 완료) 도깨비다.
      *
      * @param spiritName 주인이 지어 준 이름. 짓지 않았으면 기본 이름
      */
@@ -41,7 +40,6 @@ public record ExhibitionView(Grid grid, List<SpiritView> spirits, List<BuildingV
             String poeticAlias,
             String realName,
             String spiritName,
-            AwakeningStage awakeningStage,
             Position position
     ) {
 

@@ -56,7 +56,7 @@ class SocialFlowTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("정령 수호까지 마친 도깨비만 아바타로 고를 수 있고, 고른 아바타는 친구 카드에 그대로 나간다")
+    @DisplayName("오염 관리까지 마친 도깨비만 아바타로 고를 수 있고, 고른 아바타는 친구 카드에 그대로 나간다")
     void 아바타() throws Exception {
         Player me = player("향로지기");
         Player friend = player("이끼돌");
@@ -176,7 +176,7 @@ class SocialFlowTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.spirits[0].realName").value("금동대향로"))
                 .andExpect(jsonPath("$.data.spirits[0].poeticAlias").value("백제, 향이 스민 산맥"))
                 .andExpect(jsonPath("$.data.spirits[0].spiritName").value("향로지기"))
-                .andExpect(jsonPath("$.data.spirits[0].awakeningStage").value("AWAKENED"))
+                .andExpect(jsonPath("$.data.spirits[0].awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.spirits[0].position.x").value(3))
                 .andExpect(jsonPath("$.data.spirits[0].clarity").doesNotExist())
                 .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").doesNotExist())
