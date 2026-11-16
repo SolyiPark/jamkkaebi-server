@@ -5,7 +5,6 @@ import com.example.jamkkaebi.friend.domain.Friendship;
 import com.example.jamkkaebi.friend.repository.FriendshipRepository;
 import com.example.jamkkaebi.friend.service.ExhibitionSnapshotService;
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Difficulty;
 import com.example.jamkkaebi.relic.domain.Era;
 import com.example.jamkkaebi.relic.domain.UserBuilding;
@@ -109,7 +108,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("정령 수호까지 마친 도깨비와 받은 건물만 담기고, 배치 전에는 좌표 키가 없다")
+    @DisplayName("오염 관리까지 마친 도깨비와 받은 건물만 담기고, 배치 전에는 좌표 키가 없다")
     void 조회() throws Exception {
         Player player = player("학예사");
         giveCompleted(player, INCENSE_BURNER);
@@ -126,7 +125,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.spirits[0].poeticAlias").value("백제, 향이 스민 산맥"))
                 .andExpect(jsonPath("$.data.spirits[0].realName").value("금동대향로"))
                 .andExpect(jsonPath("$.data.spirits[0].spiritName").value("향산이"))
-                .andExpect(jsonPath("$.data.spirits[0].awakeningStage").value("AWAKENED"))
+                .andExpect(jsonPath("$.data.spirits[0].awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.spirits[0].clarity").value("CLEAR"))
                 .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").value(startsWith("2026-09-12T10:00")))
                 .andExpect(jsonPath("$.data.spirits[0].displayed").value(false))
@@ -142,18 +141,17 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("지어 준 이름과 각성 단계, 방치로 달라진 선명도가 그대로 실린다")
-    void 이름_각성_선명도() throws Exception {
+    @DisplayName("지어 준 이름과 방치로 달라진 선명도가 그대로 실리고, 각성 단계는 없다")
+    void 이름_선명도() throws Exception {
         Player player = player("학예사");
         UserRelic relic = giveCompleted(player, INCENSE_BURNER);
         patch(player, "/api/relics/{id}/spirit-name", "{\"name\":\"향로지기\"}", INCENSE_BURNER)
                 .andExpect(status().isOk());
-        setAwakening(relic, AwakeningStage.AWAKENED_PLUS);
 
         clock.advance(Duration.ofDays(8));
         get(player, "/api/exhibition")
                 .andExpect(jsonPath("$.data.spirits[0].spiritName").value("향로지기"))
-                .andExpect(jsonPath("$.data.spirits[0].awakeningStage").value("AWAKENED_PLUS"))
+                .andExpect(jsonPath("$.data.spirits[0].awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.spirits[0].clarity").value("FADED"));
 
         clock.advance(Duration.ofDays(7));
@@ -448,7 +446,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("숨기기는 보유하지 않은 유물이면 W001, 정령 수호 전이면 W002 다")
+    @DisplayName("숨기기는 보유하지 않은 유물이면 W001, 오염 관리 전이면 W002 다")
     void 숨기기_실패() throws Exception {
         Player player = player("학예사");
         give(player, FROG_FIGURINE);
@@ -498,7 +496,7 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.spirits[0].revealLevel").value("NAMED"))
                 .andExpect(jsonPath("$.data.spirits[0].spiritName").value("향로지기"))
                 .andExpect(jsonPath("$.data.spirits[0].realName").value("금동대향로"))
-                .andExpect(jsonPath("$.data.spirits[0].awakeningStage").value("AWAKENED"))
+                .andExpect(jsonPath("$.data.spirits[0].awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.spirits[0].position.x").value(3))
                 .andExpect(jsonPath("$.data.spirits[0].position.y").value(5))
                 .andExpect(jsonPath("$.data.spirits[0].clarity").doesNotExist())
@@ -686,16 +684,6 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
         int buildingId = catalog.buildingOf(era).orElseThrow().getId();
         userBuildingRepository.save(UserBuilding.awarded(player.id(), buildingId, LocalDateTime.now(clock)));
         return buildingId;
-    }
-
-    /** 강화 확정은 게이지를 채워야 해서 단계를 곧바로 맞춘다. */
-    private void setAwakening(UserRelic relic, AwakeningStage stage) {
-        transactionTemplate.executeWithoutResult(status -> {
-            UserRelic managed = userRelicRepository.findById(relic.getId()).orElseThrow();
-            while (managed.getAwakeningStage() != stage) {
-                managed.awaken(0);
-            }
-        });
     }
 
     private static String item(String type, int id, int x, int y) {

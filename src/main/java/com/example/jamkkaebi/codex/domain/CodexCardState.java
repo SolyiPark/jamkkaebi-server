@@ -14,7 +14,7 @@ public enum CodexCardState {
 
     LOCKED,     // 미획득
     SILHOUETTE, // 작업대 진행 중
-    FULL_COLOR; // 정령 수호까지 완료
+    FULL_COLOR; // 오염 관리까지 완료
 
     /**
      * @param owned 이 사용자의 진행 상태. 보유하지 않았으면 {@code null}

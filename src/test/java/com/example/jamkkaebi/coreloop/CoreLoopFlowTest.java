@@ -1,8 +1,9 @@
 package com.example.jamkkaebi.coreloop;
 
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
+import com.example.jamkkaebi.relic.domain.Clarity;
 import com.example.jamkkaebi.relic.domain.Difficulty;
 import com.example.jamkkaebi.relic.domain.Era;
+import com.example.jamkkaebi.relic.domain.Phase;
 import com.example.jamkkaebi.relic.domain.RelicStatus;
 import com.example.jamkkaebi.relic.domain.UserRelic;
 import org.junit.jupiter.api.DisplayName;
@@ -16,7 +17,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * 코어 루프 완주 — 상자에서 뽑아 3페이즈를 마치고 각성까지.
+ * 코어 루프 완주 — 상자에서 뽑아 3페이즈를 마치고, 관리 플레이로 선명도를 지키기까지.
  *
  * <p>백엔드 계획 M1 의 완료 판정이 그대로 이 파일의 첫 테스트다.
  */
@@ -24,7 +25,7 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
 
     @Test
     @DisplayName("상자를 열어 얻은 유물을 3페이즈까지 마치면 완료 상태가 되고 이름이 공개된다")
-    void 상자에서_뽑아_정령_수호까지() throws Exception {
+    void 상자에서_뽑아_오염_관리까지() throws Exception {
         Player player = player("잠꾸러기");
 
         var opened = post(player, "/api/box/open", """
@@ -33,40 +34,45 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value("BOX_OPENED"))
                 .andExpect(jsonPath("$.data.result").value("NEW"))
-                // 획득 직후는 실루엣뿐이다 — 시적 별칭은 봉인 해제를 마쳐야 공개된다 (부록 C-1).
+                // 획득 직후는 실루엣이지만 시적 별칭은 처음부터 보인다.
                 .andExpect(jsonPath("$.data.relic.revealLevel").value("SILHOUETTE"))
-                .andExpect(jsonPath("$.data.relic.poeticAlias").doesNotExist())
-                .andExpect(jsonPath("$.data.relic.realName").doesNotExist());
+                .andExpect(jsonPath("$.data.relic.poeticAlias").isNotEmpty())
+                .andExpect(jsonPath("$.data.relic.realName").doesNotExist())
+                .andExpect(jsonPath("$.data.relic.spiritName").doesNotExist());
         int relicId = read(opened, "$.data.relic.relicId");
 
-        // 1페이즈 — 봉인 해제. 별칭이 열린다.
+        // 1페이즈 — 봉인 해제. 형태가 열린다.
         clearPhase(player, relicId, null)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.revealed").value("ALIAS"))
+                .andExpect(jsonPath("$.data.revealed").value("FORM"))
                 .andExpect(jsonPath("$.data.next.action").value("NEXT_PHASE"))
                 .andExpect(jsonPath("$.data.next.phase").value("RECALL"))
-                // 최초 정화는 성장 게이지를 주지 않는다 — 완료된 도깨비를 돌본 성과로만 자란다.
-                .andExpect(jsonPath("$.data.rewards.growthGauge").value(0));
+                .andExpect(jsonPath("$.data.rewards.growthGauge").doesNotExist())
+                // 최초 정화는 돌봄 횟수를 세지 않는다.
+                .andExpect(jsonPath("$.data.careCount").doesNotExist());
 
-        // 2페이즈 — 기억 회복. 형태가 열린다.
+        // 2페이즈 — 기억 회복. 실제 이름이 열리지만 도깨비 이름은 아직이다.
         clearPhase(player, relicId, null)
-                .andExpect(jsonPath("$.data.revealed").value("FORM"))
+                .andExpect(jsonPath("$.data.revealed").value("NAMED"))
+                .andExpect(jsonPath("$.data.relic.realName").isNotEmpty())
+                .andExpect(jsonPath("$.data.relic.spiritName").doesNotExist())
                 .andExpect(jsonPath("$.data.next.phase").value("GUARD"));
 
-        // 3페이즈 — 정령 수호. 이름이 전부 공개되고 각성한다.
+        // 3페이즈 — 오염 관리. 완료하면 도깨비 이름까지 공개된다.
         clearPhase(player, relicId, null)
                 .andExpect(jsonPath("$.data.status").value("COMPLETED"))
                 .andExpect(jsonPath("$.data.revealed").value("NAMED"))
                 .andExpect(jsonPath("$.data.relic.realName").isNotEmpty())
                 .andExpect(jsonPath("$.data.relic.spiritName").isNotEmpty())
                 .andExpect(jsonPath("$.data.next.action").value("DONE"))
-                .andExpect(jsonPath("$.data.awakening.stage").value("AWAKENED"))
+                .andExpect(jsonPath("$.data.awakening").doesNotExist())
+                .andExpect(jsonPath("$.data.careCount").value(0))
                 .andExpect(jsonPath("$.data.clarity").value("CLEAR"));
 
         UserRelic stored = userRelicRepository
                 .findByUserIdAndRelicId(player.id(), relicId).orElseThrow();
         assertThat(stored.getStatus()).isEqualTo(RelicStatus.COMPLETED);
-        assertThat(stored.getAwakeningStage()).isEqualTo(AwakeningStage.AWAKENED);
+        assertThat(stored.getCareCount()).isZero();
         assertThat(stored.getLastPurifiedAt()).isNotNull();
     }
 
@@ -88,86 +94,225 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("관리 플레이로 게이지를 채우면 강화를 확정할 수 있고, 넘친 게이지는 다음 단계로 이월된다")
-    void 성장_게이지_충전과_강화_확정() throws Exception {
-        Player player = player("돌보미");
+    @DisplayName("최초 정화는 보통 하나만 고를 수 있고, 다른 난이도는 P001")
+    void 최초_정화_난이도_고정() throws Exception {
+        Player player = player("새내기");
         int relicId = giveAndReturnId(player, 1);
-        completeFirstPurification(player, relicId);
-
-        // 보통 난이도 한 판 = 20 × 1.2 = 24. 각성+ 에 필요한 100 을 넘기려면 다섯 판.
-        for (int i = 0; i < 5; i++) {
-            clearPhase(player, relicId, Difficulty.NORMAL)
-                    .andExpect(jsonPath("$.data.rewards.growthGauge").value(24));
-        }
 
         get(player, "/api/relics/{id}", relicId)
-                .andExpect(jsonPath("$.data.growthReady").value(true))
-                .andExpect(jsonPath("$.data.growthGauge.current").value(120))
-                .andExpect(jsonPath("$.data.growthGauge.max").value(100))
-                .andExpect(jsonPath("$.data.nextStage").value("AWAKENED_PLUS"))
-                // 어려움은 각성+ 전까지 잠겨 있다.
-                .andExpect(jsonPath("$.data.nextPlay.difficulties[3].difficulty").value("HARD"))
-                .andExpect(jsonPath("$.data.nextPlay.difficulties[3].unlocked").value(false));
+                .andExpect(jsonPath("$.data.nextPlay.entryRoute").value("FIRST"))
+                .andExpect(jsonPath("$.data.nextPlay.difficulties.length()").value(1))
+                .andExpect(jsonPath("$.data.nextPlay.difficulties[0]").value("NORMAL"))
+                .andExpect(jsonPath("$.data.nextPlay.difficultySelectable").doesNotExist())
+                .andExpect(jsonPath("$.data.careCount").doesNotExist());
+
+        post(player, "/api/purifications", """
+                {"relicId":%d,"difficulty":"HARD"}
+                """.formatted(relicId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("P001"));
+
+        // 하나뿐인 난이도는 보내도 되고 생략해도 된다.
+        post(player, "/api/purifications", """
+                {"relicId":%d,"difficulty":"NORMAL"}
+                """.formatted(relicId))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.difficulty").value("NORMAL"));
+    }
+
+    @Test
+    @DisplayName("선명하면 쉬움·보통·어려움, 흐려지면 쉬움이 빠진다")
+    void 선명도별_고를_수_있는_난이도() throws Exception {
+        Player player = player("돌보미");
+        int relicId = completedRelic(player);
+
+        get(player, "/api/relics/{id}", relicId)
+                .andExpect(jsonPath("$.data.nextPlay.entryRoute").value("CARE"))
+                .andExpect(jsonPath("$.data.nextPlay.remainingPhases[0]").value("GUARD"))
+                .andExpect(jsonPath("$.data.nextPlay.difficulties[0]").value("EASY"))
+                .andExpect(jsonPath("$.data.nextPlay.difficulties[1]").value("NORMAL"))
+                .andExpect(jsonPath("$.data.nextPlay.difficulties[2]").value("HARD"));
+
+        clock.advance(Duration.ofDays(8));
+        get(player, "/api/relics/{id}", relicId)
+                .andExpect(jsonPath("$.data.clarity").value("FADED"))
+                .andExpect(jsonPath("$.data.nextPlay.difficulties.length()").value(2))
+                .andExpect(jsonPath("$.data.nextPlay.difficulties[0]").value("NORMAL"))
+                .andExpect(jsonPath("$.data.nextPlay.difficulties[1]").value("HARD"));
+
+        post(player, "/api/purifications", """
+                {"relicId":%d,"difficulty":"EASY"}
+                """.formatted(relicId))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("P001"));
+
+        // 고를 것이 여럿이면 생략할 수 없다.
+        post(player, "/api/purifications", "{\"relicId\":%d}".formatted(relicId))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("선명할 때 쉬움 한 판은 선명도만 새로 고치고 돌봄 횟수를 하나 올린다")
+    void 쉬움은_선명도_회복만() throws Exception {
+        Player player = player("산책러");
+        int relicId = completedRelic(player);
+        clock.advance(Duration.ofDays(6));
+
+        clearPhase(player, relicId, Difficulty.EASY)
+                .andExpect(jsonPath("$.data.next.action").value("DONE"))
+                .andExpect(jsonPath("$.data.careCount").value(1))
+                .andExpect(jsonPath("$.data.clarity").value("CLEAR"));
+
+        // 6일 방치 뒤 갱신했으므로 다시 6일이 지나도 아직 선명하다.
+        clock.advance(Duration.ofDays(6));
+        get(player, "/api/relics/{id}", relicId)
+                .andExpect(jsonPath("$.data.clarity").value("CLEAR"))
+                .andExpect(jsonPath("$.data.careCount").value(1));
+    }
+
+    @Test
+    @DisplayName("재봉인이어도 어려움 한 판이면 전부 복구된다")
+    void 어려움은_한_판에_전체_복구() throws Exception {
+        Player player = player("한방이");
+        int relicId = completedRelic(player);
+        clock.advance(Duration.ofDays(15));
+
+        get(player, "/api/relics/{id}", relicId)
+                .andExpect(jsonPath("$.data.clarity").value("RESEALED"))
+                .andExpect(jsonPath("$.data.nextPlay.remainingPhases.length()").value(3));
+
+        clearPhase(player, relicId, Difficulty.HARD)
+                .andExpect(jsonPath("$.data.next.action").value("DONE"))
+                .andExpect(jsonPath("$.data.clarity").value("CLEAR"))
+                .andExpect(jsonPath("$.data.lastClearedPhase").doesNotExist())
+                .andExpect(jsonPath("$.data.careCount").value(1));
+
+        UserRelic stored = userRelicRepository.findByUserIdAndRelicId(player.id(), relicId).orElseThrow();
+        assertThat(stored.getRestorePhase()).isNull();
+        assertThat(stored.getRestoreClarity()).isNull();
+    }
+
+    @Test
+    @DisplayName("보통은 한 페이즈씩 복구하고, 판마다 돌봄 횟수가 오른다")
+    void 보통은_한_페이즈씩() throws Exception {
+        Player player = player("꾸준이");
+        int relicId = completedRelic(player);
+        clock.advance(Duration.ofDays(8));
+
+        clearPhase(player, relicId, Difficulty.NORMAL)
+                .andExpect(jsonPath("$.data.next.action").value("CONTINUE_RESTORE"))
+                .andExpect(jsonPath("$.data.next.phase").value("GUARD"))
+                .andExpect(jsonPath("$.data.lastClearedPhase").value("RECALL"))
+                .andExpect(jsonPath("$.data.careCount").value(1));
+
+        clearPhase(player, relicId, Difficulty.NORMAL)
+                .andExpect(jsonPath("$.data.next.action").value("DONE"))
+                .andExpect(jsonPath("$.data.clarity").value("CLEAR"))
+                .andExpect(jsonPath("$.data.careCount").value(2));
+    }
+
+    @Test
+    @DisplayName("흐려짐에서 기억 회복까지 복구한 뒤 재봉인되면 봉인 해제부터 다시 한다")
+    void 복구_도중_선명도가_바뀌면_처음부터() throws Exception {
+        Player player = player("게으름뱅이");
+        int relicId = completedRelic(player);
+        clock.advance(Duration.ofDays(8));
+        clearPhase(player, relicId, Difficulty.NORMAL)
+                .andExpect(jsonPath("$.data.lastClearedPhase").value("RECALL"));
+
+        UserRelic midway = userRelicRepository.findByUserIdAndRelicId(player.id(), relicId).orElseThrow();
+        assertThat(midway.getRestorePhase()).isEqualTo(Phase.RECALL);
+        assertThat(midway.getRestoreClarity()).isEqualTo(Clarity.FADED);
+
+        // 방치해 재봉인 — 예전에는 [GUARD] 만 남아 두 페이즈를 건너뛰었다.
+        clock.advance(Duration.ofDays(7));
+        get(player, "/api/relics/{id}", relicId)
+                .andExpect(jsonPath("$.data.clarity").value("RESEALED"))
+                .andExpect(jsonPath("$.data.lastClearedPhase").doesNotExist())
+                .andExpect(jsonPath("$.data.nextPlay.phase").value("UNSEAL"))
+                .andExpect(jsonPath("$.data.nextPlay.remainingPhases.length()").value(3));
+
+        clearPhase(player, relicId, Difficulty.NORMAL)
+                .andExpect(jsonPath("$.data.next.phase").value("RECALL"))
+                .andExpect(jsonPath("$.data.next.remainingPhases.length()").value(2));
+    }
+
+    @Test
+    @DisplayName("플레이 도중 흐려짐 경계를 넘어도 그 판은 시작할 때의 계획대로 정산한다")
+    void 정산은_세션_시작_시점_계획_기준() throws Exception {
+        Player player = player("아슬이");
+        int relicId = completedRelic(player);
+        // 선명의 마지막 순간에 쉬움을 시작한다.
+        clock.advance(Duration.ofDays(7).minusSeconds(30));
+        String token = startPurification(player, relicId, Difficulty.EASY);
+        clock.advance(Duration.ofMinutes(1));
+
+        post(player, "/api/purifications/{token}/result", """
+                {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
+                 "bonusTiles":{"jeongseong":0}}
+                """, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.next.action").value("DONE"))
+                .andExpect(jsonPath("$.data.clarity").value("CLEAR"));
+    }
+
+    @Test
+    @DisplayName("흐려짐에서 기억 회복을 하던 중 재봉인돼도 그 판은 인정되어 오염 관리만 남는다")
+    void 플레이_도중_재봉인돼도_진행_인정() throws Exception {
+        Player player = player("아슬아슬");
+        int relicId = completedRelic(player);
+        // 흐려짐의 마지막 순간에 기억 회복을 시작하고, 끝낼 때는 재봉인이다.
+        clock.advance(Duration.ofDays(14).minusSeconds(30));
+        String token = startPurification(player, relicId, Difficulty.NORMAL);
+        clock.advance(Duration.ofMinutes(1));
+
+        post(player, "/api/purifications/{token}/result", """
+                {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
+                 "bonusTiles":{"jeongseong":0}}
+                """, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.clarity").value("RESEALED"))
+                .andExpect(jsonPath("$.data.lastClearedPhase").value("RECALL"))
+                .andExpect(jsonPath("$.data.next.action").value("CONTINUE_RESTORE"))
+                .andExpect(jsonPath("$.data.next.phase").value("GUARD"))
+                .andExpect(jsonPath("$.data.next.remainingPhases.length()").value(1));
+
+        get(player, "/api/relics/{id}", relicId)
+                .andExpect(jsonPath("$.data.nextPlay.phase").value("GUARD"));
+
+        UserRelic stored = userRelicRepository.findByUserIdAndRelicId(player.id(), relicId).orElseThrow();
+        assertThat(stored.getRestoreClarity()).isEqualTo(Clarity.RESEALED);
+    }
+
+    @Test
+    @DisplayName("성장·각성 API 는 없어졌다")
+    void 각성_API_제거() throws Exception {
+        Player player = player("옛사람");
+        int relicId = completedRelic(player);
 
         post(player, "/api/relics/{id}/awaken", """
                 {"targetStage":"AWAKENED_PLUS"}
                 """, relicId)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.awakeningStage").value("AWAKENED_PLUS"))
-                // 넘친 20 은 버리지 않고 다음 단계로 옮긴다 (부록 C-7).
-                .andExpect(jsonPath("$.data.carriedOver").value(20))
-                .andExpect(jsonPath("$.data.growthGauge.current").value(20))
-                .andExpect(jsonPath("$.data.growthGauge.max").value(150))
-                .andExpect(jsonPath("$.data.unlockedDifficulties[0]").value("HARD"));
+                // 예전 구현은 게이지 부족으로 409(W003)를 줬다. 경로 자체가 없어졌는지 404 C004 로 확인한다.
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("C004"));
+
+        get(player, "/api/relics/{id}", relicId)
+                .andExpect(jsonPath("$.data.awakeningStage").doesNotExist())
+                .andExpect(jsonPath("$.data.growthGauge").doesNotExist())
+                .andExpect(jsonPath("$.data.growthReady").doesNotExist())
+                .andExpect(jsonPath("$.data.nextStage").doesNotExist())
+                .andExpect(jsonPath("$.data.careCount").value(0));
     }
 
-    @Test
-    @DisplayName("같은 단계로 다시 확정 요청하면 아무것도 바뀌지 않고, 두 단계를 건너뛰면 막힌다")
-    void 강화_확정_멱등과_단계_검사() throws Exception {
-        Player player = player("연타왕");
+    private int completedRelic(Player player) throws Exception {
         int relicId = giveAndReturnId(player, 1);
         completeFirstPurification(player, relicId);
-        for (int i = 0; i < 5; i++) {
-            clearPhase(player, relicId, Difficulty.NORMAL);
-        }
-        post(player, "/api/relics/{id}/awaken", """
-                {"targetStage":"AWAKENED_PLUS"}
-                """, relicId).andExpect(status().isOk());
-
-        // 응답을 못 받고 다시 누른 경우 — 단계가 또 오르면 안 된다.
-        post(player, "/api/relics/{id}/awaken", """
-                {"targetStage":"AWAKENED_PLUS"}
-                """, relicId)
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.awakeningStage").value("AWAKENED_PLUS"))
-                .andExpect(jsonPath("$.data.carriedOver").value(0));
-
-        assertThat(userRelicRepository.findByUserIdAndRelicId(player.id(), relicId)
-                .orElseThrow().getAwakeningStage()).isEqualTo(AwakeningStage.AWAKENED_PLUS);
+        return relicId;
     }
 
     @Test
-    @DisplayName("게이지가 차지 않았는데 강화하면 W003, 각성 단계가 어긋나면 W004")
-    void 강화_실패_경로() throws Exception {
-        Player player = player("성급이");
-        int relicId = giveAndReturnId(player, 1);
-        completeFirstPurification(player, relicId);
-
-        post(player, "/api/relics/{id}/awaken", """
-                {"targetStage":"AWAKENED_PLUS"}
-                """, relicId)
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("W003"));
-
-        post(player, "/api/relics/{id}/awaken", """
-                {"targetStage":"FULLY_AWAKENED"}
-                """, relicId)
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("W004"));
-    }
-
-    @Test
-    @DisplayName("정령 수호를 마치기 전에는 이름을 지을 수 없다")
+    @DisplayName("오염 관리를 마치기 전에는 이름을 지을 수 없다")
     void 이름_짓기는_완료_후에만() throws Exception {
         Player player = player("작명가");
         int relicId = giveAndReturnId(player, 1);

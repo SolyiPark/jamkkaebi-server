@@ -1,6 +1,6 @@
 package com.example.jamkkaebi.relic.service;
 
-import com.example.jamkkaebi.relic.config.GrowthProperties;
+import com.example.jamkkaebi.relic.config.ClarityProperties;
 import com.example.jamkkaebi.relic.domain.Clarity;
 import com.example.jamkkaebi.relic.domain.Phase;
 import com.example.jamkkaebi.relic.domain.UserRelic;
@@ -23,7 +23,7 @@ class ClarityPolicyTest {
     private static final LocalDateTime PURIFIED_AT = LocalDateTime.of(2026, 9, 1, 12, 0);
 
     private final ClarityPolicy policy =
-            new ClarityPolicy(new GrowthProperties(null, null, null, null));
+            new ClarityPolicy(new ClarityProperties(null, null, null));
 
     @Nested
     @DisplayName("선명도")
@@ -43,7 +43,7 @@ class ClarityPolicyTest {
         }
 
         @Test
-        @DisplayName("아직 정령 수호를 마치지 않은 유물에는 선명도가 없다")
+        @DisplayName("아직 오염 관리를 마치지 않은 유물에는 선명도가 없다")
         void 미완료_유물() {
             UserRelic inProgress = UserRelic.acquired(1L, 1, PURIFIED_AT);
 
@@ -72,7 +72,7 @@ class ClarityPolicyTest {
     class 복구_순서 {
 
         @Test
-        @DisplayName("선명하면 정령 수호만 반복한다")
+        @DisplayName("선명하면 오염 관리만 반복한다")
         void 선명() {
             assertThat(policy.remainingPhases(Clarity.CLEAR, null)).containsExactly(Phase.GUARD);
         }
@@ -85,16 +85,9 @@ class ClarityPolicyTest {
         }
 
         @Test
-        @DisplayName("흐려짐 복구로 기억 회복만 마쳤으면 정령 수호만 남는다")
+        @DisplayName("흐려짐 복구로 기억 회복만 마쳤으면 오염 관리만 남는다")
         void 흐려짐_절반() {
             assertThat(policy.remainingPhases(Clarity.FADED, Phase.RECALL))
-                    .containsExactly(Phase.GUARD);
-        }
-
-        @Test
-        @DisplayName("그 상태로 방치해 재봉인돼도 봉인 해제를 다시 시키지 않는다")
-        void 복구_도중_재봉인() {
-            assertThat(policy.remainingPhases(Clarity.RESEALED, Phase.RECALL))
                     .containsExactly(Phase.GUARD);
         }
 
@@ -106,7 +99,7 @@ class ClarityPolicyTest {
         }
 
         @Test
-        @DisplayName("봉인 해제까지만 마치고 재봉인이 깊어져도 그 뒤만 남는다")
+        @DisplayName("재봉인 복구로 봉인 해제까지 마쳤으면 그 뒤만 남는다")
         void 재봉인_절반() {
             assertThat(policy.remainingPhases(Clarity.RESEALED, Phase.UNSEAL))
                     .containsExactly(Phase.RECALL, Phase.GUARD);
@@ -118,27 +111,67 @@ class ClarityPolicyTest {
     class 진행도_기록 {
 
         @Test
-        @DisplayName("정령 수호를 마치면 선명으로 돌아오고 진행도가 비워진다")
-        void 정령_수호_클리어() {
+        @DisplayName("오염 관리를 마치면 선명으로 돌아오고 진행도가 비워진다")
+        void 오염_관리_클리어() {
             UserRelic spirit = completed();
             LocalDateTime later = PURIFIED_AT.plusDays(10);
 
-            spirit.clearCarePhase(Phase.RECALL, later);
+            spirit.clearCarePlay(Phase.RECALL, Clarity.FADED, later);
             assertThat(spirit.getRestorePhase()).isEqualTo(Phase.RECALL);
+            assertThat(spirit.getRestoreClarity()).isEqualTo(Clarity.FADED);
             assertThat(policy.clarityOf(spirit, later)).isEqualTo(Clarity.FADED);
 
-            spirit.clearCarePhase(Phase.GUARD, later);
+            spirit.clearCarePlay(Phase.GUARD, Clarity.FADED, later);
             assertThat(spirit.getRestorePhase()).isNull();
+            assertThat(spirit.getRestoreClarity()).isNull();
             assertThat(policy.clarityOf(spirit, later)).isEqualTo(Clarity.CLEAR);
+            assertThat(spirit.getCareCount()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("흐려짐에서 기억 회복까지 복구한 채 재봉인되면 진행을 버리고 봉인 해제부터 전부")
+        void 복구_도중_재봉인() {
+            UserRelic spirit = completed();
+            LocalDateTime faded = PURIFIED_AT.plusDays(8);
+            spirit.clearCarePlay(Phase.RECALL, Clarity.FADED, faded);
+
+            LocalDateTime resealed = PURIFIED_AT.plusDays(15);
+            Clarity now = policy.clarityOf(spirit, resealed);
+            assertThat(now).isEqualTo(Clarity.RESEALED);
+            assertThat(spirit.restorePhaseFor(now)).isNull();
+            assertThat(policy.remainingPhases(now, spirit.restorePhaseFor(now)))
+                    .containsExactly(Phase.UNSEAL, Phase.RECALL, Phase.GUARD);
+            // 같은 선명도에서는 진행을 그대로 잇는다.
+            assertThat(spirit.restorePhaseFor(Clarity.FADED)).isEqualTo(Phase.RECALL);
+        }
+
+        @Test
+        @DisplayName("어려움 한 판은 남은 순서와 상관없이 선명으로 돌리고 진행도를 비운다")
+        void 전체_복구() {
+            UserRelic spirit = completed();
+            spirit.clearCarePlay(Phase.UNSEAL, Clarity.RESEALED, PURIFIED_AT.plusDays(15));
+
+            LocalDateTime later = PURIFIED_AT.plusDays(16);
+            spirit.restoreFully(later);
+            assertThat(spirit.getRestorePhase()).isNull();
+            assertThat(spirit.getRestoreClarity()).isNull();
+            assertThat(policy.clarityOf(spirit, later)).isEqualTo(Clarity.CLEAR);
+            assertThat(spirit.getCareCount()).isEqualTo(2);
+        }
+
+        @Test
+        @DisplayName("최초 정화는 돌봄 횟수를 세지 않는다")
+        void 최초_정화는_세지_않는다() {
+            assertThat(completed().getCareCount()).isZero();
         }
     }
 
-    /** 정령 수호까지 마쳐 {@link #PURIFIED_AT} 에 선명해진 도깨비. */
+    /** 오염 관리까지 마쳐 {@link #PURIFIED_AT} 에 선명해진 도깨비. */
     private static UserRelic completed() {
         UserRelic spirit = UserRelic.acquired(1L, 1, PURIFIED_AT.minusDays(1));
-        spirit.clearFirstPhase(PURIFIED_AT);
-        spirit.clearFirstPhase(PURIFIED_AT);
-        spirit.clearFirstPhase(PURIFIED_AT);
+        spirit.clearFirstPlay(PURIFIED_AT);
+        spirit.clearFirstPlay(PURIFIED_AT);
+        spirit.clearFirstPlay(PURIFIED_AT);
         return spirit;
     }
 }

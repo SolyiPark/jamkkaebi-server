@@ -37,36 +37,34 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
             """;
 
     @Test
-    @DisplayName("난이도 목록은 네 단계를 수치와 함께 준다")
+    @DisplayName("난이도 목록은 세 단계를 수치와 함께 주고, 해금 조건은 없다")
     void 난이도_목록() throws Exception {
         Player player = player("탐색가");
 
         get(player, "/api/difficulties")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.difficulties.length()").value(4))
-                .andExpect(jsonPath("$.data.difficulties[2].difficulty").value("NORMAL"))
-                .andExpect(jsonPath("$.data.difficulties[2].boardWidth").value(7))
-                .andExpect(jsonPath("$.data.difficulties[2].boardHeight").value(8))
-                .andExpect(jsonPath("$.data.difficulties[2].tapBudget").value(19))
-                .andExpect(jsonPath("$.data.difficulties[3].unlockStage").value("AWAKENED_PLUS"))
-                // 기본 개방인 난이도에는 해금 조건 키가 실리지 않는다.
-                .andExpect(jsonPath("$.data.difficulties[0].unlockStage").doesNotExist());
+                .andExpect(jsonPath("$.data.difficulties.length()").value(3))
+                .andExpect(jsonPath("$.data.difficulties[0].difficulty").value("EASY"))
+                .andExpect(jsonPath("$.data.difficulties[1].difficulty").value("NORMAL"))
+                .andExpect(jsonPath("$.data.difficulties[1].boardWidth").value(7))
+                .andExpect(jsonPath("$.data.difficulties[1].boardHeight").value(8))
+                .andExpect(jsonPath("$.data.difficulties[1].tapBudget").value(19))
+                .andExpect(jsonPath("$.data.difficulties[2].difficulty").value("HARD"))
+                .andExpect(jsonPath("$.data.difficulties[2].unlockStage").doesNotExist());
     }
 
     @Test
-    @DisplayName("난이도마다 목표 형상을 개수와 칸 수 합으로 준다 — 2개/7칸 · 3개/10칸 · 3개/12칸 · 4개/14칸")
+    @DisplayName("난이도마다 목표 형상을 개수와 칸 수 합으로 준다 — 3개/10칸 · 3개/12칸 · 4개/14칸")
     void 난이도별_목표_형상() throws Exception {
         Player player = player("탐색가");
 
         get(player, "/api/difficulties")
-                .andExpect(jsonPath("$.data.difficulties[0].shapeCount").value(2))
-                .andExpect(jsonPath("$.data.difficulties[0].shapeCellTotal").value(7))
+                .andExpect(jsonPath("$.data.difficulties[0].shapeCount").value(3))
+                .andExpect(jsonPath("$.data.difficulties[0].shapeCellTotal").value(10))
                 .andExpect(jsonPath("$.data.difficulties[1].shapeCount").value(3))
-                .andExpect(jsonPath("$.data.difficulties[1].shapeCellTotal").value(10))
-                .andExpect(jsonPath("$.data.difficulties[2].shapeCount").value(3))
-                .andExpect(jsonPath("$.data.difficulties[2].shapeCellTotal").value(12))
-                .andExpect(jsonPath("$.data.difficulties[3].shapeCount").value(4))
-                .andExpect(jsonPath("$.data.difficulties[3].shapeCellTotal").value(14));
+                .andExpect(jsonPath("$.data.difficulties[1].shapeCellTotal").value(12))
+                .andExpect(jsonPath("$.data.difficulties[2].shapeCount").value(4))
+                .andExpect(jsonPath("$.data.difficulties[2].shapeCellTotal").value(14));
     }
 
     @Test
@@ -75,18 +73,18 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
         Player player = player("탐색가");
 
         get(player, "/api/difficulties")
-                .andExpect(jsonPath("$.data.difficulties[0].threatCount").value(2))
+                .andExpect(jsonPath("$.data.difficulties[0].threatCount").value(4))
                 .andExpect(jsonPath("$.data.difficulties[0].reinforcedOnShape").value(1))
                 .andExpect(jsonPath("$.data.difficulties[0].reinforcedOnField").value(1))
                 .andExpect(jsonPath("$.data.difficulties[0].helperCount").value(1))
                 .andExpect(jsonPath("$.data.difficulties[0].bonusJeongseongCount").value(1))
                 .andExpect(jsonPath("$.data.difficulties[0].bonusCrystalCount").doesNotExist())
-                .andExpect(jsonPath("$.data.difficulties[3].threatCount").value(8))
-                .andExpect(jsonPath("$.data.difficulties[3].reinforcedOnShape").value(2))
-                .andExpect(jsonPath("$.data.difficulties[3].reinforcedOnField").value(2))
-                .andExpect(jsonPath("$.data.difficulties[3].helperCount").value(2))
-                .andExpect(jsonPath("$.data.difficulties[3].bonusJeongseongCount").value(3))
-                .andExpect(jsonPath("$.data.difficulties[3].bonusCrystalCount").doesNotExist());
+                .andExpect(jsonPath("$.data.difficulties[2].threatCount").value(8))
+                .andExpect(jsonPath("$.data.difficulties[2].reinforcedOnShape").value(2))
+                .andExpect(jsonPath("$.data.difficulties[2].reinforcedOnField").value(2))
+                .andExpect(jsonPath("$.data.difficulties[2].helperCount").value(2))
+                .andExpect(jsonPath("$.data.difficulties[2].bonusJeongseongCount").value(3))
+                .andExpect(jsonPath("$.data.difficulties[2].bonusCrystalCount").doesNotExist());
     }
 
     @Test
@@ -140,7 +138,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("최초 정화는 보통 고정이고, 난이도를 보내면 거절한다")
+    @DisplayName("최초 정화는 보통 고정이고, 다른 난이도를 보내면 P001")
     void 최초_정화는_난이도를_고를_수_없다() throws Exception {
         Player player = player("초보");
         give(player, 1);
@@ -148,9 +146,8 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
         post(player, "/api/purifications", """
                 {"relicId":1,"difficulty":"EASY"}
                 """)
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("C001"))
-                .andExpect(jsonPath("$.errors[0].field").value("difficulty"));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("P001"));
 
         post(player, "/api/purifications", """
                 {"relicId":1}
@@ -166,13 +163,19 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("각성+ 전에는 어려움 난이도를 고를 수 없다")
-    void 잠긴_난이도() throws Exception {
+    @DisplayName("흐려지면 쉬움을 고를 수 없다 — 어려움은 해금 없이 바로 고를 수 있다")
+    void 고를_수_없는_난이도() throws Exception {
         Player player = player("욕심쟁이");
         giveCompleted(player, 1);
 
         post(player, "/api/purifications", """
                 {"relicId":1,"difficulty":"HARD"}
+                """)
+                .andExpect(status().isCreated());
+
+        clock.advance(java.time.Duration.ofDays(8));
+        post(player, "/api/purifications", """
+                {"relicId":1,"difficulty":"EASY"}
                 """)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("P001"));

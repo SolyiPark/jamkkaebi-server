@@ -1,7 +1,6 @@
 package com.example.jamkkaebi.purification.dto.response;
 
 import com.example.jamkkaebi.purification.config.DifficultyParams;
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Difficulty;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -32,8 +31,7 @@ public record DifficultyView(
         int shapeCellTotal,
         int tapBudget,
         int scoutLimit,
-        BigDecimal rewardMultiplier,
-        AwakeningStage unlockStage
+        BigDecimal rewardMultiplier
 ) {
 
     public static DifficultyView of(Difficulty difficulty, DifficultyParams params) {
@@ -41,6 +39,6 @@ public record DifficultyView(
                 params.threatCount(), params.reinforcedOnShape(), params.reinforcedOnField(),
                 params.helperCount(), params.bonusJeongseongCount(),
                 params.shapeCount(), params.shapeCellTotal(),
-                params.tapBudget(), params.scoutLimit(), params.rewardMultiplier(), params.unlockStage());
+                params.tapBudget(), params.scoutLimit(), params.rewardMultiplier());
     }
 }

@@ -196,7 +196,7 @@ public class ExhibitionService {
                     : ownedBuildings.contains(item.id());
             if (!placeable) {
                 errors.add(new FieldError("items[%d]".formatted(i), item.type() == ExhibitItemType.SPIRIT
-                        ? "정령 수호까지 마친 도깨비만 둘 수 있습니다."
+                        ? "오염 관리까지 마친 도깨비만 둘 수 있습니다."
                         : "보유한 건물만 둘 수 있습니다."));
                 continue;
             }

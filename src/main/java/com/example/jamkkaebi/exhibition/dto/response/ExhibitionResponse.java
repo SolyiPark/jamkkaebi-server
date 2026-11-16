@@ -13,7 +13,7 @@ import java.util.List;
  * 숨긴 도깨비도 목록에 남는다.
  *
  * @param grid      배치 좌표 범위
- * @param spirits   정령 수호까지 마친 도깨비 전부 ({@code relicId} 순)
+ * @param spirits   오염 관리까지 마친 도깨비 전부 ({@code relicId} 순)
  * @param buildings 받은 건물 전부 ({@code buildingId} 순)
  * @param today     오늘 게임 일자 ({@link com.example.jamkkaebi.global.time.GameClock}, KST 자정에 바뀐다).
  *                  선명도를 계산한 시각과 같은 날이다. 클라이언트는 도깨비 대화의 "며칠 전에 닦아 줬다"

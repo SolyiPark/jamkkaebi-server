@@ -1,7 +1,5 @@
 package com.example.jamkkaebi.purification.config;
 
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
-
 import java.math.BigDecimal;
 
 /**
@@ -30,7 +28,6 @@ import java.math.BigDecimal;
  * @param tapBudget            탭 예산
  * @param scoutLimit           정찰 횟수
  * @param rewardMultiplier     보상 배율
- * @param unlockStage          해금에 필요한 각성 단계
  */
 public record DifficultyParams(
         Integer boardWidth,
@@ -44,13 +41,8 @@ public record DifficultyParams(
         Integer shapeCellTotal,
         Integer tapBudget,
         Integer scoutLimit,
-        BigDecimal rewardMultiplier,
-        AwakeningStage unlockStage
+        BigDecimal rewardMultiplier
 ) {
-
-    public boolean unlockedFor(AwakeningStage stage) {
-        return unlockStage == null || (stage != null && stage.reached(unlockStage));
-    }
 
     public int boardCells() {
         return boardWidth * boardHeight;
@@ -75,11 +67,10 @@ public record DifficultyParams(
                 orDefault(shapeCellTotal, defaults.shapeCellTotal),
                 orDefault(tapBudget, defaults.tapBudget),
                 orDefault(scoutLimit, defaults.scoutLimit),
-                orDefault(rewardMultiplier, defaults.rewardMultiplier),
-                orDefault(unlockStage, defaults.unlockStage));
+                orDefault(rewardMultiplier, defaults.rewardMultiplier));
     }
 
-    // 해금 조건을 뺀 값이 모두 있는가
+    // 값이 모두 있는가
     boolean complete() {
         return boardWidth != null && boardHeight != null && threatCount != null
                 && reinforcedOnShape != null && reinforcedOnField != null && helperCount != null

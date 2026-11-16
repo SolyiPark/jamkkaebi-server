@@ -1,6 +1,5 @@
 package com.example.jamkkaebi.purification.config;
 
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Difficulty;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -22,8 +21,6 @@ class PurificationPropertiesTest {
     @DisplayName("목표 형상의 기본값은 클라이언트 모양 풀에서 서로 다른 모양으로 만들 수 있는 개수/칸 수다")
     void 목표_형상_기본값() {
         PurificationProperties properties = defaults();
-
-        assertShape(properties, Difficulty.VERY_EASY, 2, 7);
         assertShape(properties, Difficulty.EASY, 3, 10);
         assertShape(properties, Difficulty.NORMAL, 3, 12);
         assertShape(properties, Difficulty.HARD, 4, 14);
@@ -32,25 +29,28 @@ class PurificationPropertiesTest {
     }
 
     @Test
-    @DisplayName("특수 타일 기본값 — 강화 합은 2 · 2 · 3 · 4칸이고 절반을 형상 안에, 정성 보너스는 1 · 1 · 2 · 3칸")
+    @DisplayName("특수 타일 기본값 — 강화 합은 2 · 3 · 4칸이고 절반을 형상 안에, 정성 보너스는 1 · 2 · 3칸")
     void 특수_타일_기본값() {
         PurificationProperties properties = defaults();
-
-        assertTiles(properties, Difficulty.VERY_EASY, 2, 1, 1, 1, 1);
         assertTiles(properties, Difficulty.EASY, 4, 1, 1, 1, 1);
         assertTiles(properties, Difficulty.NORMAL, 6, 2, 1, 1, 2);
         assertTiles(properties, Difficulty.HARD, 8, 2, 2, 2, 3);
     }
 
     @Test
-    @DisplayName("탭 예산 기본값은 12 · 16 · 19 · 20 — 보드가 클수록 늘어난다")
+    @DisplayName("탭 예산 기본값은 16 · 19 · 20 — 보드가 클수록 늘어난다")
     void 탭_예산_기본값() {
         PurificationProperties properties = defaults();
-
-        assertThat(properties.paramsOf(Difficulty.VERY_EASY).tapBudget()).isEqualTo(12);
         assertThat(properties.paramsOf(Difficulty.EASY).tapBudget()).isEqualTo(16);
         assertThat(properties.paramsOf(Difficulty.NORMAL).tapBudget()).isEqualTo(19);
         assertThat(properties.paramsOf(Difficulty.HARD).tapBudget()).isEqualTo(20);
+    }
+
+    @Test
+    @DisplayName("난이도는 쉬움·보통·어려움 세 단계다 — 매우 쉬움은 없다")
+    void 난이도_세_단계() {
+        assertThat(defaults().ordered()).containsExactly(Difficulty.EASY, Difficulty.NORMAL, Difficulty.HARD);
+        assertThat(defaults().difficulties()).hasSize(3);
     }
 
     @Test
@@ -71,7 +71,7 @@ class PurificationPropertiesTest {
     void 보드에_들어가지_않는다() {
         // 3×3 = 9칸에 형상 6칸 + 위협 3 + 보너스 2
         DifficultyParams tooSmall = new DifficultyParams(
-                3, 3, 3, 0, 0, 0, 2, 3, 6, 19, 3, new BigDecimal("1.2"), null);
+                3, 3, 3, 0, 0, 0, 2, 3, 6, 19, 3, new BigDecimal("1.2"));
 
         assertThatThrownBy(() -> withNormal(tooSmall))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -140,7 +140,7 @@ class PurificationPropertiesTest {
     @DisplayName("형상 크기 범위가 뒤집히면 기동에서 거절한다")
     void 형상_크기_범위() {
         assertThatThrownBy(() -> new PurificationProperties(
-                null, null, null, null, null, null, null, 5, 2, null))
+                null, null, null, null, null, null, 5, 2, null))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -189,8 +189,7 @@ class PurificationPropertiesTest {
     @DisplayName("난이도의 값 하나만 덮어쓰면 나머지는 그 난이도의 기본값을 쓴다 — 0 으로 채워지지 않는다")
     void 일부만_덮어쓰기() {
         MapConfigurationPropertySource source = new MapConfigurationPropertySource(Map.of(
-                "app.purification.difficulties.normal.tap-budget", "21",
-                "app.purification.difficulties.hard.unlock-stage", "AWAKENED"));
+                "app.purification.difficulties.normal.tap-budget", "21"));
 
         PurificationProperties properties = new Binder(source)
                 .bind("app.purification", PurificationProperties.class).get();
@@ -202,10 +201,6 @@ class PurificationPropertiesTest {
         assertThat(normal.threatCount()).isEqualTo(6);
         assertShape(properties, Difficulty.NORMAL, 3, 12);
         assertThat(normal.rewardMultiplier()).isEqualByComparingTo("1.2");
-        assertThat(normal.unlockStage()).isNull();
-        // 어려움을 늘 열어 두려면 해금 단계를 가장 낮은 각성으로 둔다.
-        DifficultyParams hard = properties.paramsOf(Difficulty.HARD);
-        assertThat(hard.unlockStage()).isEqualTo(AwakeningStage.AWAKENED);
         assertShape(properties, Difficulty.HARD, 4, 14);
     }
 
@@ -229,22 +224,22 @@ class PurificationPropertiesTest {
 
     private static DifficultyParams params(int shapeCount, int shapeCellTotal) {
         return new DifficultyParams(
-                7, 8, 6, 2, 1, 1, 2, shapeCount, shapeCellTotal, 19, 3, new BigDecimal("1.2"), null);
+                7, 8, 6, 2, 1, 1, 2, shapeCount, shapeCellTotal, 19, 3, new BigDecimal("1.2"));
     }
 
     // 4×4 보드에 형상 3개/6칸
     private static DifficultyParams tiles(int threat, int reinforcedOnShape, int reinforcedOnField,
                                           int helper, int bonusJeongseong) {
         return new DifficultyParams(4, 4, threat, reinforcedOnShape, reinforcedOnField, helper,
-                bonusJeongseong, 3, 6, 19, 3, new BigDecimal("1.2"), null);
+                bonusJeongseong, 3, 6, 19, 3, new BigDecimal("1.2"));
     }
 
     private static PurificationProperties withNormal(DifficultyParams normal) {
         return new PurificationProperties(
-                null, null, null, null, null, null, null, null, null, Map.of(Difficulty.NORMAL, normal));
+                null, null, null, null, null, null, null, null, Map.of(Difficulty.NORMAL, normal));
     }
 
     private static PurificationProperties defaults() {
-        return new PurificationProperties(null, null, null, null, null, null, null, null, null, null);
+        return new PurificationProperties(null, null, null, null, null, null, null, null, null);
     }
 }

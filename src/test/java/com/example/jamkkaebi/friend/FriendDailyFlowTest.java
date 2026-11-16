@@ -4,7 +4,6 @@ import com.example.jamkkaebi.friend.domain.Block;
 import com.example.jamkkaebi.friend.domain.FriendRecommendation;
 import com.example.jamkkaebi.friend.service.FriendCleanupScheduler;
 import com.example.jamkkaebi.friend.spi.ExhibitionView;
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Era;
 import com.example.jamkkaebi.support.FakeExhibitionViewReader;
 import org.junit.jupiter.api.DisplayName;
@@ -482,7 +481,7 @@ class FriendDailyFlowTest extends FriendApiTestSupport {
                 FakeExhibitionViewReader.GRID,
                 List.of(new ExhibitionView.SpiritView(
                         2, Era.THREE_KINGDOMS, "백제, 향이 스민 산맥", "금동대향로", spiritName,
-                        AwakeningStage.AWAKENED_PLUS, new ExhibitionView.Position(3, 5))),
+                        new ExhibitionView.Position(3, 5))),
                 List.of());
     }
 

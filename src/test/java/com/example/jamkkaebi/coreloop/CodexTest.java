@@ -140,7 +140,7 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.cards[1].cardState").value("FULL_COLOR"))
                 // 선명도는 카드 상태가 아니라 배지로 따로 보여 준다.
                 .andExpect(jsonPath("$.data.cards[1].clarity").value("RESEALED"))
-                .andExpect(jsonPath("$.data.cards[1].awakeningStage").value("AWAKENED"));
+                .andExpect(jsonPath("$.data.cards[1].awakeningStage").doesNotExist());
         get(player, "/api/codex/relics/{id}", INCENSE_BURNER)
                 .andExpect(jsonPath("$.data.cardState").value("FULL_COLOR"))
                 .andExpect(jsonPath("$.data.record.story").isNotEmpty());
@@ -174,13 +174,14 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.cards[1].relic.poeticAlias").value("백제, 향이 스민 산맥"))
                 .andExpect(jsonPath("$.data.cards[1].relic.realName").value("금동대향로"))
                 .andExpect(jsonPath("$.data.cards[1].relic.spiritName").value("향산이"))
-                .andExpect(jsonPath("$.data.cards[1].awakeningStage").value("AWAKENED"))
+                .andExpect(jsonPath("$.data.cards[1].awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.cards[1].clarity").value("CLEAR"))
                 // 실루엣 — 작업대 진행 중이라 이름이 없고 배지도 없다.
                 .andExpect(jsonPath("$.data.cards[2].relicId").value(FROG_FIGURINE))
                 .andExpect(jsonPath("$.data.cards[2].cardState").value("SILHOUETTE"))
                 .andExpect(jsonPath("$.data.cards[2].relic.revealLevel").value("SILHOUETTE"))
-                .andExpect(jsonPath("$.data.cards[2].relic.poeticAlias").doesNotExist())
+                // 시적 별칭은 획득 직후부터 항상 보인다.
+                .andExpect(jsonPath("$.data.cards[2].relic.poeticAlias").isNotEmpty())
                 .andExpect(jsonPath("$.data.cards[2].relic.realName").doesNotExist())
                 .andExpect(jsonPath("$.data.cards[2].awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.cards[2].clarity").doesNotExist());
@@ -191,12 +192,12 @@ class CodexTest extends CoreLoopApiTestSupport {
     void 진행_중_카드는_단계적_공개() throws Exception {
         Player player = player("학예사");
         UserRelic relic = give(player, FROG_FIGURINE);
-        relic.clearFirstPhase(LocalDateTime.now(clock));   // 봉인 해제 클리어 → 별칭 공개
+        relic.clearFirstPlay(LocalDateTime.now(clock));   // 봉인 해제 클리어 → 형태 공개
         userRelicRepository.save(relic);
 
         get(player, "/api/codex/eras/{era}", "THREE_KINGDOMS")
                 .andExpect(jsonPath("$.data.cards[2].cardState").value("SILHOUETTE"))
-                .andExpect(jsonPath("$.data.cards[2].relic.revealLevel").value("ALIAS"))
+                .andExpect(jsonPath("$.data.cards[2].relic.revealLevel").value("FORM"))
                 .andExpect(jsonPath("$.data.cards[2].relic.poeticAlias").value("신라, 흙에서 깨어난 개구리"))
                 .andExpect(jsonPath("$.data.cards[2].relic.realName").doesNotExist())
                 .andExpect(jsonPath("$.data.cards[2].relic.spiritName").doesNotExist());
@@ -256,7 +257,7 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.cardState").value("FULL_COLOR"))
                 .andExpect(jsonPath("$.data.relic.revealLevel").value("NAMED"))
                 .andExpect(jsonPath("$.data.relic.realName").value("금동대향로"))
-                .andExpect(jsonPath("$.data.awakeningStage").value("AWAKENED"))
+                .andExpect(jsonPath("$.data.awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.clarity").value("CLEAR"))
                 .andExpect(jsonPath("$.data.record.story").value(story))
                 // 링크는 콘텐츠가 정해지기 전이라 비어 있고, 비어 있으면 키가 빠진다.
@@ -283,7 +284,7 @@ class CodexTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("카드 상세 — 진행 중인 카드도 실화 기록과 이름을 내지 않는다")
+    @DisplayName("카드 상세 — 진행 중인 카드는 별칭만 내고 실화 기록과 이름은 내지 않는다")
     void 카드_상세_진행_중() throws Exception {
         Player player = player("학예사");
         give(player, INCENSE_BURNER);
@@ -297,7 +298,7 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.record").doesNotExist())
                 .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
 
-        assertNoSecrets(body, INCENSE_BURNER);
+        assertNoSecretsExceptAlias(body, INCENSE_BURNER);
     }
 
     @Test
@@ -334,7 +335,7 @@ class CodexTest extends CoreLoopApiTestSupport {
         completeFirstPurification(player, goryeo[0]);
         completeFirstPurification(player, goryeo[1]);
         clearPhase(player, goryeo[2], null);   // 봉인 해제
-        clearPhase(player, goryeo[2], null);   // 기억 회복 — 아직 정령 수호가 남았다
+        clearPhase(player, goryeo[2], null);   // 기억 회복 — 아직 오염 관리가 남았다
 
         get(player, "/api/codex")
                 .andExpect(jsonPath("$.data.eras[1].completedCount").value(2))
@@ -345,14 +346,15 @@ class CodexTest extends CoreLoopApiTestSupport {
         get(player, "/api/codex/eras/{era}", "GORYEO")
                 .andExpect(jsonPath("$.data.cards[0].cardState").value("FULL_COLOR"))
                 .andExpect(jsonPath("$.data.cards[1].cardState").value("FULL_COLOR"))
-                // 기억 회복까지 마친 카드는 별칭은 보이고 이름은 아직 가려져 있다.
+                // 기억 회복까지 마친 카드는 실제 이름까지 보이고, 도깨비 이름은 완료 전이라 아직 가려져 있다.
                 .andExpect(jsonPath("$.data.cards[2].cardState").value("SILHOUETTE"))
-                .andExpect(jsonPath("$.data.cards[2].relic.revealLevel").value("FORM"))
+                .andExpect(jsonPath("$.data.cards[2].relic.revealLevel").value("NAMED"))
                 .andExpect(jsonPath("$.data.cards[2].relic.poeticAlias").isNotEmpty())
-                .andExpect(jsonPath("$.data.cards[2].relic.realName").doesNotExist())
+                .andExpect(jsonPath("$.data.cards[2].relic.realName").isNotEmpty())
+                .andExpect(jsonPath("$.data.cards[2].relic.spiritName").doesNotExist())
                 .andExpect(jsonPath("$.data.building.acquired").value(false));
 
-        clearPhase(player, goryeo[2], null);   // 정령 수호 — 시대 완성
+        clearPhase(player, goryeo[2], null);   // 오염 관리 — 시대 완성
 
         get(player, "/api/codex")
                 .andExpect(jsonPath("$.data.eras[1].completedCount").value(3))
@@ -363,7 +365,7 @@ class CodexTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.collectionRate").value(100))
                 .andExpect(jsonPath("$.data.cards[2].cardState").value("FULL_COLOR"))
                 .andExpect(jsonPath("$.data.cards[2].relic.realName").isNotEmpty())
-                .andExpect(jsonPath("$.data.cards[2].awakeningStage").value("AWAKENED"))
+                .andExpect(jsonPath("$.data.cards[2].awakeningStage").doesNotExist())
                 .andExpect(jsonPath("$.data.cards[2].clarity").value("CLEAR"))
                 .andExpect(jsonPath("$.data.building.acquired").value(true))
                 .andExpect(jsonPath("$.data.building.level").value(1))
@@ -459,10 +461,15 @@ class CodexTest extends CoreLoopApiTestSupport {
 
     /** 가려진 카드의 응답에 이름·실화 텍스트가 한 글자도 실리지 않았는지 본다. */
     private void assertNoSecrets(String body, int relicId) {
+        assertThat(body).doesNotContain(catalog.relic(relicId).getPoeticAlias());
+        assertNoSecretsExceptAlias(body, relicId);
+    }
+
+    // 획득한 카드는 별칭이 늘 보이므로 별칭만 빼고 검사한다.
+    private void assertNoSecretsExceptAlias(String body, int relicId) {
         RelicMaster master = catalog.relic(relicId);
         assertThat(body)
                 .doesNotContain(master.getRealName())
-                .doesNotContain(master.getPoeticAlias())
                 .doesNotContain(master.getSpiritDefaultName())
                 .doesNotContain(master.getRealStory())
                 .doesNotContain("story");

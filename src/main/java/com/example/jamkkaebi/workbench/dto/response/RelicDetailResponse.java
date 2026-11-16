@@ -1,10 +1,8 @@
 package com.example.jamkkaebi.workbench.dto.response;
 
-import com.example.jamkkaebi.relic.domain.AwakeningStage;
 import com.example.jamkkaebi.relic.domain.Clarity;
 import com.example.jamkkaebi.relic.domain.Phase;
 import com.example.jamkkaebi.relic.domain.RelicStatus;
-import com.example.jamkkaebi.relic.dto.response.GaugeView;
 import com.example.jamkkaebi.relic.dto.response.RelicCard;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
@@ -16,7 +14,9 @@ import java.time.LocalDateTime;
  * <p>진행 단계에 해당하지 않는 필드는 {@code null} 로 두어 직렬화에서 빠진다.
  *
  * @param currentPhase     최초 정화 진행도. 이미 완료했으면 {@code null}
- * @param lastClearedPhase 이번 복구 순서에서 마지막으로 클리어한 페이즈. 복구 중이 아니면 {@code null}
+ * @param careCount        관리 플레이 성공 횟수. 완료 전이면 {@code null}
+ * @param lastClearedPhase 이번 복구 순서에서 마지막으로 클리어한 페이즈. 복구 중이 아니거나
+ *                         복구 도중 선명도가 바뀌어 진행이 초기화됐으면 {@code null}
  * @param resealAt         이대로 두면 재봉인되는 시각. 이미 재봉인됐으면 {@code null}
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -24,10 +24,7 @@ public record RelicDetailResponse(
         RelicCard relic,
         RelicStatus status,
         Phase currentPhase,
-        AwakeningStage awakeningStage,
-        GaugeView growthGauge,
-        Boolean growthReady,
-        AwakeningStage nextStage,
+        Integer careCount,
         Clarity clarity,
         LocalDateTime lastPurifiedAt,
         Phase lastClearedPhase,
