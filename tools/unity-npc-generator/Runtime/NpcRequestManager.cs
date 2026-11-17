@@ -106,7 +106,7 @@ namespace Jamkkaebi.Npc
             this.slm = slm;
             this.rule = rule;
             SlmEnabled = slm != null;
-            SlmTimeout = TimeSpan.FromSeconds(4);
+            SlmTimeout = TimeSpan.FromSeconds(3);
             RecentLineCount = 10;
             Cache = new NpcLineCache();
             UsePrefetched = true;
@@ -138,6 +138,7 @@ namespace Jamkkaebi.Npc
 
         private sealed class PrefetchJob
         {
+            public bool IsTemplate;   // 칸 있는 대사로 만든다 (PrefetchTemplate)
             public ReactionRequest Template;
             public int Count;
             public int NextVariation;
@@ -145,7 +146,7 @@ namespace Jamkkaebi.Npc
         }
 
         /// <summary>
-        /// 시나리오(같은 도깨비의 같은 선택지)마다 기억해 두고 다시 쓰지 않을 최근 대사 수. 기본 10 — 최근 10개 중 하나와 80% 넘게 겹치면
+        /// 시나리오(같은 도깨비의 같은 선택지)마다 기억해 두고 다시 쓰지 않을 최근 대사 수. 기본 10 — 최근 10개 중 하나와 90% 이상 겹치면
         /// 출력 검사가 거르고 SLM 생성기가 새로 만든다. 0 이면 기억하지 않는다.
         /// </summary>
         public int RecentLineCount { get; set; }
@@ -156,7 +157,7 @@ namespace Jamkkaebi.Npc
         public bool SlmEnabled { get; set; }
 
         /// <summary>
-        /// SLM 을 기다리는 시간. 넘으면 기본 대사로 대신한다. 기본 4초이고, 실기기의 첫 응답·전체 생성 시간을 재서 정한다.
+        /// SLM 을 기다리는 시간. 넘으면 기본 대사로 대신한다. 기본 3초이고, 실기기의 첫 응답·전체 생성 시간을 재서 정한다.
         /// 모델 런타임이 취소에 늦게 반응해도 이 시간이 지나면 기다리지 않는다.
         /// </summary>
         public TimeSpan SlmTimeout { get; set; }
@@ -197,10 +198,15 @@ namespace Jamkkaebi.Npc
                 }
                 AttachRecent(request);
 
-                // 0) 미리 만들어 둔 대사가 있으면 바로 꺼내 쓴다 (같은 상황에서 만든 것, 최근 대사와 90% 넘게 겹치지 않는 것)
+                // 0) 미리 만들어 둔 대사가 있으면 바로 꺼내 쓴다 (같은 상황에서 만든 것, 최근 대사와 90% 이상 겹치지 않는 것)
                 if (UsePrefetched && !NpcActions.SkipsModel(request.Candidates))
                 {
                     ReactionResult ready = Cache.TryTake(request, request.RecentLines);
+                    if (ready == null)
+                    {
+                        // 칸 있는 대사: 서버 값을 모르는 채로 미리 만들어 둔 것에 이 요청의 시간대·호칭·방문 횟수를 넣어 바로 완성한다
+                        ready = Cache.TryTakeTemplate(request, request.RecentLines);
+                    }
                     if (ready != null)
                     {
                         request.RequestId = NewId();
@@ -283,9 +289,25 @@ namespace Jamkkaebi.Npc
         /// 이 상황의 대사를 count 개 미리 만들어 보관함(Cache)에 둔다 — 백그라운드로, 기다리지 않는다. 요청이 오면 바로 꺼내 쓰므로 기기가 느려도 응답이 바로 뜬다.
         /// template 은 요청과 같은 모양이어야 한다 (NpcContextBuilder.PrefetchRequests 가 만든다: 탭 인사·안부·관리 감사·손님 관람).
         /// 한가할 때(진행 중인 요청이 없을 때)만 만들고, 요청이 오면 멈췄다가 끝난 뒤 이어 만든다. 만든 대사는 서로, 그리고 이미 띄운 최근 대사와
-        /// 90% 넘게 겹치지 않아야 보관한다(NpcLineChecks.Similar). SLM 을 쓰지 않거나 이야기·끌려갈 때처럼 모델을 안 쓰는 요청이면 아무것도 하지 않는다.
+        /// 90% 이상 겹치지 않아야 보관한다(NpcLineChecks.Similar). SLM 을 쓰지 않거나 이야기·끌려갈 때처럼 모델을 안 쓰는 요청이면 아무것도 하지 않는다.
         /// </summary>
         public void Prefetch(ReactionRequest template, int count)
+        {
+            EnqueuePrefetch(template, count, false);
+        }
+
+        /// <summary>
+        /// 서버 값(시간대·닉네임·방문 횟수)을 <b>기다리지 않고</b> 대사를 미리 만든다. template 의 값(시간대 사실·호칭·방문 횟수)은 견본일 뿐이고, 만든 대사에서 그 값에 달린 말을
+        /// 칸(<c>{시간대}</c>·<c>{호칭}</c>·<c>{횟수}</c>, NpcLineSlots)으로 남겨 보관한다. 서버 값이 온 뒤의 요청(RequestAsync)은 같은 상황이면 이 대사를 꺼내 칸에 실제 값을
+        /// 넣어 모델 없이 바로 완성한다 — 시간대가 바뀌거나 닉네임·방문 횟수가 달라도 같은 대사를 쓸 수 있다. 칸으로 만들 수 없는 대사(며칠 전·"아침 일찍")는 보관하지 않고 다시 만든다.
+        /// 견본을 만드는 것은 NpcContextBuilder.PrefetchTemplates 가 한다.
+        /// </summary>
+        public void PrefetchTemplate(ReactionRequest template, int count)
+        {
+            EnqueuePrefetch(template, count, true);
+        }
+
+        private void EnqueuePrefetch(ReactionRequest template, int count, bool isTemplate)
         {
             if (template == null || count <= 0 || !SlmEnabled || slm == null || template.Candidates == null || template.Candidates.Count == 0
                     || NpcActions.SkipsModel(template.Candidates))
@@ -295,16 +317,16 @@ namespace Jamkkaebi.Npc
             lock (gate)
             {
                 // 같은 상황이 이미 줄에 있으면 더하지 않는다
-                string key = NpcLineCache.KeyOf(template);
+                string key = isTemplate ? NpcLineCache.TemplateKeyOf(template) : NpcLineCache.KeyOf(template);
                 foreach (PrefetchJob queued in prefetchJobs)
                 {
-                    if (NpcLineCache.KeyOf(queued.Template) == key)
+                    if (queued.IsTemplate == isTemplate && (isTemplate ? NpcLineCache.TemplateKeyOf(queued.Template) : NpcLineCache.KeyOf(queued.Template)) == key)
                     {
                         queued.Count = Math.Max(queued.Count, count);
                         return;
                     }
                 }
-                prefetchJobs.Enqueue(new PrefetchJob { Template = template, Count = Math.Min(count, Math.Max(1, Cache.MaxPerKey)), NextVariation = template.Variation });
+                prefetchJobs.Enqueue(new PrefetchJob { IsTemplate = isTemplate, Template = template, Count = Math.Min(count, Math.Max(1, Cache.MaxPerKey)), NextVariation = template.Variation });
                 if (!prefetchRunning)
                 {
                     prefetchRunning = true;
@@ -407,7 +429,7 @@ namespace Jamkkaebi.Npc
         // 한 상황의 대사를 목표 수만큼 만든다. 요청 때문에 취소되면 false(나중에 이어 만든다), 다 만들었거나 포기했으면 true
         private async Task<bool> RunPrefetchJob(PrefetchJob job)
         {
-            while (Cache.Count(job.Template) < job.Count && job.Failures < 3)
+            while ((job.IsTemplate ? Cache.TemplateCount(job.Template) : Cache.Count(job.Template)) < job.Count && job.Failures < 3)
             {
                 if (Volatile.Read(ref activeRequests) > 0)
                 {
@@ -448,9 +470,9 @@ namespace Jamkkaebi.Npc
                         job.Failures++;
                         continue;
                     }
-                    if (!result.IsSuccess || !Cache.Add(job.Template, result))
+                    if (!result.IsSuccess || !(job.IsTemplate ? Cache.AddTemplate(job.Template, result) : Cache.Add(job.Template, result)))
                     {
-                        // 검사에 걸렸거나 보관한 대사·최근 대사와 90% 넘게 겹침 → 다음 곁들일 거리·첫 낱말로 다시
+                        // 검사에 걸렸거나 보관한 대사·최근 대사와 90% 이상 겹침 → 다음 곁들일 거리·첫 낱말로 다시
                         job.Failures++;
                     }
                 }
@@ -459,7 +481,7 @@ namespace Jamkkaebi.Npc
         }
 
         // 미리 만들 요청: 템플릿을 베끼고 곁들일 거리 번호를 바꾼다. 이미 보관한 대사와 그 시나리오의 최근 대사를 RecentLines 로 넣어
-        // 출력 검사가 90% 넘게 겹치는 대사를 거르게 한다 (프롬프트에는 싣지 않는다)
+        // 출력 검사가 90% 이상 겹치는 대사를 거르게 한다 (프롬프트에는 싣지 않는다)
         private ReactionRequest CopyForPrefetch(PrefetchJob job)
         {
             ReactionRequest t = job.Template;
@@ -477,7 +499,7 @@ namespace Jamkkaebi.Npc
                 ContentVersion = t.ContentVersion,
                 Variation = job.NextVariation++,
                 Nickname = t.Nickname,
-                Familiar = t.Familiar,
+                Intimacy = t.Intimacy,
                 RecentLines = new List<string>()
             };
             if (t.RecentLines != null)
@@ -485,7 +507,7 @@ namespace Jamkkaebi.Npc
                 copy.RecentLines.AddRange(t.RecentLines);
             }
             copy.RecentLines.AddRange(RecentLinesOf(t.RelicId, t.Input));
-            copy.RecentLines.AddRange(Cache.LinesFor(t));
+            copy.RecentLines.AddRange(job.IsTemplate ? Cache.TemplateLinesFor(t) : Cache.LinesFor(t));
             return copy;
         }
 

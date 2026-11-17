@@ -160,14 +160,35 @@ namespace Jamkkaebi.Npc
         public const string StoryIndex = "story_index";             // 그 실화가 stories 의 몇 번째인지 (0부터). 프롬프트에는 싣지 않고, 규칙 기반 생성기가 같은 이야기 대사를 고를 때 쓴다
     }
 
-    /// <summary>상대를 부르는 이름. 30일에 3번 이상 방문한 상대는 닉네임, 그 밖에는 '발굴자'.</summary>
+    /// <summary>
+    /// 상대를 부르는 이름과 친밀도. 친밀도는 최근 30일 방문한 날 수로 정한다: 3·7·12·20번을 채울 때마다 한 단계 오른다 (0~4단계).
+    /// 3단계(30일 방문 12번)부터 닉네임으로 부르고, 0~2단계는 '발굴자'로 부른다.
+    /// </summary>
     public static class NpcAddress
     {
-        /// <summary>친밀하지 않은 상대(30일 방문 3번 미만, 닉네임 없음)를 부르는 호칭.</summary>
+        /// <summary>친밀하지 않은 상대(0단계, 닉네임 없음)를 부르는 호칭.</summary>
         public const string Stranger = "발굴자";
 
-        /// <summary>최근 30일에 이만큼 이상 방문하면 친밀해져 닉네임으로 부른다.</summary>
-        public const int FamiliarVisits = 3;
+        /// <summary>최근 30일 방문한 날 수가 이만큼 이상이면 한 단계씩 오른다: 3번 → 1단계, 7번 → 2단계, 12번 → 3단계, 20번 → 4단계.</summary>
+        public static readonly System.Collections.ObjectModel.ReadOnlyCollection<int> LevelUpVisits =
+            System.Array.AsReadOnly(new[] { 3, 7, 12, 20 });
+
+        /// <summary>이 단계(3단계 = 30일 방문 12번) 이상이면 닉네임으로 부른다.</summary>
+        public const int NicknameLevel = 3;
+
+        /// <summary>최근 30일 방문한 날 수(같은 날은 하루)에서 친밀도를 구한다. 방문 기록이 없으면 0.</summary>
+        public static int IntimacyOf(int? visits)
+        {
+            int level = 0;
+            if (visits.HasValue)
+            {
+                while (level < LevelUpVisits.Count && visits.Value >= LevelUpVisits[level])
+                {
+                    level++;
+                }
+            }
+            return level;
+        }
     }
 
     public static class NpcTargets
@@ -255,8 +276,17 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public string Nickname { get; set; }
 
-        /// <summary>최근 30일에 3번 이상 방문해 친밀해졌는지. 그러면 닉네임으로, 아니면 '발굴자'로 부른다 (컨텍스트 구성기가 정한다).</summary>
-        public bool Familiar { get; set; }
+        /// <summary>
+        /// 친밀도 0~4단계 (NpcAddress.IntimacyOf — 최근 30일 방문한 날 수가 3·7·12·20번을 채울 때마다 한 단계). 컨텍스트 구성기가 정한다.
+        /// 3단계부터 닉네임으로 부른다.
+        /// </summary>
+        public int Intimacy { get; set; }
+
+        /// <summary>친밀해져(3단계 이상) 닉네임으로 부르는지. 닉네임이 없으면 친밀해도 '발굴자'로 부른다.</summary>
+        public bool Familiar
+        {
+            get { return Intimacy >= NpcAddress.NicknameLevel && !string.IsNullOrEmpty(Nickname); }
+        }
 
         /// <summary>프롬프트에 싣고 출력 검사가 지키는 호칭: 친밀하고 닉네임이 있으면 닉네임, 아니면 '발굴자'.</summary>
         public string AddressName

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Jamkkaebi.Npc
 {
@@ -87,6 +88,166 @@ namespace Jamkkaebi.Npc
             }
             builder.Append("|n:").Append(request.Nickname).Append(':').Append(request.Familiar);
             return builder.ToString();
+        }
+
+        private static readonly Regex SituationTime = new Regex("(?<=주인이 )(새벽|아침|오전|낮|저녁|밤)(?=에 )", RegexOptions.CultureInvariant);
+        private static readonly Regex SituationCount = new Regex("[0-9]+(?=번 온 친구)", RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 칸 있는 대사(템플릿)용 열쇠. KeyOf 와 같되 <b>서버가 넘겨주는 값에 달린 것을 뺀다</b> — 시간대(상황 문장의 "낮에"·사실 time_of_day), 닉네임·친밀도(호칭),
+        /// 방문 횟수(상황 문장의 "7번"·사실 visit_count_30d·visit_days). 그래서 서버 값을 모르는 채로 미리 만든 대사를, 서버 값이 온 뒤의 요청이 같은 열쇠로 찾는다.
+        /// 선명도·마지막 관리·기억처럼 어떤 말을 할지 정하는 사실은 그대로 넣는다.
+        /// </summary>
+        public static string TemplateKeyOf(ReactionRequest request)
+        {
+            var builder = new StringBuilder("T|");
+            string situation = SituationCount.Replace(SituationTime.Replace(request.Situation ?? "", NpcLineSlots.TimeSlot), NpcLineSlots.CountSlot);
+            builder.Append(request.RelicId).Append('|').Append(request.Mode).Append('|').Append(request.Input).Append('|').Append(situation);
+            if (request.Candidates != null)
+            {
+                foreach (ActionCandidate candidate in request.Candidates)
+                {
+                    if (candidate != null)
+                    {
+                        builder.Append("|c:").Append(candidate.ActionId).Append('=')
+                               .Append(string.Join(",", (candidate.TargetIds ?? new List<string>()).ToArray()));
+                    }
+                }
+            }
+            var facts = new List<string>();
+            if (request.Facts != null)
+            {
+                foreach (Fact fact in request.Facts)
+                {
+                    if (fact != null && fact.Key != NpcFactKeys.Awakening && fact.Key != NpcFactKeys.StoryIndex && fact.Key != NpcFactKeys.TimeOfDay
+                            && fact.Key != NpcFactKeys.VisitCount30d && fact.Key != NpcFactKeys.VisitDays)
+                    {
+                        facts.Add(fact.Key + "=" + fact.Value);
+                    }
+                }
+            }
+            facts.Sort(StringComparer.Ordinal);
+            foreach (string fact in facts)
+            {
+                builder.Append("|f:").Append(fact);
+            }
+            if (request.Memory != null)
+            {
+                foreach (MemoryEntry memory in request.Memory)
+                {
+                    if (memory != null)
+                    {
+                        builder.Append("|m:").Append(memory.DaysAgo).Append(':').Append(memory.ActionId).Append(':').Append(memory.Summary);
+                    }
+                }
+            }
+            return builder.ToString();
+        }
+
+        /// <summary>그 상황으로 미리 만든 칸 있는 대사 수.</summary>
+        public int TemplateCount(ReactionRequest request)
+        {
+            lock (gate)
+            {
+                return Live(TemplateKeyOf(request)).Count;
+            }
+        }
+
+        /// <summary>
+        /// 그 상황으로 보관된 칸 있는 대사 글. 요청 자신의 값(견본)을 칸에 넣은 글이다 — 미리 만들 때 새로 만든 대사와 겹치는지 비교하는 데 쓴다.
+        /// 넣을 값이 없는 칸은 그대로 둔다.
+        /// </summary>
+        public List<string> TemplateLinesFor(ReactionRequest request)
+        {
+            SlotValues sample = SlotValues.FromRequest(request);
+            lock (gate)
+            {
+                var lines = new List<string>();
+                foreach (Entry entry in Live(TemplateKeyOf(request)))
+                {
+                    lines.Add(NpcLineSlots.Fill(entry.Result.Line, sample) ?? entry.Result.Line);
+                }
+                return lines;
+            }
+        }
+
+        /// <summary>
+        /// 서버 값을 모르는 채로(또는 견본 값으로) 만든 대사를 칸 있는 대사로 바꿔 넣는다. 요청 자신의 값(시간대·호칭·방문 횟수)이 견본이다.
+        /// 칸으로 만들 수 없는 대사(며칠 전·"아침 일찍" 등, NpcLineSlots 참고)·꽉 찬 보관함·이미 있는 대사와 90% 이상 겹치는 대사는 넣지 않고 false.
+        /// </summary>
+        public bool AddTemplate(ReactionRequest request, ReactionResult result)
+        {
+            if (request == null || result == null || !result.IsSuccess || string.IsNullOrEmpty(result.Line))
+            {
+                return false;
+            }
+            string slotted = NpcLineSlots.Slotify(result.Line, SlotValues.FromRequest(request));
+            if (slotted == null)
+            {
+                return false;
+            }
+            string key = TemplateKeyOf(request);
+            lock (gate)
+            {
+                List<Entry> live = Live(key);
+                if (live.Count >= MaxPerKey)
+                {
+                    return false;
+                }
+                foreach (Entry entry in live)
+                {
+                    if (NpcLineChecks.Similar(slotted, entry.Result.Line) != null)
+                    {
+                        return false;
+                    }
+                }
+                live.Add(new Entry
+                {
+                    Result = ReactionResult.Success(result.RequestId, result.ActionId, result.TargetId, slotted, result.Source, result.Note),
+                    At = Now()
+                });
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// 그 상황으로 미리 만든 칸 있는 대사 하나를, 요청의 서버 값(시간대·호칭·방문 횟수)을 칸에 넣어 완성해 꺼낸다. 칸에 넣을 값이 없거나 넣은 뒤 시간대·호칭이
+        /// 규칙과 어긋나면 그 대사는 두고 다음 것을 본다. recent 와 90% 이상 겹치는 것은 버린다. 없으면 null. 결과의 Note 에 채운 칸이 적힌다.
+        /// </summary>
+        public ReactionResult TryTakeTemplate(ReactionRequest request, IEnumerable<string> recent)
+        {
+            if (request == null)
+            {
+                return null;
+            }
+            SlotValues actual = SlotValues.FromRequest(request);
+            string key = TemplateKeyOf(request);
+            lock (gate)
+            {
+                List<Entry> live = Live(key);
+                for (int i = 0; i < live.Count; i++)
+                {
+                    ReactionResult stored = live[i].Result;
+                    string filled = NpcLineSlots.Fill(stored.Line, actual);
+                    if (filled == null
+                            || NpcLineChecks.TimeContradiction(filled, actual.TimeWord) != null
+                            || NpcLineChecks.AddressContradiction(filled, request.Nickname, request.Familiar) != null)
+                    {
+                        continue; // 이 요청에는 못 쓰는 대사 — 다른 요청을 위해 둔다
+                    }
+                    if (NpcLineChecks.FindSimilar(filled, recent).HasValue)
+                    {
+                        live.RemoveAt(i);
+                        i--;
+                        continue;
+                    }
+                    live.RemoveAt(i);
+                    string names = NpcLineSlots.SlotNames(stored.Line);
+                    return ReactionResult.Success(stored.RequestId, stored.ActionId, stored.TargetId, filled, stored.Source,
+                            names.Length > 0 ? "칸 채움: " + names : stored.Note);
+                }
+                return null;
+            }
         }
 
         /// <summary>그 상황으로 보관된 대사 수 (오래된 것은 먼저 버린다).</summary>
