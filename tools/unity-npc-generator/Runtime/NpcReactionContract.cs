@@ -96,8 +96,36 @@ namespace Jamkkaebi.Npc
             return actionId == TellStory;
         }
 
+        /// <summary>
+        /// 대사 없이 몸짓(애니메이션)만 하는 행동. 끌려갈 때의 버둥거림은 대사를 띄우지 않는다 — 규칙 기반 생성기가 이 행동을
+        /// 고르되 대사는 빈 글(<see cref="ReactionResult.Line"/> == "")로 돌려주고, 부르는 쪽은 말풍선 없이 애니메이션만 재생한다.
+        /// </summary>
+        public static bool IsSilent(string actionId)
+        {
+            return actionId == StruggleProtest || actionId == StrugglePlay;
+        }
+
         /// <summary>후보가 모두 정해진 대사를 쓰는 행동인지. 그러면 SLM 을 부르지 않는다.</summary>
         public static bool OnlyFixedLines(List<ActionCandidate> candidates)
+        {
+            return AllMatch(candidates, UsesFixedLines);
+        }
+
+        /// <summary>후보가 모두 대사 없는 행동인지(끌려갈 때). 그러면 SLM 을 부르지 않고 대사 없는 반응을 돌려준다.</summary>
+        public static bool OnlySilent(List<ActionCandidate> candidates)
+        {
+            return AllMatch(candidates, IsSilent);
+        }
+
+        /// <summary>
+        /// 후보가 모두 정해진 대사를 쓰거나 대사가 없는 행동인지. 그러면 모델을 부르지 않고 프롬프트도 만들지 않는다.
+        /// </summary>
+        public static bool SkipsModel(List<ActionCandidate> candidates)
+        {
+            return AllMatch(candidates, a => UsesFixedLines(a) || IsSilent(a));
+        }
+
+        private static bool AllMatch(List<ActionCandidate> candidates, Func<string, bool> test)
         {
             if (candidates == null || candidates.Count == 0)
             {
@@ -105,7 +133,7 @@ namespace Jamkkaebi.Npc
             }
             foreach (ActionCandidate candidate in candidates)
             {
-                if (candidate == null || !UsesFixedLines(candidate.ActionId))
+                if (candidate == null || !test(candidate.ActionId))
                 {
                     return false;
                 }
@@ -126,8 +154,41 @@ namespace Jamkkaebi.Npc
         public const string LastCareDaysAgo = "last_care_days_ago"; // 정수 (며칠 전)
         public const string VisitCount30d = "visit_count_30d";      // 정수 — 손님 장면
         public const string CareResult = "care_result";             // 관리 결과 한 줄
+        public const string TimeOfDay = "time_of_day";              // 새벽 · 아침 · 오전 · 낮 · 저녁 · 밤 — 서버 시각에서 계산. 탭 인사에만 넣는다
+        public const string VisitDays = "visit_days";               // 상대가 최근 30일에 방문한 날 ("오늘, 3일 전, 9일 전") — 서버의 방문 기록
         public const string VerifiedStory = "verified_story";       // 이번에 들려줄 실화 한 문장 (페르소나 stories 중 StoryRotation 이 고른 것)
         public const string StoryIndex = "story_index";             // 그 실화가 stories 의 몇 번째인지 (0부터). 프롬프트에는 싣지 않고, 규칙 기반 생성기가 같은 이야기 대사를 고를 때 쓴다
+    }
+
+    /// <summary>
+    /// 상대를 부르는 이름과 친밀도. 친밀도는 최근 30일 방문한 날 수로 정한다: 3·7·12·20번을 채울 때마다 한 단계 오른다 (0~4단계).
+    /// 3단계(30일 방문 12번)부터 닉네임으로 부르고, 0~2단계는 '발굴자'로 부른다.
+    /// </summary>
+    public static class NpcAddress
+    {
+        /// <summary>친밀하지 않은 상대(0단계, 닉네임 없음)를 부르는 호칭.</summary>
+        public const string Stranger = "발굴자";
+
+        /// <summary>최근 30일 방문한 날 수가 이만큼 이상이면 한 단계씩 오른다: 3번 → 1단계, 7번 → 2단계, 12번 → 3단계, 20번 → 4단계.</summary>
+        public static readonly System.Collections.ObjectModel.ReadOnlyCollection<int> LevelUpVisits =
+            System.Array.AsReadOnly(new[] { 3, 7, 12, 20 });
+
+        /// <summary>이 단계(3단계 = 30일 방문 12번) 이상이면 닉네임으로 부른다.</summary>
+        public const int NicknameLevel = 3;
+
+        /// <summary>최근 30일 방문한 날 수(같은 날은 하루)에서 친밀도를 구한다. 방문 기록이 없으면 0.</summary>
+        public static int IntimacyOf(int? visits)
+        {
+            int level = 0;
+            if (visits.HasValue)
+            {
+                while (level < LevelUpVisits.Count && visits.Value >= LevelUpVisits[level])
+                {
+                    level++;
+                }
+            }
+            return level;
+        }
     }
 
     public static class NpcTargets
@@ -209,6 +270,30 @@ namespace Jamkkaebi.Npc
         /// <summary>어느 도깨비인지 (서버의 relicId).</summary>
         public int RelicId { get; set; }
 
+        /// <summary>
+        /// 지금 상대(주인 장면은 주인, 손님 장면은 구경 온 친구)의 닉네임. 서버가 넘긴다. 없으면 null.
+        /// 닉네임은 Familiar 일 때만 부른다 — 아니면 '발굴자'.
+        /// </summary>
+        public string Nickname { get; set; }
+
+        /// <summary>
+        /// 친밀도 0~4단계 (NpcAddress.IntimacyOf — 최근 30일 방문한 날 수가 3·7·12·20번을 채울 때마다 한 단계). 컨텍스트 구성기가 정한다.
+        /// 3단계부터 닉네임으로 부른다.
+        /// </summary>
+        public int Intimacy { get; set; }
+
+        /// <summary>친밀해져(3단계 이상) 닉네임으로 부르는지. 닉네임이 없으면 친밀해도 '발굴자'로 부른다.</summary>
+        public bool Familiar
+        {
+            get { return Intimacy >= NpcAddress.NicknameLevel && !string.IsNullOrEmpty(Nickname); }
+        }
+
+        /// <summary>프롬프트에 싣고 출력 검사가 지키는 호칭: 친밀하고 닉네임이 있으면 닉네임, 아니면 '발굴자'.</summary>
+        public string AddressName
+        {
+            get { return Familiar && !string.IsNullOrEmpty(Nickname) ? Nickname : NpcAddress.Stranger; }
+        }
+
         public InteractionMode Mode { get; set; }
 
         /// <summary>NpcInputs 중 하나.</summary>
@@ -279,7 +364,10 @@ namespace Jamkkaebi.Npc
         /// <summary>Success 일 때. 고른 후보의 대상 중 하나다.</summary>
         public string TargetId { get; private set; }
 
-        /// <summary>Success 일 때. 일반 텍스트로 띄운다 (리치 텍스트 끔).</summary>
+        /// <summary>
+        /// Success 일 때. 일반 텍스트로 띄운다 (리치 텍스트 끔). <b>빈 글이면 말풍선을 띄우지 않고</b> 행동의 애니메이션만 재생한다
+        /// (끌려갈 때의 Struggle — <see cref="NpcActions.IsSilent"/>).
+        /// </summary>
         public string Line { get; private set; }
 
         /// <summary>Failed 일 때.</summary>

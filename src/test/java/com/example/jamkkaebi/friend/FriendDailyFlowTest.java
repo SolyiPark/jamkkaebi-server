@@ -174,7 +174,11 @@ class FriendDailyFlowTest extends FriendApiTestSupport {
         makeFriends(other, visitor);
 
         get(visitor, "/api/friends/{code}/exhibition", owner.code())
-                .andExpect(jsonPath("$.data.recentVisitDays").value(1));
+                .andExpect(jsonPath("$.data.recentVisitDays").value(1))
+                // 방문 기록: 도깨비가 "며칠 전에 왔다"를 실제 기록대로 말하도록 날짜 목록과, 나를 부를 닉네임도 내린다
+                .andExpect(jsonPath("$.data.recentVisitDates.length()").value(1))
+                .andExpect(jsonPath("$.data.recentVisitDates[0]").value("2026-09-12"))
+                .andExpect(jsonPath("$.data.visitorNickname").value("방문객"));
         // 같은 날 다시 열어도, 다른 친구 전시관을 열어도 이 친구의 날 수는 늘지 않는다.
         get(visitor, "/api/friends/{code}/exhibition", other.code()).andExpect(status().isOk());
         get(visitor, "/api/friends/{code}/exhibition", owner.code())
@@ -187,7 +191,10 @@ class FriendDailyFlowTest extends FriendApiTestSupport {
 
         clock.set(NEXT_DAY);
         get(visitor, "/api/friends/{code}/exhibition", owner.code())
-                .andExpect(jsonPath("$.data.recentVisitDays").value(2));
+                .andExpect(jsonPath("$.data.recentVisitDays").value(2))
+                // 가까운 날부터, 날 수와 목록 길이가 같다
+                .andExpect(jsonPath("$.data.recentVisitDates.length()").value(2))
+                .andExpect(jsonPath("$.data.recentVisitDates[1]").value("2026-09-12"));
         // 방향이 있다 — 주인이 방문객의 전시관을 처음 열면 주인 쪽은 1이다.
         get(owner, "/api/friends/{code}/exhibition", visitor.code())
                 .andExpect(jsonPath("$.data.recentVisitDays").value(1));

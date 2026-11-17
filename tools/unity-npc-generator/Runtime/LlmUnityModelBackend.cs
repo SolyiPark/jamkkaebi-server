@@ -23,11 +23,13 @@ namespace Jamkkaebi.Npc
             NumThreads = -1;
             ContextSize = 2048;
             Temperature = 0.7f;
-            MaxTokens = 64;
+            MaxTokens = 40;
             Grammar = LlmUnityGrammar.Gbnf;
             DisableThinking = true;
             WarmUp = true;
             CancelGrace = TimeSpan.FromSeconds(2);
+            SaveSystemState = true;
+            StateVersion = "1";
         }
 
         /// <summary>GGUF 파일 이름. 에디터의 LLM 모델 관리자에 등록한 이름 그대로 (예: "gemma-4-E2B-it-Q4_K_M.gguf").</summary>
@@ -67,6 +69,16 @@ namespace Jamkkaebi.Npc
         /// <summary>취소한 뒤 모델이 멈추기를 기다리는 최대 시간. 지나면 기다리지 않고 다음 요청을 받는다.</summary>
         public TimeSpan CancelGrace { get; set; }
 
+        /// <summary>
+        /// 시스템 메시지를 읽은 모델의 기억(KV 캐시)을 파일로 저장해 두고, 다음에 같은 시스템 메시지를 미리 읽을 때 읽는 대신
+        /// 파일에서 되살린다. 앱을 다시 켜도 도깨비 다섯의 시스템 메시지(각 수백 토큰)를 다시 읽지 않아 첫 대사가 빨라진다.
+        /// 세션이 ILlmUnityStateStore 를 지원하지 않거나 저장·복원이 실패하면 그냥 읽는다.
+        /// </summary>
+        public bool SaveSystemState { get; set; }
+
+        /// <summary>저장한 기억의 버전. 시스템 메시지 밖의 것(템플릿·라이브러리)이 바뀌어 옛 기억을 버려야 하면 올린다.</summary>
+        public string StateVersion { get; set; }
+
         /// <summary>첫 실행에 모델을 내려받을 때(LLMUnity 의 Download on Build) 진행률 0~1.</summary>
         public Action<float> DownloadProgress { get; set; }
     }
@@ -85,6 +97,19 @@ namespace Jamkkaebi.Npc
 
         /// <summary>모델을 내리고 메모리를 돌려준다. 다시 쓰려면 새로 StartAsync 한다.</summary>
         void Destroy();
+    }
+
+    /// <summary>
+    /// 선택 기능: 세션이 이것도 구현하면, 시스템 메시지를 읽어 둔 모델의 기억을 이름(key)으로 저장하고 되살린다.
+    /// 실패는 예외 대신 false 로 알린다 (기억이 없거나 깨졌거나 모델이 다름).
+    /// </summary>
+    public interface ILlmUnityStateStore
+    {
+        /// <summary>지금 모델의 기억을 key 로 저장한다. 저장했으면 true.</summary>
+        Task<bool> SaveStateAsync(string key);
+
+        /// <summary>key 로 저장해 둔 기억을 모델에 되살린다. 되살렸으면 true.</summary>
+        Task<bool> LoadStateAsync(string key);
     }
 
     /// <summary>LLMUnity 로 모델을 올리는 쪽. Unity 에서는 LlmUnityRuntime(Unity/ 폴더)이 구현한다. Unity 메인 스레드에서 불린다.</summary>
@@ -141,6 +166,9 @@ namespace Jamkkaebi.Npc
         private long generation;
         private volatile LlmUnityCall lastCall;
         private volatile LlmUnityCall lastPrepare;
+        private volatile bool lastPrepareRestored;
+        private int stateLoads;
+        private int stateSaves;
 
         // 마지막으로 끝까지 읽힌 시스템 메시지와 그 세션. oneAtATime 안에서만 읽고 쓴다
         private ILlmUnitySession readSession;
@@ -189,6 +217,24 @@ namespace Jamkkaebi.Npc
         public LlmUnityCall LastPrepare
         {
             get { return lastPrepare; }
+        }
+
+        /// <summary>마지막 미리 읽기가 저장해 둔 기억을 되살린 것이면 true (실제로 읽은 것이 아님).</summary>
+        public bool LastPrepareRestored
+        {
+            get { return lastPrepareRestored; }
+        }
+
+        /// <summary>저장해 둔 기억을 되살린 횟수.</summary>
+        public int StateLoads
+        {
+            get { return Volatile.Read(ref stateLoads); }
+        }
+
+        /// <summary>시스템 메시지를 읽은 뒤 기억을 저장한 횟수.</summary>
+        public int StateSaves
+        {
+            get { return Volatile.Read(ref stateSaves); }
         }
 
         public async Task LoadAsync(CancellationToken ct)
@@ -321,6 +367,19 @@ namespace Jamkkaebi.Npc
                     // 끝까지 읽히기 전에는 모델이 무엇을 기억하는지 모른다
                     readSystem = null;
                     Stopwatch watch = Stopwatch.StartNew();
+                    ILlmUnityStateStore store = prepare && options.SaveSystemState ? current as ILlmUnityStateStore : null;
+                    string stateKey = store != null ? StateKey(system) : null;
+                    if (store != null && await RestoreState(store, stateKey).ConfigureAwait(false))
+                    {
+                        token.ThrowIfCancellationRequested();
+                        watch.Stop();
+                        readSession = current;
+                        readSystem = system;
+                        lastPrepareRestored = true;
+                        lastPrepare = new LlmUnityCall(-1, watch.ElapsedMilliseconds, 0);
+                        return "";
+                    }
+                    watch = Stopwatch.StartNew();
                     long firstToken = -1;
                     Action onFirstToken = () => Interlocked.CompareExchange(ref firstToken, watch.ElapsedMilliseconds, -1);
                     Task<string> chat = OnUnity(() => current.ChatOnceAsync(system, user, grammar, maxTokens, options, onFirstToken));
@@ -347,6 +406,11 @@ namespace Jamkkaebi.Npc
                     if (prepare)
                     {
                         lastPrepare = measured;
+                        lastPrepareRestored = false;
+                        if (store != null)
+                        {
+                            await PersistState(store, stateKey).ConfigureAwait(false);
+                        }
                     }
                     else
                     {
@@ -359,6 +423,55 @@ namespace Jamkkaebi.Npc
                     oneAtATime.Release();
                 }
             }
+        }
+
+        // 저장해 둔 기억 되살리기. 실패(없음·깨짐·예외)는 읽기로 대신하면 되므로 false
+        private async Task<bool> RestoreState(ILlmUnityStateStore store, string key)
+        {
+            try
+            {
+                bool ok = await OnUnity(() => store.LoadStateAsync(key)).ConfigureAwait(false);
+                if (ok)
+                {
+                    Interlocked.Increment(ref stateLoads);
+                }
+                return ok;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        // 방금 읽은 시스템 메시지의 기억을 저장. 실패해도 생성에는 영향이 없다
+        private async Task PersistState(ILlmUnityStateStore store, string key)
+        {
+            try
+            {
+                if (await OnUnity(() => store.SaveStateAsync(key)).ConfigureAwait(false))
+                {
+                    Interlocked.Increment(ref stateSaves);
+                }
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        /// <summary>
+        /// 저장한 기억의 이름. 시스템 메시지·모델 파일·컨텍스트 크기·StateVersion 이 모두 같을 때만 같다.
+        /// string.GetHashCode 는 실행마다 달라질 수 있어 쓰지 않고, 64비트 FNV-1a 로 직접 만든다.
+        /// </summary>
+        public string StateKey(string system)
+        {
+            string text = options.Model + "|" + options.ContextSize + "|" + options.StateVersion + "|" + system;
+            ulong hash = 14695981039346656037UL;
+            for (int i = 0; i < text.Length; i++)
+            {
+                hash ^= text[i];
+                hash *= 1099511628211UL;
+            }
+            return "npc-kv-" + hash.ToString("x16");
         }
 
         private string GrammarFor(NpcPrompt prompt)

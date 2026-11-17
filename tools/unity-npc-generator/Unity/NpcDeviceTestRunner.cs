@@ -6,6 +6,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
@@ -18,7 +19,7 @@ namespace Jamkkaebi.Npc
     /// 요청 관리자로 하나씩 돌려 대사·출처(SLM/기본 대사)·첫 응답 시간·전체 시간·메모리를 화면에 보여 주고 CSV 로 저장한다.
     ///
     /// <para>로그는 "[NPC시험]" 으로 시작한다. 안드로이드는 adb logcat, iOS 는 Xcode 콘솔에서 본다.
-    /// CSV 는 Application.persistentDataPath 에 생긴다 (경로는 화면과 로그에 나온다).</para>
+    /// CSV 는 Application.persistentDataPath 에 생기고, 장면 하나가 끝날 때마다 한 줄씩 이어 쓴다 (중간에 실패하거나 앱이 꺼져도 그때까지의 줄은 남는다). 경로는 화면과 로그에 나온다.</para>
     ///
     /// <para>prepareSystemPrompt 를 켜면 장면마다 요청 전에 그 도깨비의 시스템 프롬프트를 미리 읽힌다(게임에서 탭해 확대할 때처럼).
     /// 미리 읽기 시간은 따로 재고, 요청 시간에는 사용자 메시지를 읽고 대사를 쓰는 시간만 남는다.
@@ -63,6 +64,19 @@ namespace Jamkkaebi.Npc
         [Tooltip("요청 전에 그 도깨비의 시스템 프롬프트를 미리 읽힌다 (게임에서 탭해 확대할 때처럼). 끄면 요청 시간에 시스템 프롬프트 읽기가 섞인다")]
         public bool prepareSystemPrompt = true;
 
+        [Header("미리 만들기 (칸 있는 대사)")]
+        [Tooltip("요청 전에 장면마다 대사를 미리 만들어 둔다. 서버 값(시간대·호칭·방문 횟수)에 달린 말은 칸으로 남겨 두고, 요청 때 실제 값을 넣어 모델 없이 바로 완성한다. 끝난 뒤 요청해 적중률과 시간을 잰다")]
+        public bool prefetchFirst = true;
+
+        [Tooltip("상황마다 미리 만들 대사 수")]
+        public int prefetchPerScene = 2;
+
+        [Tooltip("미리 만들기를 기다리는 최대 시간(초). 느린 기기는 길게")]
+        public float prefetchWaitSeconds = 900f;
+
+        [Tooltip("요청할 때 서버 값을 미리 만들 때와 다르게 준다(시간대를 바꾸고 닉네임 '하늘'을 부른다). 칸 채우기가 실제로 되는지 본다")]
+        public bool requestWithOtherServerValues = true;
+
         public bool autoStart = true;
 
         [Header("데이터 (비우면 Resources/Npc/ 에서 읽는다)")]
@@ -79,6 +93,7 @@ namespace Jamkkaebi.Npc
         private bool running;
         private INpcModelBackend model;
         private NpcRequestManager manager;
+        private string csvPath; // 이번 판의 CSV. 중간에 멈추거나 실패해도 여기까지의 줄은 남아 있다
 
         private void Start()
         {
@@ -119,18 +134,19 @@ namespace Jamkkaebi.Npc
             }
             running = true;
             lines.Clear();
+            csvPath = null;
             try
             {
                 await RunAll(stopping.Token);
             }
             catch (OperationCanceledException)
             {
-                Say("중단됨");
+                Say("중단됨" + SavedSoFar());
             }
             catch (Exception e)
             {
                 status = "오류";
-                Say("오류: " + e);
+                Say("오류: " + e + SavedSoFar());
             }
             finally
             {
@@ -190,7 +206,35 @@ namespace Jamkkaebi.Npc
             }
 
             manager = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(slmTimeoutSeconds) };
-            var csv = new StringBuilder("장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모\n");
+            // CSV 는 장면 하나가 끝날 때마다 이어 쓴다. 끝에서 한 번에 저장하면 중간에 실패하거나 앱이 꺼졌을 때 지금까지의 기록이 모두 사라진다
+            string path = Path.Combine(Application.persistentDataPath,
+                    "npc_device_test_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".csv");
+            File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값\n", new UTF8Encoding(true)); // BOM: 엑셀에서 한글이 안 깨진다
+            csvPath = path;
+            Say("CSV: " + path + " (장면마다 이어 쓴다)");
+
+            // 미리 만들기: 장면마다 대사를 칸 있는 대사로 만들어 둔 뒤 요청한다 (게임이 서버 값을 받기 전에 한가할 때 만들어 두는 것과 같다)
+            int prefetchHits = 0;
+            if (prefetchFirst && slm != null && slm.IsReady)
+            {
+                status = "미리 만드는 중";
+                Stopwatch preparing = Stopwatch.StartNew();
+                foreach (NpcTestScene scene in sceneList)
+                {
+                    manager.PrefetchTemplate(scene.CreateRequest(), Math.Max(1, prefetchPerScene));
+                }
+                while (preparing.Elapsed.TotalSeconds < prefetchWaitSeconds)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    Task working = manager.PrefetchCompletion;
+                    if (working == null || working.IsCompleted)
+                    {
+                        break;
+                    }
+                    await Task.Delay(500, ct);
+                }
+                Say("미리 만들기: " + preparing.ElapsedMilliseconds + "ms, 보관한 칸 있는 대사 " + manager.Cache.TotalCount + "개 (장면 " + sceneList.Count + "개 × 상황당 최대 " + prefetchPerScene + "개)");
+            }
             var slmTimes = new List<long>();
             var firstTokens = new List<long>();
             var prepareTimes = new List<long>();
@@ -213,10 +257,11 @@ namespace Jamkkaebi.Npc
                     ReactionRequest request = scene.CreateRequest();
                     // 게임처럼 반복마다 곁들일 거리를 바꾼다 (run.py 와 같게 1번째 반복 = 0번째)
                     request.Variation = rep - 1;
+                    string retargeted = requestWithOtherServerValues ? Retarget(request) : "";
 
                     // 게임에서 탭해 확대할 때처럼 시스템 프롬프트를 먼저 읽힌다. 같은 도깨비가 이어지면 바로 끝난다
                     long prepareMs = -1;
-                    if (prepareSystemPrompt && slm != null && slm.IsReady && !NpcActions.OnlyFixedLines(request.Candidates))
+                    if (prepareSystemPrompt && slm != null && slm.IsReady && !NpcActions.SkipsModel(request.Candidates))
                     {
                         Stopwatch preparing = Stopwatch.StartNew();
                         await manager.PrepareAsync(scene.RelicId, ct);
@@ -230,16 +275,23 @@ namespace Jamkkaebi.Npc
 
                     long memory = MemoryMb();
                     peak = Math.Max(peak, memory);
-                    bool isFixed = response.Note == NpcRequestManager.FixedLinesNote;
+                    bool isSilent = response.Note == NpcRequestManager.SilentNote;
+                    bool isFixed = response.Note == NpcRequestManager.FixedLinesNote || isSilent;
                     bool fromSlm = response.ShouldShow && !response.UsedFallback;
-                    string source = !response.ShouldShow ? "없음" : (fromSlm ? "SLM" : (isFixed ? "정해진" : "기본"));
+                    bool prefetched = response.ShouldShow && response.Note == NpcRequestManager.PrefetchedNote;
+                    string source = !response.ShouldShow ? "없음" : (prefetched ? "미리" : (fromSlm ? "SLM" : (isSilent ? "대사없음" : (isFixed ? "정해진" : "기본"))));
                     string action = response.ShouldShow ? response.Reaction.ActionId : "";
                     string line = response.ShouldShow ? response.Reaction.Line : "";
                     bool expected = scene.Expected.Contains(action);
-                    long firstToken = fromSlm ? FirstTokenMs() : -1;
+                    long firstToken = fromSlm && !prefetched ? FirstTokenMs() : -1;
                     if (isFixed)
                     {
                         fixedCount++;
+                    }
+                    else if (prefetched)
+                    {
+                        // 미리 만든 대사(칸을 채워 완성): 모델을 부르지 않아 시간은 거의 0 이다. SLM 시간 통계에는 넣지 않는다
+                        prefetchHits++;
                     }
                     else if (fromSlm)
                     {
@@ -268,10 +320,13 @@ namespace Jamkkaebi.Npc
                         + (prepareMs >= 0 ? ", 미리 읽기 " + prepareMs + "ms" : "")
                         + (firstToken >= 0 ? ", 첫 응답 " + firstToken + "ms" : "") + ")"
                         + (fromSlm && response.Reaction.Note == null ? "" : "  ← " + response.Note));
-                    csv.Append(Csv(scene.Id)).Append(',').Append(rep).Append(',').Append(source).Append(',').Append(action).Append(',')
+                    var row = new StringBuilder();
+                    row.Append(Csv(scene.Id)).Append(',').Append(rep).Append(',').Append(source).Append(',').Append(action).Append(',')
                         .Append(expected ? "O" : "X").Append(',').Append(Csv(line)).Append(',').Append(line.Length).Append(',')
                         .Append(prepareMs).Append(',').Append(firstToken).Append(',').Append(watch.ElapsedMilliseconds).Append(',')
-                        .Append(memory).Append(',').Append(Csv(response.Note)).Append('\n');
+                        .Append(memory).Append(',').Append(Csv(response.Note)).Append(',').Append(prefetched ? "O" : "X").Append(',')
+                        .Append(Csv(prefetched && response.Reaction != null ? response.Reaction.Note : "")).Append(',').Append(Csv(retargeted)).Append('\n');
+                    AppendCsv(path, row.ToString());
                 }
             }
 
@@ -296,11 +351,13 @@ namespace Jamkkaebi.Npc
             {
                 Say("첫 응답 시간: 중앙값 " + Percentile(firstTokens, 0.5) + "ms, 90% " + Percentile(firstTokens, 0.9) + "ms");
             }
+            if (prefetchFirst)
+            {
+                int asked = total - fixedCount;
+                Say("미리 만든 대사 적중 " + prefetchHits + "/" + asked + " (적중하면 모델을 부르지 않고 칸에 서버 값을 넣어 바로 완성 — 전체 시간 0ms 안팎)");
+            }
             Say("메모리 최대 " + peak + "MB" + MemoryNote());
 
-            string path = Path.Combine(Application.persistentDataPath,
-                    "npc_device_test_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".csv");
-            File.WriteAllText(path, csv.ToString(), new UTF8Encoding(true)); // BOM: 엑셀에서 한글이 안 깨진다
             Say("CSV 저장: " + path);
             status = "끝";
         }
@@ -397,6 +454,52 @@ namespace Jamkkaebi.Npc
                 throw new InvalidOperationException("데이터가 없다: 인스펙터에 넣거나 Resources/" + resourcePath + ".json 에 둔다");
             }
             return found.text;
+        }
+
+        // 중간에 멈추거나 실패했을 때, 그때까지 쌓인 CSV 가 어디 있는지 알려 주는 말
+        private string SavedSoFar()
+        {
+            return csvPath != null ? "  (지금까지의 기록은 CSV 에 남아 있다: " + csvPath + ")" : "";
+        }
+
+        // 줄 하나를 파일 끝에 붙인다. 열 때마다 닫으므로 도중에 앱이 꺼져도 지금까지의 줄은 남는다.
+        // 머리글에 BOM 을 이미 썼으므로 여기서는 BOM 없이 쓴다. 쓰기에 실패해도(저장 공간 부족 등) 시험은 계속한다
+        private void AppendCsv(string path, string text)
+        {
+            try
+            {
+                File.AppendAllText(path, text, new UTF8Encoding(false));
+            }
+            catch (Exception e)
+            {
+                Say("CSV 쓰기 실패 (시험은 계속한다): " + e.Message);
+            }
+        }
+
+        private static readonly Regex SituationTime = new Regex("(?<=주인이 )(새벽|아침|오전|낮|저녁|밤)(?=에 )");
+
+        // 요청의 서버 값을 미리 만들 때와 다르게 바꾼다: 시간대는 다른 시간대로(탭 인사에만 있다), 닉네임은 '하늘'(친밀 3단계). 바꾼 것을 글로 돌려준다
+        private static string Retarget(ReactionRequest request)
+        {
+            var changed = new List<string>();
+            if (request.Facts != null)
+            {
+                foreach (Fact fact in request.Facts)
+                {
+                    if (fact.Key == NpcFactKeys.TimeOfDay && !string.IsNullOrEmpty(fact.Value))
+                    {
+                        string from = fact.Value;
+                        string to = from == "저녁" ? "아침" : "저녁";
+                        fact.Value = to;
+                        request.Situation = SituationTime.Replace(request.Situation ?? "", to);
+                        changed.Add("시간대 " + from + "→" + to);
+                    }
+                }
+            }
+            request.Nickname = "하늘";
+            request.Intimacy = NpcAddress.NicknameLevel;
+            changed.Add("호칭 하늘");
+            return string.Join(", ", changed.ToArray());
         }
 
         private static string Csv(string value)

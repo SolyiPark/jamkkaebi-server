@@ -57,6 +57,8 @@ namespace Jamkkaebi.Npc
                 Mode = Text(scene, "mode") == "owner" ? InteractionMode.Owner : InteractionMode.Visitor,
                 Input = Text(scene, "input"),
                 Situation = Text(scene, "event"),
+                Nickname = Text(scene, "nickname"),
+                Intimacy = IntimacyOf(scene),
                 ContentVersion = "test"
             };
             foreach (object c in List(scene, "candidates"))
@@ -109,6 +111,17 @@ namespace Jamkkaebi.Npc
         {
             object value;
             return map.TryGetValue(key, out value) && value != null ? Convert.ToString(value, CultureInfo.InvariantCulture) : null;
+        }
+
+        /// <summary>장면의 친밀도. "intimacy"(0~4)가 있으면 그것, 없으면 예전 칸 "familiar"(true → 닉네임 단계(3), false → 0단계).</summary>
+        public static int IntimacyOf(Dictionary<string, object> scene)
+        {
+            object value;
+            if (scene.TryGetValue("intimacy", out value) && value != null && !(value is bool))
+            {
+                return Math.Max(0, Math.Min(NpcAddress.LevelUpVisits.Count, Convert.ToInt32(value, CultureInfo.InvariantCulture)));
+            }
+            return scene.TryGetValue("familiar", out value) && value is bool && (bool)value ? NpcAddress.NicknameLevel : 0;
         }
 
         private static List<object> List(Dictionary<string, object> map, string key)

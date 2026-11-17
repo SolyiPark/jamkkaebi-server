@@ -3,11 +3,13 @@ package com.example.jamkkaebi.exhibition.service;
 import com.example.jamkkaebi.exhibition.config.ExhibitionProperties;
 import com.example.jamkkaebi.exhibition.domain.ExhibitItemType;
 import com.example.jamkkaebi.exhibition.domain.ExhibitionChangedEvent;
+import com.example.jamkkaebi.exhibition.domain.ExhibitionVisit;
 import com.example.jamkkaebi.exhibition.dto.request.ExhibitionLayoutRequest;
 import com.example.jamkkaebi.exhibition.dto.response.ExhibitBuildingView;
 import com.example.jamkkaebi.exhibition.dto.response.ExhibitSpiritView;
 import com.example.jamkkaebi.exhibition.dto.response.ExhibitionResponse;
 import com.example.jamkkaebi.exhibition.dto.response.SpiritVisibilityResponse;
+import com.example.jamkkaebi.exhibition.repository.ExhibitionVisitRepository;
 import com.example.jamkkaebi.global.exception.BusinessException;
 import com.example.jamkkaebi.global.exception.ErrorCode;
 import com.example.jamkkaebi.global.response.FieldError;
@@ -23,11 +25,11 @@ import com.example.jamkkaebi.relic.service.RelicCatalog;
 import com.example.jamkkaebi.relic.service.RelicOwnership;
 import com.example.jamkkaebi.user.domain.User;
 import com.example.jamkkaebi.user.repository.UserRepository;
-import com.example.jamkkaebi.user.service.UserProfileService;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -46,8 +48,11 @@ import java.util.Set;
 @Service
 public class ExhibitionService {
 
-    private final UserProfileService userProfileService;
+    /** 방문 기록·친밀도에 쓰는 기간(일). 오늘을 포함한 최근 30일. */
+    public static final int RECENT_VISIT_DAYS = 30;
+
     private final UserRepository userRepository;
+    private final ExhibitionVisitRepository exhibitionVisitRepository;
     private final UserRelicRepository userRelicRepository;
     private final UserBuildingRepository userBuildingRepository;
     private final RelicCatalog catalog;
@@ -57,8 +62,8 @@ public class ExhibitionService {
     private final GameClock gameClock;
     private final ApplicationEventPublisher eventPublisher;
 
-    public ExhibitionService(UserProfileService userProfileService,
-                             UserRepository userRepository,
+    public ExhibitionService(UserRepository userRepository,
+                             ExhibitionVisitRepository exhibitionVisitRepository,
                              UserRelicRepository userRelicRepository,
                              UserBuildingRepository userBuildingRepository,
                              RelicCatalog catalog,
@@ -67,8 +72,8 @@ public class ExhibitionService {
                              ExhibitionProperties properties,
                              GameClock gameClock,
                              ApplicationEventPublisher eventPublisher) {
-        this.userProfileService = userProfileService;
         this.userRepository = userRepository;
+        this.exhibitionVisitRepository = exhibitionVisitRepository;
         this.userRelicRepository = userRelicRepository;
         this.userBuildingRepository = userBuildingRepository;
         this.catalog = catalog;
@@ -79,11 +84,18 @@ public class ExhibitionService {
         this.eventPublisher = eventPublisher;
     }
 
-    // 홈 화면 — 둘 수 있는 도깨비·건물 전부와 배치 상태
-    @Transactional(readOnly = true)
+    /**
+     * 홈 화면 — 둘 수 있는 도깨비·건물 전부와 배치 상태.
+     *
+     * <p>연 것을 오늘 방문으로 남기고(같은 날은 한 번) 최근 30일 방문한 날들을 함께 내린다. 사용자 행을 먼저 잠가
+     * 같은 사용자의 조회 두 건이 겹쳐도 방문 행이 두 번 만들어지지 않는다.
+     */
+    @Transactional
     public ExhibitionResponse exhibition(String friendCode) {
-        User user = userProfileService.getByFriendCode(friendCode);
+        User user = userRepository.findByFriendCodeForUpdate(friendCode)
+                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
         return assemble(
+                user,
                 userRelicRepository.findAllByUserId(user.getId()),
                 userBuildingRepository.findAllByUserId(user.getId()));
     }
@@ -125,7 +137,7 @@ public class ExhibitionService {
         }
 
         eventPublisher.publishEvent(new ExhibitionChangedEvent(user.getId(), gameClock.now()));
-        return assemble(relics, buildings);
+        return assemble(user, relics, buildings);
     }
 
     /**
@@ -206,7 +218,7 @@ public class ExhibitionService {
         }
     }
 
-    private ExhibitionResponse assemble(List<UserRelic> relics, List<UserBuilding> buildings) {
+    private ExhibitionResponse assemble(User user, List<UserRelic> relics, List<UserBuilding> buildings) {
         LocalDateTime now = gameClock.now();
 
         List<UserRelic> completed = relics.stream()
@@ -230,7 +242,18 @@ public class ExhibitionService {
                 .toList();
 
         // 선명도와 같은 시각에서 날짜를 떼어, 자정 무렵에도 선명도와 날짜가 서로 어긋나지 않게 한다
-        return new ExhibitionResponse(properties.grid(), spirits, buildingViews, now.toLocalDate());
+        // 시각(now)·닉네임·방문 기록도 함께 내린다 — 도깨비가 탭 인사에서 시간대를 말하고, 친밀도(최근 30일 방문한 날 수)에 따라 나를 부른다
+        LocalDate today = now.toLocalDate();
+        List<LocalDate> visitDates = recordVisitAndRecentDates(user.getId(), today);
+        return new ExhibitionResponse(properties.grid(), spirits, buildingViews, today, now, user.getNickname(), visitDates);
+    }
+
+    // 오늘 방문을 남기고(이미 있으면 그대로) 최근 30일 방문한 날들을 가까운 날부터 돌려준다. 사용자 행을 잠근 뒤에 부른다
+    private List<LocalDate> recordVisitAndRecentDates(Long userId, LocalDate today) {
+        if (!exhibitionVisitRepository.existsByUserIdAndVisitDate(userId, today)) {
+            exhibitionVisitRepository.save(ExhibitionVisit.of(userId, today));
+        }
+        return exhibitionVisitRepository.findVisitDates(userId, today.minusDays(RECENT_VISIT_DAYS - 1));
     }
 
     private record Slot(ExhibitItemType type, Integer id) {
