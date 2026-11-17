@@ -108,6 +108,38 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
+    @DisplayName("내 전시관을 연 날을 남기고 최근 30일 방문한 날들을 가까운 날부터 내린다 — 같은 날은 하루, 30일 밖은 뺀다")
+    void 내_방문_기록() throws Exception {
+        Player player = player("신입");
+
+        // 처음 연 날에도 오늘 하나가 들어 있다
+        clock.set(LocalDateTime.of(2026, 9, 1, 10, 0));
+        get(player, "/api/exhibition")
+                .andExpect(jsonPath("$.data.recentVisitDates.length()").value(1))
+                .andExpect(jsonPath("$.data.recentVisitDates[0]").value("2026-09-01"));
+
+        clock.set(LocalDateTime.of(2026, 9, 5, 9, 0));
+        get(player, "/api/exhibition");
+
+        // 같은 날 여러 번 열어도 하루
+        clock.set(LocalDateTime.of(2026, 9, 12, 8, 0));
+        get(player, "/api/exhibition");
+        clock.set(LocalDateTime.of(2026, 9, 12, 21, 30));
+        get(player, "/api/exhibition")
+                .andExpect(jsonPath("$.data.recentVisitDates.length()").value(3))
+                .andExpect(jsonPath("$.data.recentVisitDates[0]").value("2026-09-12"))
+                .andExpect(jsonPath("$.data.recentVisitDates[1]").value("2026-09-05"))
+                .andExpect(jsonPath("$.data.recentVisitDates[2]").value("2026-09-01"));
+
+        // 오늘 포함 30일이 지난 날(9월 1일·5일)은 빠진다: 10월 5일 기준 창은 9월 6일부터
+        clock.set(LocalDateTime.of(2026, 10, 5, 12, 0));
+        get(player, "/api/exhibition")
+                .andExpect(jsonPath("$.data.recentVisitDates.length()").value(2))
+                .andExpect(jsonPath("$.data.recentVisitDates[0]").value("2026-10-05"))
+                .andExpect(jsonPath("$.data.recentVisitDates[1]").value("2026-09-12"));
+    }
+
+    @Test
     @DisplayName("오염 관리까지 마친 도깨비와 받은 건물만 담기고, 배치 전에는 좌표 키가 없다")
     void 조회() throws Exception {
         Player player = player("학예사");
