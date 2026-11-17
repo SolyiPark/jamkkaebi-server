@@ -1,5 +1,5 @@
 {
-  "contentVersion": "lines-12",
+  "contentVersion": "lines-13",
   "storyPolicy": "stories 는 실화를 담은 이야기 대사로(잠깨비 목적에 맞춰 고른 실화), npc-prompt-test/data/personas.json 의 stories 와 같은 순서다. 사실은 그대로 두고 말투만 입혔다. 돌려 가며 써서 다 들려줄 때까지 같은 이야기를 반복하지 않는다. fallback(페르소나가 아직 없는 도깨비)은 stories 없이 자료 문장(verified_story) 앞뒤에 storyPrefix·storyTail 을 붙인다.",
   "spirits": [
     {
@@ -12,7 +12,7 @@
         "어흠, 처음엔 나무, 1434년부턴 철, 그 뒤엔 구리로 만들었어. 지금은 국립중앙박물관에 있지."
       ],
       "pools": [
-        { "actionId": "greet", "variant": "", "lines": ["어흠, 왔구나.", "어흠, 왔네? 기다렸어.", "별일 없었지? 내가 다 살피고 있었어."] },
+        { "actionId": "greet", "variant": "", "lines": ["어흠, 왔구나.", "어흠, 왔네? 기다렸어.", "별일 없었지? 내가 다 살피고 있었어.", "어흠, 마침 순찰 중이었어.", "수상한 낌새는 없었어. 반가워!", "어흠, 반가워. 내가 지키고 있었지."] },
         { "actionId": "answer_status", "variant": "faded", "lines": ["어흠, 몸이 좀 흐려졌어. 닦아 줄래?", "흐려져서 체면이 말이 아니야."] },
         { "actionId": "answer_status", "variant": "recent_care", "lines": ["지난번에 닦아 준 덕에 멀쩡해.", "요전에 관리해 줘서 아주 선명해."] },
         { "actionId": "answer_status", "variant": "default", "lines": ["어흠, 나는 별일 없어.", "수상한 건 하나도 없었어."] },
@@ -33,7 +33,7 @@
         "호호, 1,300년 넘게 진흙에 묻혀 있던 덕에 옛 모습을 지킬 수 있었지."
       ],
       "pools": [
-        { "actionId": "greet", "variant": "", "lines": ["어머, 왔구나.", "호호, 어서 와. 보고 싶었어."] },
+        { "actionId": "greet", "variant": "", "lines": ["어머, 왔구나.", "호호, 어서 와. 보고 싶었어.", "호호, 반가워. 편히 앉아.", "어머, 와 줬구나. 고마워.", "호호, 향이 먼저 알아챘어."] },
         { "actionId": "answer_status", "variant": "faded", "lines": ["어머, 향이 좀 흐려졌어. 손 봐 줄래?", "몸이 흐려졌네. 살살 닦아 주면 좋겠어."] },
         { "actionId": "answer_status", "variant": "recent_care", "lines": ["요전에 닦아 준 덕에 향이 맑아.", "호호, 지난번 손길 덕에 개운해."] },
         { "actionId": "answer_status", "variant": "default", "lines": ["호호, 별일 없어.", "오늘도 포근하고 고요해."] },
@@ -54,7 +54,7 @@
         "나는 지금 간송미술관에 있어. 간송 전형필 선생이 2만 원에 사들인 덕분이래."
       ],
       "pools": [
-        { "actionId": "greet", "variant": "", "lines": ["왔구나? 반가워.", "구름처럼 살며시 왔네."] },
+        { "actionId": "greet", "variant": "", "lines": ["왔구나? 반가워.", "구름처럼 살며시 왔네.", "반가워, 구름 무늬가 설레네.", "왔구나, 조금 쑥스럽지만 반가워.", "어, 와 줬네. 반가워."] },
         { "actionId": "answer_status", "variant": "faded", "lines": ["조금 흐려졌어… 살살 닦아 줄래?", "무늬가 뿌예졌어… 닦아 주면 좋겠어."] },
         { "actionId": "answer_status", "variant": "recent_care", "lines": ["지난번에 닦아 줘서 아직 맑아.", "요전 손길 덕분에 무늬가 또렷해."] },
         { "actionId": "answer_status", "variant": "default", "lines": ["구름처럼 마음이 가벼워.", "나는 괜찮아. 고마워."] },
@@ -75,7 +75,7 @@
         "…나 같은 고려 나전칠기는 다 합쳐도 15점 정도래. 대부분 외국에 흩어져 있고."
       ],
       "pools": [
-        { "actionId": "greet", "variant": "", "lines": ["…왔어?", "왔구나. 잘 왔어."] },
+        { "actionId": "greet", "variant": "", "lines": ["…왔어?", "왔구나. 잘 왔어.", "…왔네. 반가워.", "…와 줬구나. 고마워.", "…마침 생각하고 있었어."] },
         { "actionId": "answer_status", "variant": "faded", "lines": ["좀 흐려졌어. 시간 되면 손봐 줘.", "...닦아 주면 좋고."] },
         { "actionId": "answer_status", "variant": "recent_care", "lines": ["…지난번에 닦아 줘서 아직 괜찮아.", "…요전에 손봐 준 거, 아직 반짝여."] },
         { "actionId": "answer_status", "variant": "default", "lines": ["…별일 없어.", "자개도 멀쩡해. 걱정 마."] },
@@ -96,7 +96,7 @@
         "히힛, 나는 조선 초기부터 이어진 우리 영모화 전통을 이어받았대! 새랑 동물을 그린 그림 말이야!"
       ],
       "pools": [
-        { "actionId": "greet", "variant": "", "lines": ["킁킁, 왔다 왔다! 놀자!", "히힛, 왔어? 나 심심했어!"] },
+        { "actionId": "greet", "variant": "", "lines": ["킁킁, 왔다 왔다! 놀자!", "히힛, 왔어? 나 심심했어!", "히힛, 왔다! 반가워!", "킁킁, 냄새로 알았어!", "앗, 왔어? 같이 놀자!"] },
         { "actionId": "answer_status", "variant": "faded", "lines": ["나 좀 흐려졌어. 닦아 줄래?", "앗, 털이 뿌예졌어! 닦아 줘!"] },
         { "actionId": "answer_status", "variant": "recent_care", "lines": ["히힛, 저번에 닦아 줘서 아직 반짝반짝!", "킁킁, 요전에 닦아 준 냄새 아직 나!"] },
         { "actionId": "answer_status", "variant": "default", "lines": ["히힛, 나 오늘 기분 최고야!", "킁킁, 오늘은 뭐 하고 놀까?"] },
