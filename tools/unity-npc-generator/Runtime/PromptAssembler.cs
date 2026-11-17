@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Jamkkaebi.Npc
 {
@@ -48,12 +49,14 @@ namespace Jamkkaebi.Npc
         {
             IncludeExamples = true;
             SentenceGrammar = true;
-            DefaultLineChars = 20;
+            DefaultLineChars = 16; // 2026-11-17 21:27: 관리 감사 평균 출력 32토큰·안부 26토큰(탭 20토큰) — 20자 목표에 모델이 30자를 써서 응답 시간(토큰당 약 40ms)이 늘었다
             TargetLabels = new Dictionary<string, string>();
-            // 말풍선에 맞춘 길이
+            // 말풍선에 맞춘 길이. 탭 인사·손님 관람은 15자: 목표를 20자로 적었더니 모델이 중앙값 25자(출력 24토큰)를 써서, 인사 한마디에 응답이 2초를 넘었다
+            // (2026-11-16 시험: 응답 ms ≈ 680 + 63 × 출력 토큰). 15자로 적으면 약 19자·18토큰으로 줄어 0.3초가량 빨라진다. run.py 의 INPUT_LINE_CHARS 와 같다
             LineChars = new Dictionary<string, int>
             {
-                { NpcInputs.Visit, 20 }
+                { NpcInputs.Tap, 15 },
+                { NpcInputs.Visit, 15 }
             };
             MaxSentences = new Dictionary<string, int>();
             // 모든 대사에 '2문장 이내'를 붙여 봤지만 Mi:dm 은 그대로, Kanana 는 더 잘렸다. 기본은 적지 않는다 (run.py --max-sentences 와 같다)
@@ -112,16 +115,23 @@ namespace Jamkkaebi.Npc
         // 규칙은 해야 할 것만 짧게 적는다. 하지 말아야 할 것(밀어내기·낮춰 부르기·자기 이름·영어·몸짓 설명·존댓말·날씨…)은
         // 프롬프트에 적지 않고 말투 다듬기(NormalizeSpeech)와 출력 검사(NpcOutputValidator·NpcLineFilter)가 맡는다.
         // 규칙이 짧을수록 읽는 시간(응답 시간의 대부분)도 줄어든다. 규칙에 '네 몸', '네 것'을 쓰면 "네 자개는"으로 옮기므로 '네'를 쓰지 않는다.
-        public const string RuleBond = "- 상대가 정이 들도록 다정하게 말한다.";
-        public const string RuleFacts = "- 아래 자료에 있는 일만 말하고, 시간대와 며칠 전은 자료에 적힌 대로 말한다.";
-        public const string RuleRole = "- 관리는 주인이 너를 닦아 주는 일이다. 바라는 것은 주인에게 부탁하고, 몸과 기분은 느끼는 대로 '내 ~'라고 말한다.";
+        // 2026-11-17 18:21 시험: 모델이 자기가 전시관을 구경하러 온 것처럼 말했다("전시관을 둘러보니 참 멋진데!", "반가워서 아침부터 달려왔어", "반가워서 왔어"). 도깨비는 주인의 전시관에 살고
+        // 찾아온 상대(주인·친구)를 맞이하는 쪽이다. 한 줄로 못 박는다 (시스템 메시지는 도깨비마다 한 번만 읽는다)
+        // 2026-11-17 22:07 시험: 규칙의 "전시관"을 읽은 모델이 "전시관이 참 포근하네"처럼 우리 전시관의 인상을 말했다. 명사 "전시관"을 규칙·손님 상황 문장에서 뺐다
+        public const string RuleBond = "- 너는 이곳에 살며, 찾아온 상대가 정이 들도록 다정하게 말한다.";
+        public const string RuleFacts = "- 자료에 있는 일만 말하고, 시간대와 며칠 전은 적힌 대로 말한다.";
+        public const string RuleRole = "- 관리는 상대가 너를 닦아 주는 일이다. 바라는 것은 상대에게 부탁하고, 몸과 기분은 느끼는 대로 '내 ~'라고 말한다."; // 2026-11-17: "주인"을 읽은 모델이 하인처럼 높였다 — 모델이 읽는 글에서는 호칭으로 쓴다(NpcLineChecks.OwnerToCall)
         public const string RuleLine = "- 소리 내어 하는 한국어 말만 쓴다.";
         // 도깨비는 모두 반말이라 말투를 공통 규칙으로 둔다. 어긋난 어미는 말투 다듬기가 고치고 출력 검사기가 문장마다 어미를 본다(SpeechMismatch)
         public const string RuleSpeech = "- 친한 친구에게 말하듯 편한 현대 반말로 말한다.";
         // 한 문장이면 출력 토큰이 줄어 응답이 빨라진다 (응답 시간은 읽는 토큰 + 쓰는 토큰에 비례한다)
-        public const string RuleOrder = "- 지금 상황에 맞는 말을 짧은 한 문장으로, 우리말 어순대로 말한다.";
-        public const string RuleVary = "- 인사에는 곁들일 거리나 지금 상황의 한마디를 덧붙여 매번 다르게 말한다.";
-        public const string RuleAsk = "- 부탁은 '~해 줘', '~해 줄래?'처럼 바로 말한다.";
+        public const string RuleOrder = "- 지금 상황에 맞는 말을 짧은 한 문장으로, 우리말 어순대로 말한다. 묻는 말만 ?로 끝낸다.";
+        // 2026-11-17: "곁들일 거리나 지금 상황의 한마디를 덧붙여"를 읽은 모델이 없는 사정을 한마디로 지어냈다("궁금한 점이 많겠네", "오늘 밤은 너무 재미있었어"). 덧붙이라고 하지 않고 짧게 말하게 한다
+        public const string RuleVary = "- 첫 낱말로 시작해 매번 다르게 말한다.";
+        // (규칙 줄 "부탁은 '~해 줘'처럼 바로 말한다"는 뺐다: 부탁의 꼴은 '할 일' 줄과 첫 낱말이 이미 정하고, 없으면 코드가 채운다(AskFallback). 읽는 토큰을 줄인다)
+
+        /// <summary>프롬프트에 싣는 예시 대사 수. 예시를 줄이면 읽는 토큰이 줄어 처음 한 번의 응답이 빨라진다. run.py 의 PROMPT_EXAMPLES 와 같다.</summary>
+        public const int PromptExamples = 2;
 
         /// <summary>
         /// 곁들일 거리 줄의 이름. 같은 상황이 거듭되면 프롬프트가 글자 하나 다르지 않아 작은 모델이 비슷한 대사를 내서,
@@ -145,12 +155,15 @@ namespace Jamkkaebi.Npc
 
         // 2026-11-14 시험: "잘"은 "잘 왔지? 다음엔 꼭 같이 가자!"처럼 없는 약속을 지어냈고, "오늘은"은 "오늘은 관리해 줘서 고마워"·"오늘은 말 그림 보러 왔구나?"처럼 어색했다.
         // 곁들일 거리의 힌트도 "이 느낌을 곁들인다"는 "말 그림 보러 왔구나?"처럼 거리를 일어난 일로 읽어서 "(내 이야기)"로 바꿨다
-        private static readonly string[] StartersTap = { "안녕", "왔구나", "와", "반가워", "찾아와서", "만나서" };
-        private static readonly string[] StartersFaded = { "몸이", "조금", "요즘", "점점", "혹시", "이대로" };
-        private static readonly string[] StartersClear = { "덕분에", "이제", "훨씬", "몸이", "개운해", "깨끗해져서" };
-        private static readonly string[] StartersVisit = { "안녕", "반가워", "와", "환영해", "편하게", "구경하러" };
+        // 2026-11-17 시험: "찾아와서"는 "찾아와서 반가워, 오늘 아침부터 부르네."처럼 방문과 부름을 뒤섞었고, "만나서"는 "만나서 반가워"로 거의 모두 같게 시작해 뺐다. "기다렸어"를 더했다
+        private static readonly string[] StartersTap = { "안녕", "왔구나", "와", "어서", "드디어" }; // 2026-11-17 20:39 시험: "반가워"는 "반가워서 인사…·왔…"로 이어져 금칙어에 걸린 것이 4건이라 "어서"로 바꿨다("어서 왔어"는 말투 다듬기가 "어서 와"로 고친다) // 2026-11-17 19:43 시험: "기다렸어"는 그것만 대사로 내(S01 #2·S22 #1·S24 #1) 인사말뿐·반복으로 거르고 다시 만들었다. 이어 쓰게 되는 "드디어"(기다린 마음)로 바꿨다
+        // 흐려진 안부 중 "마지막 관리가 며칠 전이었는지"를 말하는 요청(AskVariant == "days")의 첫 낱말
+        private static readonly string[] StartersFadedDays = { "마지막 관리가", "마지막", "벌써", "어느새" }; // "마지막으로"는 "마지막으로 닦아주면 감사할 것 같아"(뜻이 뒤섞임)로 이어져 뺐다 (2026-11-17 21:09 시험 S03 #2)
+        private static readonly string[] StartersFaded = { "살살", "괜찮으면", "시간 되면", "조심조심", "이왕이면" }; // 2026-11-17 21:45 시험 뒤: 흐려진 안부는 '이미 한 말'(상태·며칠 전) 뒤에 이어질 부탁의 말머리 // // 2026-11-17 18:21 시험: "점점"은 "점점 새로워지고 싶어", "혹시"는 "혹시, 오랜만에 깨워줘"처럼 뜬금없는 말로 이어져 "어느새"·"자꾸"로 바꿨다 // "조금"은 "조금 전 관리를 못 받아서"(금칙어)로 이어져 뺐다 (2026-11-17 시험 S03 #3)
+        private static readonly string[] StartersClear = { "덕분에", "정말", "훨씬", "몸이", "개운하게", "깨끗하게" }; // 2026-11-17 21:27 시험: "이제"는 "이제 관리해 줘서 고마워"(때가 뒤섞임)로 이어져 "정말"로 바꿨다 // 2026-11-17 18:21 시험: "깨끗해졌어"·"개운해"는 그것만 대사로 내 "~하게"로 이어 쓰게 했다 // "깨끗해져서"는 "깨끗해져서 닦아줘서 고마워"처럼 '~서'를 거듭 이었다 (2026-11-17 시험 S04 #1)
+        private static readonly string[] StartersVisit = { "안녕", "반가워", "와", "환영해", "마음껏 둘러봐", "천천히 둘러봐" }; // "편하게"는 "편하게 찾아와 줘서 고마워"처럼 이어졌다 (2026-11-17 19:43 시험 S05 #2) // "구경하러"는 "구경하러 온 친구를 반가이 맞아."처럼 상대를 남 얘기하듯 옮겼다 (2026-11-17 18:21 시험 S05 #4)
         // 단골에게는 "오랜만"을 부르는 말을 피한다 (3일 전에도 온 친구에게 "오랜만에 와 줘서"라고 해서 모두 거르고 기본 대사로 넘어갔다)
-        private static readonly string[] StartersRecall = { "자주", "이번에도", "또", "다시", "반가워", "오늘도" };
+        private static readonly string[] StartersRecall = { "자주", "이번에도", "또", "다시", "반가워", "어서" }; // 2026-11-17 22:27 시험: "오늘도"는 "오늘도 정말 오래 만났네"(없는 일)·"오늘도 또 와줘서"(겹침)로 이어져 "어서"로 바꿨다
 
         /// <summary>이번 요청의 첫 낱말. 곁들일 거리가 없는 요청(지난 대화 꺼내기)은 null. run.py 의 starter_word 와 같다.</summary>
         public static string Starter(ReactionRequest request)
@@ -230,7 +243,7 @@ namespace Jamkkaebi.Npc
         // 게임과 규칙 기반 생성기만 쓰는 사실. 프롬프트에는 싣지 않는다
         // 방문 횟수(visit_count_30d)도 상황 문장("최근 30일 동안 7번 온 친구")에 있다. 사실 칸의 "선명도"는 "선명도가 흐려졌어"처럼 낱말을 그대로 읊어 "몸 상태"로 바꿨다
         // 지금 시간대(time_of_day)는 상황 문장("주인이 아침에 찾아와 너를 탭했다")에 있어 사실 칸에 또 싣지 않는다 — 출력 검사만 쓴다
-        private static readonly HashSet<string> HiddenFactKeys = new HashSet<string> { NpcFactKeys.StoryIndex, NpcFactKeys.Awakening, NpcFactKeys.TimeOfDay, NpcFactKeys.VisitCount30d };
+        private static readonly HashSet<string> HiddenFactKeys = new HashSet<string> { NpcFactKeys.StoryIndex, NpcFactKeys.Awakening, NpcFactKeys.TimeOfDay, NpcFactKeys.VisitCount30d, NpcFactKeys.CareResult }; // care_result: "관리 결과: 재봉인→선명"을 읽은 모델이 "재봉인이 선명해졌네"라고 했다 (2026-11-17 21:09 시험 S09 #4). 관리했다는 사실은 상황 문장에 있다
 
         private readonly PersonaCatalog personas;
         private readonly ActionCatalog actions;
@@ -326,18 +339,17 @@ namespace Jamkkaebi.Npc
         {
             var lines = new List<string>
             {
-                "너는 모바일 게임 '잠깨비'의 도깨비 '" + p.name + "'이다. " + p.origin + "에 깃든 정령이다.",
+                // 이름은 싣지 않는다: 이름을 읽은 모델이 "훨씬 선명해진 향산이,"·"향산이가 인사해"처럼 자기 이름을 말했다 (자기 이름은 검사가 지운다). 성격·말씨로 도깨비가 갈린다
+                "너는 모바일 게임 '잠깨비'의 도깨비다. " + p.origin + "에 깃든 정령이다.",
                 "성격: " + p.traits
             };
-            if (!string.IsNullOrEmpty(p.emotionStyle))
-            {
-                lines.Add("감정 표현: " + p.emotionStyle);
-            }
+            // '감정 표현' 줄은 싣지 않는다 (2026-11-17 21:45 시험): "기쁘면 말 앞에 '어흠'을 붙인다"를 읽은 모델이 "다시 와 줘서 어흠, 고마워!"·"오늘 또 보니 어흠."처럼 말 가운데에 끼웠고,
+            // "기쁘면 헛기침을 한다"류는 몸짓을 서술했다("폴짝폴짝 뛰는구나"). 말씨는 '말투' 줄과 예시가 맡는다. run.py 의 system_block 과 같다
             lines.Add("말투: " + p.speechStyle);
             if (options.IncludeExamples && p.examples != null && p.examples.Count > 0)
             {
                 lines.Add("대사 예시:");
-                lines.AddRange(p.examples.Select(e => "- " + e));
+                lines.AddRange(p.examples.Take(PromptExamples).Select(e => "- " + e));
             }
             lines.Add("");
             lines.Add("규칙:");
@@ -348,7 +360,6 @@ namespace Jamkkaebi.Npc
             lines.Add(RuleSpeech);
             lines.Add(RuleOrder);
             lines.Add(RuleVary);
-            lines.Add(RuleAsk);
             if (options.IncludeExamples)
             {
                 lines.Add(RuleExamples);
@@ -359,14 +370,21 @@ namespace Jamkkaebi.Npc
         // 사용자 메시지의 맨 앞: 지금 상대와 태도, 이번 후보 행동에 맞는 페르소나 칸.
         // 같은 도깨비·같은 상대면 이 부분도 앞 요청과 같아 다시 읽지 않는 범위가 늘어난다.
         // 두 태도를 다 실으면 주인에게 손님 태도로 말해서 지금 상대의 것만 싣는다
+        private static bool HasBatchim(string word)
+        {
+            char last = word[word.Length - 1];
+            return last >= '가' && last <= '힣' && (last - 0xAC00) % 28 != 0;
+        }
+
         private static IEnumerable<string> PartnerLines(Persona p, ReactionRequest request)
         {
-            // 호칭은 30일에 3번 이상 방문했으면 닉네임, 아니면 '발굴자'. 꼭 부르지 않아도 된다 (모든 대사에 넣으면 부담스럽다)
+            // 호칭은 친밀도 3단계(30일에 12번 이상 방문)부터 닉네임, 아니면 '발굴자'. 꼭 부르지 않아도 된다 (모든 대사에 넣으면 부담스럽다)
             // 닉네임·'발굴자'를 대사에 꼭 넣을 필요는 없지만 가끔은 나와야 정이 든다: 세 번에 한 번(Variation 0·3·6…)은 "한 번 불러 준다"고 적고,
             // 나머지는 호칭만 알려 준다 (적어 두면 모델이 부르기도 한다). "도윤님"처럼 '님'을 붙이면 출력 직전에 뗀다(NpcLineChecks.NormalizeSpeech)
             string address = "호칭: " + request.AddressName + (request.Variation % 3 == 0 ? "(한 번 불러 준다)" : "");
             List<string> lines = request.Mode == InteractionMode.Owner
-                    ? new List<string> { "지금 상대: 주인", address, "주인을 대할 때: " + p.toOwner }
+                    // 호칭이 프롬프트에 네 번(지금 상대·호칭·대할 때·상황) 나와 "발굴자가 오래 걸리지 않네"처럼 호칭을 주어로 엉뚱한 말을 이었다 → 두 번(지금 상대·상황)으로 줄인다 (읽는 토큰도 준다)
+                    ? new List<string> { "지금 상대: " + request.AddressName + (request.Variation % 3 == 0 ? "(한 번 불러 준다)" : ""), "대하는 태도: " + p.toOwner }
                     : new List<string> { "지금 상대: 친구(구경만 한다)", address, "친구를 대할 때: " + p.toVisitor };
 
             var wanted = new HashSet<string>();
@@ -398,8 +416,16 @@ namespace Jamkkaebi.Npc
         /// 곁들일 거리 목록의 이름 (run.py 의 flavor_key 와 같다). 탭·손님 관람은 그 선택지, 관리하기와 선명한 안부는 clear,
         /// 흐려진 안부는 faded. 지난 대화 꺼내기는 그 기억 하나에 집중하도록 싣지 않는다(null). 끌려갈 때는 대사가 없어 거리도 없다.
         /// </summary>
+        // 2026-11-17 21:09 시험: "떠올린 것: 구름 무늬" 줄을 읽은 모델이 상황과 상관없는 거리로 말했다("이제 구름 무늬처럼 부드럽게 도윤 안부에 답해 줄게", "이제 구름 무늬를 떠올리니, 오랜만에…").
+        // 다양성은 첫 낱말이 맡으므로 곁들일 거리 줄은 싣지 않는다 (되돌리려면 true). run.py 의 FLAVORS_ENABLED 와 같다
+        public const bool FlavorsEnabled = false;
+
         public static string FlavorKey(ReactionRequest request)
         {
+            if (!FlavorsEnabled)
+            {
+                return null;
+            }
             // 탭 인사·손님 관람에는 곁들일 거리를 싣지 않는다 (2026-11-14 시험: "반가워서 내 말 그림 줬어"처럼 거리를 일어난 일로 읽어 엉뚱한 말을 했다).
             // 이 둘의 다양성은 첫 낱말(Starter)이 맡는다
             return StarterKey(request) == "tap" || StarterKey(request) == "visit" ? null : StarterKey(request);
@@ -432,6 +458,10 @@ namespace Jamkkaebi.Npc
         // 이번 요청의 곁들일 거리. Variation 번째 것을 돌려 가며 쓴다 (목록 길이로 나눈 나머지). 없으면 null
         private static string Flavor(Persona p, ReactionRequest request)
         {
+            if (AskVariant(request) == "days")
+            {
+                return null; // 며칠 전만 말하는 요청에 '흐려진 몸'류 거리를 실으면 상태를 섞어 말한다
+            }
             List<string> items = p.flavors != null ? p.flavors.For(FlavorKey(request)) : null;
             if (items == null || items.Count == 0)
             {
@@ -451,13 +481,100 @@ namespace Jamkkaebi.Npc
             }
         }
 
+        // 탭 상황 문장의 시간대("주인이 아침에 찾아와 너를 불렀다")는 세 번에 한 번(Variation 0·3·6…)만 싣는다. 늘 싣자 탭 인사 12건 중 9건이 "오늘 아침부터 …"로 시작했고
+        // ("오늘 아침부터 왜 부르는지 궁금하네", "반가워, 오늘 아침부터 부르시니 정말 반가워" — 2026-11-16 시험 S01·S22~S24) 반복·어색한 말의 가장 큰 원인이었다. run.py 의 event_text 와 같다
+        private static readonly Regex TapTime = new Regex("(?:새벽|아침|오전|낮|저녁|밤)에 (?=너를)", RegexOptions.CultureInvariant);
+
+        private static readonly Regex AskSentence = new Regex("주인에게 [^.]*달라고 부탁한다\\.", RegexOptions.CultureInvariant);
+
+        // 흐려진 안부의 '이미 한 말'(2026-11-17 21:45 시험 뒤): 사실 문장은 서버 값으로 코드가 만들어 대사 앞에 두고, 모델은 이어서 부탁하는 한 문장만 쓴다.
+        // 사실을 모델에 맡기자 "마지막 관리가 16일 전이라서, 이제는 스스로를 닦아야 해"처럼 없는 설정을 지어냈다. 요청마다 번갈아(Variation 짝수 = 상태, 홀수 = N일 전) 한 사실만 말한다.
+        // run.py 의 ask_prefix 와 같다
+        public const int AskLineChars = 12;
+
+        public static string LinePrefix(ReactionRequest request)
+        {
+            string variant = AskVariant(request);
+            if (variant == null)
+            {
+                return null;
+            }
+            int pick = ((request.Variation / 2) % 2 + 2) % 2;
+            if (variant == "days")
+            {
+                string n = request.FindFact(NpcFactKeys.LastCareDaysAgo);
+                return pick == 0 ? "마지막 관리가 " + n + "일 전이었어." : "관리받은 지 " + n + "일이 지났어.";
+            }
+            string clarity = request.FindFact(NpcFactKeys.Clarity);
+            bool resealed = clarity == "재봉인" || clarity == "RESEALED";
+            return resealed ? (pick == 0 ? "몸이 흐려지다 못해 봉인됐어." : "다시 봉인될 만큼 흐려졌어.") : (pick == 0 ? "몸이 흐려졌어." : "몸이 많이 흐려졌어.");
+        }
+
+        /// <summary>흐려진 안부의 '할 일' 줄. 재봉인은 깨워 달라고, 흐려짐은 닦아 달라고 이어 부탁한다. 흐려진 안부가 아니면 null.</summary>
+        public static string AskTask(ReactionRequest request)
+        {
+            if (AskVariant(request) == null)
+            {
+                return null;
+            }
+            string clarity = request.FindFact(NpcFactKeys.Clarity);
+            return "이어서 " + (clarity == "재봉인" || clarity == "RESEALED" ? "깨워" : "닦아") + " 달라고 부탁하는 말을 한다";
+        }
+
+        // 모델이 부탁을 빼먹거나 사실을 또 말하면 코드가 부탁 문장을 채운다 (2026-11-17 22:07 시험). run.py 의 ASK_FALLBACKS·ask_fallback 과 같다
+        private static readonly string[] AskFallbacks = { "살살 {v} 줄래?", "시간 되면 {v} 줄래?", "조심조심 {v} 줘.", "괜찮으면 {v} 줄래?", "이왕이면 {v} 줘." };
+
+        public static string AskFallback(ReactionRequest request)
+        {
+            string clarity = request.FindFact(NpcFactKeys.Clarity);
+            string verb = clarity == "재봉인" || clarity == "RESEALED" ? "깨워" : "닦아";
+            int n = AskFallbacks.Length;
+            return AskFallbacks[(((request.Variation + request.RelicId) % n) + n) % n].Replace("{v}", verb);
+        }
+
+        public static string EventText(ReactionRequest request)
+        {
+            string situation = request.Situation ?? "";
+            if (request.Input == NpcInputs.Tap && ((request.Variation % 3) + 3) % 3 != 0)
+            {
+                return TapTime.Replace(situation, "");
+            }
+            if (AskVariant(request) != null)
+            {
+                return "주인이 너를 보러 찾아왔다."; // (22:07 시험: "안부를 물었다"를 읽은 모델이 "혹시 안부를 물어봐줘?"로 되받았다) 사실은 '이미 한 말'(LinePrefix)로 코드가 말한다 — 상황 문장에 두면 모델이 사실을 다시 풀어 쓴다
+            }
+            return situation;
+        }
+
+        /// <summary>
+        /// 흐려진 안부 요청이 말할 사실: "state"(몸이 흐려졌다) · "days"(마지막 관리가 N일 전). 흐려진 안부가 아니면 null.
+        /// "마지막 관리가 9일 전이었어. 닦아 줄래?"에 "흐려져서"까지 넣으면 어색해져서(2026-11-17 20:39 시험 뒤) 요청마다 번갈아(Variation 짝수 = 상태, 홀수 = 며칠 전) 한 사실만 프롬프트에 싣는다.
+        /// 마지막 관리 사실이 없으면 늘 상태. run.py 의 ask_variant 와 같다.
+        /// </summary>
+        public static string AskVariant(ReactionRequest request)
+        {
+            if (!NpcLineChecks.NeedsAsk(request))
+            {
+                return null;
+            }
+            return ((request.Variation % 2) + 2) % 2 == 1 && request.FindFact(NpcFactKeys.LastCareDaysAgo) != null ? "days" : "state";
+        }
+
         private IEnumerable<string> SituationLines(ReactionRequest request)
         {
             // '고른 선택지' 줄은 상황 문장과 겹치고, Mi:dm 이 '탭'을 'tap' 으로 옮겨 행동 칸에 적어서 싣지 않는다
-            var lines = new List<string> { "상황: " + request.Situation };
+            string call = request.Mode == InteractionMode.Owner ? request.AddressName : null;
+            var lines = new List<string> { "상황: " + NpcLineChecks.OwnerToCall(EventText(request), call) };
+            string prefix = LinePrefix(request);
+            if (prefix != null)
+            {
+                lines.Add("이미 한 말: " + prefix);
+            }
 
+            string variant = AskVariant(request);
             List<Fact> facts = (request.Facts ?? new List<Fact>())
-                    .Where(f => f != null && !HiddenFactKeys.Contains(f.Key ?? ""))
+                    .Where(f => f != null && !HiddenFactKeys.Contains(f.Key ?? "")
+                            && !(variant != null && (f.Key == NpcFactKeys.LastCareDaysAgo || f.Key == NpcFactKeys.Clarity))) // 상황 문장에 이미 있어 둘 다 뺀다 (읽는 토큰 감소)
                     .ToList();
             if (facts.Count > 0)
             {
@@ -476,7 +593,7 @@ namespace Jamkkaebi.Npc
                     string when = memory.DaysAgo == 0 ? "오늘" : memory.DaysAgo + "일 전";
                     // 대사 원문이 아니라 요약을 싣는다. 원문을 주면 작은 모델이 그대로 다시 읊는다
                     string what = !string.IsNullOrEmpty(memory.Summary) ? memory.Summary : Meaning(memory.ActionId);
-                    lines.Add("- " + when + ": " + what);
+                    lines.Add("- " + when + ": " + NpcLineChecks.OwnerToCall(what, call));
                 }
             }
             return lines;
@@ -490,7 +607,7 @@ namespace Jamkkaebi.Npc
             if (shape == 0)
             {
                 // 행동이 하나뿐이면 고를 것이 없다 — 후보 목록 대신 할 일 한 줄 (행동 ID 도 대상 줄도 싣지 않는다)
-                return "할 일: " + Meaning(request.Candidates[0].ActionId);
+                return "할 일: " + (AskTask(request) ?? Meaning(request.Candidates[0].ActionId));
             }
             string head = shape == 2 ? (options.DescribeFormat ? CandidatesHeadFree : CandidatesHead) : (options.DescribeFormat ? CandidatesHeadAction : CandidatesHead);
             var lines = new List<string> { head };
@@ -506,6 +623,9 @@ namespace Jamkkaebi.Npc
             return string.Join("\n", lines.ToArray());
         }
 
+        /// <summary>이 글자 수 이하면 대사 줄에 "(짧아도 된다)"를 적지 않는다. run.py 의 SHORT_LINE_CHARS 와 같다.</summary>
+        public const int ShortLineChars = 15;
+
         // 대사 줄. 작은 모델은 글자 수를 잘 못 세서, 문장 수를 같이 주면 길이를 더 잘 지킨다 (MaxSentences)
         private string LineRule(ReactionRequest request, Persona persona)
         {
@@ -519,8 +639,27 @@ namespace Jamkkaebi.Npc
             {
                 sentences = options.DefaultMaxSentences;
             }
-            // 글자 수만 적으면 그 길이를 채우려고 말을 덧붙여서, 짧아도 된다고 함께 적는다
-            string rule = "대사: 한국어, " + chars + "자 이내" + (sentences > 0 ? ", " + sentences + "문장 이내" : "") + "(짧아도 된다)";
+            // 글자 수만 적으면 그 길이를 채우려고 말을 덧붙여서, 짧아도 된다고 함께 적는다. 다만 15자 이하(탭 인사·손님 관람)에는 적지 않는다 —
+            // "짧게 말한다"·"(짧아도 된다)"를 읽은 모델이 첫 낱말만 대사로 냈다("기다렸어", "왔구나", "와, 도윤!" — 2026-11-17 시험 S01·S22~S24 에서 인사말뿐·반복으로 거르고 다시 만들었다)
+            if (NpcLineChecks.NeedsAsk(request))
+            {
+                chars = Math.Min(chars, AskLineChars); // 모델은 이어지는 부탁 한 문장만 쓴다
+            }
+            string rule = "대사: 한국어 반말, " + chars + "자 이내" + (sentences > 0 ? ", " + sentences + "문장 이내" : "") + (chars <= ShortLineChars ? "" : "(짧아도 된다)");
+            // 첫 낱말을 줄 바로 옆에서 다시 말해 준다: 시스템 규칙과 '첫 낱말' 줄만으로는 모델이 따르지 않아 감사가 "관리해 줘서 고마워"로 거듭 같았다(S07·S09·S13·S25 반복)
+            // 15자 이하(탭 인사·손님 관람)는 첫 낱말에서 멈추지 않게 "이어 말한다"고 적는다 ("기다렸어"·"안녕"만 낸 대사가 인사말뿐으로 걸렸다). "마음을 전하는 한 문장"은
+            // "반가워서 불렀어"·"반가워서 뛰어나왔어"처럼 '반가워서 ~'로 잇게 해서 뺐다 (2026-11-17 19:43 시험 S22)
+            if (Starter(request) != null)
+            {
+                rule += chars <= ShortLineChars && !NpcLineChecks.NeedsAsk(request) ? ", 첫 낱말로 시작해 반가운 마음을 말한다" : NpcLineChecks.NeedsAsk(request) ? ", 첫 낱말로 시작" : ", 첫 낱말로 시작하는 한 문장";
+            }
+            // 흐려진 안부 9건 중 4건이 닦아 달라는 부탁을 빼먹었다(MissingAsk). 끝을 "닦아 줘"로 맺게 했더니 토막 난 말("깨워줘 닦아 줘")이, "'닦아 줄래?'로 부탁한다"로 했더니 모든 대사가
+            // "…닦아 줄래?"로 끝나 같아 보였다(2026-11-17 18:21·19:43 시험). 끝말을 정해 주지 않고 바라는 마음만 말하게 한다 — 닦아 달라는 말이 들어가기만 하면 출력 검사(HasAsk)가 통과시킨다
+            if (NpcLineChecks.NeedsAsk(request))
+            {
+                // "며칠 전"이라고 적었더니 모델이 그 낱말을 그대로 옮겼다("마지막 관리가 며칠 전이라"). 서버가 주는 값 N 으로 채워 적는다
+                rule += ", 부탁 한 문장";
+            }
             // 말투 다짐 줄(speechReminder)은 공통 규칙 RuleSpeech 과 겹쳐 뺐다 (2026-11-13)
             if (request.Memory != null && request.Memory.Count > 0)
             {

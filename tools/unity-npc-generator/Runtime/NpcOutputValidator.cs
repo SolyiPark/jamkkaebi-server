@@ -29,6 +29,7 @@ namespace Jamkkaebi.Npc
         PersonaCopy,    // 페르소나 설명문을 옮겼다 ("가장 친한 동료처럼 반긴다") — 페르소나를 받은 검사기만 본다
         WrongTime,      // 지금 시간대와 어긋난다 (낮인데 "좋은 밤", 자료에 시간대가 없는데 "오늘 밤")
         WrongAddress,   // 호칭이 규칙과 다르다 (친밀한데 '발굴자', 친밀하지 않은데 닉네임)
+        WrongSubject,   // 주체가 어긋난다 (자기 것을 '내 ~' 없이 구경하듯 말함: "자개가 정말 공들여 만든 거네") — 페르소나를 받은 검사기만 본다
         Repeated        // 그 도깨비가 최근에 띄운 대사(request.RecentLines)와 같다
     }
 
@@ -176,6 +177,12 @@ namespace Jamkkaebi.Npc
         public Dictionary<string, int> MaxChars { get; set; }
 
         /// <summary>그 선택지의 대사 길이 제한.</summary>
+        /// <summary>
+        /// 길이 제한에 두는 여유(글자). 실기기 시험(2026-11-12·14 Tab S9·S25 FE 48건 중 12건이 다시 만듦)에서 "26자(제한 25)"처럼 한두 글자 넘었다고 거르고 다시 만들어
+        /// 한 번에 10~15초가 더 들었다. 말풍선에 한두 글자 더 들어가는 것은 문제가 아니라 제한에 이만큼 여유를 둔다. run.py 의 LENGTH_TOLERANCE 와 같다.
+        /// </summary>
+        public const int LengthTolerance = 5;
+
         public int LimitFor(string input)
         {
             int limit;
@@ -242,10 +249,32 @@ namespace Jamkkaebi.Npc
             }
             string line = CleanLine(Text(json, "line"));
             Persona persona = personas != null ? personas.Find(request.RelicId) : null;
+            // 주인 장면: 대화 기억도 마지막 관리 사실도 없는데 '오랜만'이라고 하면 지어낸 말이다
+            bool hasRecord = (request.Memory != null && request.Memory.Count > 0)
+                    || request.FindFact(NpcFactKeys.LastCareDaysAgo) != null
+                    || request.FindFact(NpcFactKeys.VisitDays) != null;
             if (NormalizeSpeech && persona != null)
             {
                 string fixedLine = NpcLineChecks.NormalizeSpeech(line, persona.endingHint != null ? persona.endingHint.label : null, persona.name,
-                        persona.ownThings, request.Nickname, request.FindFact(NpcFactKeys.VisitDays));
+                        persona.ownThings, request.Nickname, request.FindFact(NpcFactKeys.VisitDays), request.AddressName,
+                        NpcLineChecks.NoRecordApplies(request.Input == NpcInputs.Visit, hasRecord, request.Situation));
+                // 상황에 맞는 한 문장으로 줄인다 (지난 대화 꺼내기는 기억의 내용이 뒤 문장에 있을 수 있어 건드리지 않는다)
+                if (action != NpcActions.RecallTalk)
+                {
+                    fixedLine = NpcLineChecks.KeepOneSentence(fixedLine, NpcLineChecks.NeedsAsk(request));
+                    if (NpcLineChecks.NeedsAsk(request) || NpcLineChecks.NoRecordApplies(request.Input == NpcInputs.Visit, hasRecord, request.Situation))
+                    {
+                        fixedLine = NpcLineChecks.FixTodayAlso(fixedLine);
+                    }
+                    if (action == NpcActions.Greet || action == NpcActions.WanderGreet || action == NpcActions.WanderRecall)
+                    {
+                        fixedLine = NpcLineChecks.FixGreetingTail(fixedLine);
+                    }
+                }
+                if (action == NpcActions.ThankCalm || action == NpcActions.ThankJoyful || action == NpcActions.AnswerStatus || action == NpcActions.RecallTalk)
+                {
+                    fixedLine = NpcLineChecks.FixCraftSpectator(fixedLine);
+                }
                 if (fixedLine != line)
                 {
                     said = line;
@@ -253,6 +282,17 @@ namespace Jamkkaebi.Npc
                 }
             }
 
+            // 흐려진 안부: 코드가 정한 사실 문장(이미 한 말) + 모델의 부탁 문장. 한 문장 줄이기는 모델이 쓴 부분에만 했다
+            string linePrefix = PromptAssembler.LinePrefix(request);
+            if (linePrefix != null && line.Length > 0)
+            {
+                // 모델의 부분에 부탁이 없거나 사실이 둘이면 거르고 다시 만들지 않고 코드가 부탁 문장을 채운다 (2026-11-17 22:07 시험)
+                if (!NpcLineChecks.IsCleanAsk(line))
+                {
+                    line = PromptAssembler.AskFallback(request);
+                }
+                line = linePrefix + " " + line;
+            }
             ActionCandidate candidate = null;
             if (request.Candidates != null)
             {
@@ -287,7 +327,7 @@ namespace Jamkkaebi.Npc
             {
                 return Fail(OutputProblem.Newline, "대사에 줄바꿈이 있다", action, target, line);
             }
-            int limit = LimitFor(request.Input);
+            int limit = LimitFor(request.Input) + LengthTolerance;
             string fitted = FitSentences(line, limit, truncated);
             if (fitted == null)
             {
@@ -295,6 +335,16 @@ namespace Jamkkaebi.Npc
                         ? "토큰 한도에서 끊겼고 " + limit + "자 안에 끝난 문장이 없다 (" + line.Length + "자까지 나옴)"
                         : "첫 문장부터 제한을 넘는다 (" + line.Length + "자, 제한 " + limit + "자)";
                 return new OutputCheck(OutputProblem.TooLong, why, action, target, line, line, truncated);
+            }
+            string discovered = NpcLineChecks.DiscoveryEnding(fitted, action);
+            if (discovered != null)
+            {
+                return new OutputCheck(OutputProblem.WrongSubject, "자기 이야기에 발견 어미(~구나) '" + discovered + "'", action, target, fitted, line, truncated);
+            }
+            string probe = NpcLineChecks.GreetingProbe(fitted, action);
+            if (probe != null)
+            {
+                return new OutputCheck(OutputProblem.WrongHistory, "인사에 지어낸 사정·캐묻기 '" + probe + "' ← '" + fitted + "'", action, target, fitted, line, truncated);
             }
             ForbiddenMatch bad = filter.Find(fitted);
             if (bad != null)
@@ -308,6 +358,10 @@ namespace Jamkkaebi.Npc
             if (NpcLineChecks.NeedsAsk(request) && !NpcLineChecks.HasAsk(fitted))
             {
                 return new OutputCheck(OutputProblem.MissingAsk, "닦아 달라는 부탁이 없다 '" + fitted + "'", action, target, fitted, line, truncated);
+            }
+            if (NpcLineChecks.NeedsAsk(request) && NpcLineChecks.MixedAskFacts(fitted))
+            {
+                return new OutputCheck(OutputProblem.WrongHistory, "상태와 며칠 전을 함께 말함 '" + fitted + "'", action, target, fitted, line, truncated);
             }
             string typo = NpcLineChecks.Typo(fitted);
             if (typo != null)
@@ -333,10 +387,6 @@ namespace Jamkkaebi.Npc
             }
             else
             {
-                // 주인 장면: 대화 기억도 마지막 관리 사실도 없는데 '오랜만'이라고 하면 지어낸 말이다
-                bool hasRecord = (request.Memory != null && request.Memory.Count > 0)
-                        || request.FindFact(NpcFactKeys.LastCareDaysAgo) != null
-                        || request.FindFact(NpcFactKeys.VisitDays) != null;
                 conflict = hasRecord ? null : NpcLineChecks.NoRecordContradiction(fitted, request.Situation);
             }
             if (conflict == null)
@@ -348,7 +398,7 @@ namespace Jamkkaebi.Npc
             {
                 return new OutputCheck(OutputProblem.WrongHistory, "기록과 어긋남 '" + conflict + "'", action, target, fitted, line, truncated);
             }
-            string copied = NpcLineChecks.CopiedFromSituation(fitted, request.Situation);
+            string copied = NpcLineChecks.CopiedFromSituation(fitted, request.Situation, request.AddressName);
             if (copied != null)
             {
                 return new OutputCheck(OutputProblem.SituationCopy, "상황 문장을 옮김 '" + copied + "'", action, target, fitted, line, truncated);
@@ -365,6 +415,16 @@ namespace Jamkkaebi.Npc
                 return new OutputCheck(OutputProblem.WrongAddress, "호칭이 규칙과 다름 '" + addressWord + "' (부를 이름: " + request.AddressName + ")",
                         action, target, fitted, line, truncated);
             }
+            string reversedCall = NpcLineChecks.ReversedCall(fitted, request.AddressName);
+            if (reversedCall != null)
+            {
+                return new OutputCheck(OutputProblem.WrongSubject, "호칭 주체가 뒤바뀜 '" + reversedCall + "'", action, target, fitted, line, truncated);
+            }
+            string thirdPerson = NpcLineChecks.PlayerThirdPerson(fitted, request.AddressName);
+            if (thirdPerson != null)
+            {
+                return new OutputCheck(OutputProblem.WrongSubject, "플레이어를 남 얘기하듯 부름 '" + thirdPerson + "'", action, target, fitted, line, truncated);
+            }
             if (persona != null)
             {
                 string personaCopy = NpcLineChecks.CopiedFromPersona(fitted, persona);
@@ -375,6 +435,12 @@ namespace Jamkkaebi.Npc
                 if (NpcLineChecks.ContainsSelfName(fitted, persona.name))
                 {
                     return new OutputCheck(OutputProblem.SelfName, "자기 이름 '" + persona.name + "'", action, target, fitted, line, truncated);
+                }
+                string subjectThing = NpcLineChecks.SubjectContradiction(fitted, persona.ownThings);
+                if (subjectThing != null)
+                {
+                    return new OutputCheck(OutputProblem.WrongSubject, "주체가 어긋남 '" + subjectThing + "' (자기 것은 '내 " + subjectThing + "'처럼 말한다)",
+                            action, target, fitted, line, truncated);
                 }
                 string wrong;
                 if (!NpcLineChecks.SpeechMatches(fitted, persona.endingHint, out wrong))
@@ -459,7 +525,52 @@ namespace Jamkkaebi.Npc
                     fitted = piece;
                 }
             }
-            return fitted;
+            return fitted ?? FitClause(line, limit);
+        }
+
+        /// <summary>쉼표로 자른 앞 마디의 최소 글자 수 (부호·띄어쓰기를 뺀 글자).</summary>
+        public const int ClauseMinChars = 5;
+
+        private const string FinalEndings = "어아야워여요죠네군지까다래자";
+
+        /// <summary>
+        /// 첫 문장이 길이 제한을 넘을 때, 제한 안에 드는 가장 긴 앞 마디(쉼표 앞)가 끝난 말이면 그것만 쓴다. 없으면 null (TooLong).
+        /// 끝난 말은 끝 글자가 어미(어·아·야·워·여·요·죠·네·군·지·까·다·래·자)이고 ClauseMinChars 글자 이상인 것이다.
+        /// 다시 만드는 데 1.5~2초가 더 드는 것을 아끼려는 것이다. run.py 의 fit_clause 와 같다.
+        /// </summary>
+        private static string FitClause(string line, int limit)
+        {
+            for (int i = line.Length - 1; i > 0; i--)
+            {
+                if (line[i] != ',' && line[i] != '，')
+                {
+                    continue;
+                }
+                string piece = line.Substring(0, i).TrimEnd();
+                if (piece.Length == 0 || piece.Length > limit)
+                {
+                    continue;
+                }
+                int core = 0;
+                foreach (char c in piece)
+                {
+                    core += char.IsLetterOrDigit(c) ? 1 : 0;
+                }
+                int quotes = 0;
+                foreach (char c in piece)
+                {
+                    quotes += QuoteChars.IndexOf(c) >= 0 ? 1 : 0;
+                }
+                if (quotes % 2 == 1)
+                {
+                    continue; // 따옴표가 열린 채 끊긴 마디는 지문("인사하며 '오늘은 …")이다
+                }
+                if (core >= ClauseMinChars && FinalEndings.IndexOf(piece[piece.Length - 1]) >= 0)
+                {
+                    return piece;
+                }
+            }
+            return null;
         }
 
         // 문장이 끝나는 자리(끝 글자 다음 위치)들
