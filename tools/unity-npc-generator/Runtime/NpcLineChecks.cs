@@ -408,7 +408,7 @@ namespace Jamkkaebi.Npc
         }
 
         // 부탁 낱말(닦·깨워…)만 있으면 "스스로 닦아야 해"(지어낸 설정)도 부탁으로 봤다 (2026-11-17 21:45 시험 S12 #4). 부탁하는 꼴(~줘·~줄래·~달라·~좋겠·~필요…)이 함께 있어야 한다
-        private static readonly Regex AskRequestForm = new Regex("줘(?!서)|줄래|줄까|주면|줄 수|주겠|주길|주렴|주라|달라|부탁|필요|바라|좋겠", RegexOptions.CultureInvariant);
+        private static readonly Regex AskRequestForm = new Regex("줘(?!서)|줄래|주면|줄 수|주길|주렴|주라|달라|부탁|필요|바라|좋겠", RegexOptions.CultureInvariant);
 
         /// <summary>안부 답하기에서 선명도가 흐려짐·재봉인이면 부탁이 있어야 한다. run.py 의 needs_ask 와 같다.</summary>
         public static bool NeedsAsk(ReactionRequest request)
@@ -456,6 +456,12 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public static string IncompleteEnding(string line)
         {
+            return IncompleteEnding(line, null);
+        }
+
+        /// <summary>address 는 지금 상대를 부르는 말(발굴자·닉네임). "어서 와, 다은."처럼 부르는 말로 끝나면 그 끝 글자('은')를 조사로 보지 않는다.</summary>
+        public static string IncompleteEnding(string line, string address)
+        {
             List<string> sentences = Sentences(line);
             if (sentences.Count == 0)
             {
@@ -464,6 +470,10 @@ namespace Jamkkaebi.Npc
             string ending = Ending(sentences[sentences.Count - 1]);
             string word = ending.Substring(ending.LastIndexOf(' ') + 1);
             if (word.Length < 2 || CompleteWords.Contains(word) || QuotativeEnding.IsMatch(word))
+            {
+                return null;
+            }
+            if (!string.IsNullOrEmpty(address) && (word == address || word == address + "아" || word == address + "야"))
             {
                 return null;
             }
@@ -607,13 +617,13 @@ namespace Jamkkaebi.Npc
 
         // 시간대 낱말: 앞이 한글이면 낱말의 일부("지난밤", "한낮")라 뺀다. 뒤는 '이야·에·도·까지·처럼'이나 문장 부호·끝일 때만 ('낮잠', '밤바다', '낮은'은 아님)
         private static readonly Regex TimeWord = new Regex(
-                "(?<![가-힣])(새벽|아침|저녁|낮|밤)(?=이야|이네|이라|이니|이지|이었|이구나|이다|에|엔|도|까지|부터|처럼|[\\s.!?…~,]|$)",
+                "(?<![가-힣])(새벽|아침|오전|저녁|낮|밤)(?=이야|이네|이라|이니|이지|이었|이구나|이다|에|엔|도|까지|부터|처럼|[\\s.!?…~,]|$)",
                 RegexOptions.CultureInvariant);
 
         // 지금 시간대마다 말해도 되는 시간대 낱말 (경계는 너그럽게: 새벽에 '밤', 밤에 '저녁')
         private static readonly Dictionary<string, string[]> AllowedTimeWords = new Dictionary<string, string[]>
         {
-            { "새벽", new[] { "새벽", "밤" } }, { "아침", new[] { "아침", "새벽" } }, { "오전", new[] { "아침", "낮" } },
+            { "새벽", new[] { "새벽", "밤" } }, { "아침", new[] { "아침", "새벽", "오전" } }, { "오전", new[] { "오전", "아침", "낮" } },
             { "낮", new[] { "낮" } }, { "저녁", new[] { "저녁" } }, { "밤", new[] { "밤", "저녁" } }
         };
 
@@ -1760,7 +1770,7 @@ namespace Jamkkaebi.Npc
         // 흐려진 안부에서 모델이 쓰는 부분은 "(말머리) 닦아 줄래?" 꼴이어야 한다 (2026-11-17 22:27 시험). 아니면 코드가 부탁 문장을 채운다. run.py 의 CLEAN_ASK_RE·is_clean_ask 와 같다
         private static readonly Regex CleanAsk = new Regex(
                 "^(?:(?:살살|괜찮으면|시간 되면|조심조심|이왕이면|혹시|천천히|조금|잠깐만|잠깐|한 ?번|좀|꼭|부디|가끔|오늘은)[ ,]*){0,3}"
-                + "(?:(?:내 몸을|내 몸|나를|날|몸을|나) ?)?(?:닦아|깨워) ?(?:줘|줄래|줄까|줄 ?수 ?있어|줄 ?수 ?있을까|주면 ?좋겠어|주라|주렴|주겠어)[.?!~]*$",
+                + "(?:(?:내 몸을|내 몸|나를|날|몸을|나) ?)?(?:닦아|깨워) ?(?:줘|줄래|줄 ?수 ?있어|줄 ?수 ?있을까|주면 ?좋겠어|주라|주렴)[.?!~]*$",
                 RegexOptions.CultureInvariant);
 
         public static bool IsCleanAsk(string part)

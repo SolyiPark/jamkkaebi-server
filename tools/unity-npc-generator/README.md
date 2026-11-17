@@ -310,7 +310,7 @@ llama.cpp 는 프롬프트 앞부분이 글자 하나까지 같으면 이미 읽
 - 이름은 `LlmUnityModelBackend.StateKey(system)` = `npc-kv-` + (모델 파일 · 컨텍스트 크기 · `StateVersion` · 시스템 메시지)의 FNV-1a 해시. 시스템 메시지가 한 글자라도 다르면 다른 파일이다. Unity 쪽(`LlmUnityRuntime.Session`)은 이름에 앱 버전도 붙여, 앱이 업데이트되면 옛 기억을 쓰지 않는다.
 - 세션이 `ILlmUnityStateStore`(`SaveStateAsync`/`LoadStateAsync`)를 구현하면 쓰고, 구현하지 않거나 저장·복원이 실패하면(파일 없음·깨짐·예외) 그냥 읽는다. 게임 동작은 달라지지 않고 느려질 뿐이다.
 - 저장은 미리 읽기 때만 한다(생성 요청 뒤에는 사용자 메시지와 대사가 섞이므로 저장하지 않는다). `LastPrepareRestored`·`StateLoads`·`StateSaves` 로 되살렸는지 볼 수 있다.
-- **API 이름 확인:** `Unity/LlmUnityRuntime.cs` 는 LLMUnity 의 `LLMAgent.Save(이름)` / `Load(이름)` 으로 썼다. 사용 중인 LLMUnity 버전에서 이 이름이 달라 컴파일이 안 되면 Scripting Define Symbols 에 `JAMKKAEBI_NO_KVSTATE` 를 넣어 끄고(항상 읽기로 대신), `SaveStateAsync`·`LoadStateAsync` 두 메서드만 고친다. 모델이나 llama.cpp 를 바꿨으면 `StateVersion` 을 올려 옛 기억을 버린다.
+- **기본은 꺼져 있다:** `Unity/LlmUnityRuntime.cs` 의 저장·복원은 `JAMKKAEBI_KVSTATE` 를 정의했을 때만 컴파일된다(기본은 항상 false 라서 그냥 시스템 메시지를 읽는다). LLMUnity 3.0.3 의 `LLMAgent` 에는 `Save(이름)`·`Load(이름)` 이 없고(`SaveHistory`·`LoadHistory` 는 대화 기록만 저장하며 llama.cpp 의 KV 캐시는 저장하지 않는다) 이 이름으로는 컴파일이 깨진다. KV 상태를 저장하는 API 를 주는 LLMUnity 로 올렸다면 `JAMKKAEBI_KVSTATE` 를 정의하고 `SaveStateAsync`·`LoadStateAsync` 두 메서드를 그 API 에 맞게 고친다. 모델이나 llama.cpp 를 바꿨으면 `StateVersion` 을 올려 옛 기억을 버린다.
 - 실기기에서 확인: 앱을 한 번 실행한 뒤 다시 켜서 같은 도깨비를 탭했을 때 `LastPrepareRestored` 가 true 이고 미리 읽기 시간이 크게 줄어야 한다.
 
 ## SLM 생성기와 출력 검사

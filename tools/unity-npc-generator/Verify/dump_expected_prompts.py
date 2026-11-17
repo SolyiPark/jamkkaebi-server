@@ -122,5 +122,46 @@ for line, flag in ONE_SAMPLES:
 for call, line in CALL_SAMPLES:
     expected["_speechSamples"].append({"label": "반말", "line": line, "call": call, "want": run.normalize_speech(line, "반말", None, None, None, None, call)})
 
+# 2026-11-18: 이번에 더한 규칙 함수(인사 꼬리·부탁 꼴·플레이어 이름 지움·자기 솜씨·끊긴 말·남 얘기 이름·뒤바뀐 주체)도 C# 과 같은 결과인지
+OWN_THINGS = ["자개", "옻칠", "몸"]
+FN_SAMPLES = [
+    ("greetingTail", "왔구나, 반가워, 무슨 일인지 궁금하네.", ""), ("greetingTail", "와, 반가워. 뭘 찾으러 왔어?", ""), ("greetingTail", "어서 와 도윤아, 오늘은 무슨 일이 있길래 찾아왔어?", ""),
+    ("greetingTail", "또 와줘서 고마워, 향로랑 친구들 보고 싶었어?", ""), ("greetingTail", "안녕, 반가워?", ""), ("greetingTail", "안녕, 오늘은 좀 일찍 왔구나.", ""),
+    ("greetingTail", "어서 와, 반가워!", ""), ("greetingTail", "왜 왔어?", ""), ("greetingTail", "와, 처음 온 친구야?", ""),
+    ("cleanAsk", "시간 되면 닦아 줄 수 있어?", ""), ("cleanAsk", "괜찮으면 도와줄래?", ""), ("cleanAsk", "조심조심 들어와, 내 마음을 좀 닦아줄래?", ""),
+    ("cleanAsk", "살살 닦아 줄까?", ""), ("cleanAsk", "이왕이면 깨워 줘.", ""), ("cleanAsk", "오늘은 닦아 줄래?", ""), ("cleanAsk", "닦아 주겠어.", ""),
+    ("dropPlayer", "오랜만에 도윤을 찾아줘서 고마워!", "도윤"), ("dropPlayer", "발굴자가 날 관리해줘서 고마워!", "발굴자"), ("dropPlayer", "도윤이 보고 싶었어.", "도윤"),
+    ("dropPlayer", "도윤아 안녕, 반가워.", "도윤"), ("dropPlayer", "고마워, 도윤!", "도윤"), ("dropPlayer", "도윤 덕분에 기뻐.", "도윤"), ("dropPlayer", "도윤을!", "도윤"),
+    ("craft", "그 자개 공들여 만들었네", ""), ("craft", "이 자개는 사흘 전 자랑했어", ""), ("craft", "그 모습이 보기 좋아", ""), ("craft", "오늘은 기분이 좋네.", ""),
+    ("craft", "옻칠을 정성껏 칠했네. 그 옻칠 반짝여.", ""),
+    ("incomplete", "어서 와, 다은.", "다은"), ("incomplete", "어서 와, 다은.", ""), ("incomplete", "내 꼬리를", "다은"), ("incomplete", "관리해 줘서", "다은"),
+    ("thirdPerson", "정말 고마워, 도윤을!", "도윤"), ("thirdPerson", "도윤한테 고마워", "도윤"), ("thirdPerson", "도윤아, 고마워!", "도윤"), ("thirdPerson", "발굴자의 손길", "발굴자"),
+    ("reversed", "드디어 도윤을 만나러 왔다니 정말 반갑다!", "도윤"), ("reversed", "발굴자를 불러서 반가워", "발굴자"), ("reversed", "도윤이 만나러 왔구나.", "도윤"),
+    ("probe", "안녕, 오늘은 좀 일찍 왔구나.", "greet"), ("probe", "어서 와, 반가워!", "greet"), ("probe", "무슨 일이야?", "thank_calm"), ("probe", "뭘 찾으러 왔어?", "wander_greet"),
+]
+
+
+def run_fn(kind, line, arg):
+    if kind == "greetingTail":
+        return run.fix_greeting_tail(line)
+    if kind == "cleanAsk":
+        return "true" if run.is_clean_ask(line) else "false"
+    if kind == "dropPlayer":
+        return run.drop_player_reference(line, arg)
+    if kind == "craft":
+        return run.fix_craft_spectator(run.fix_own_possessive(line, OWN_THINGS))
+    if kind == "incomplete":
+        return run.incomplete_ending(line, arg or None) or ""
+    if kind == "thirdPerson":
+        return run.player_third_person(line, arg) or ""
+    if kind == "reversed":
+        return run.reversed_call(line, arg) or ""
+    if kind == "probe":
+        return run.greeting_probe(line, arg) or ""
+    raise ValueError(kind)
+
+
+expected["_fnSamples"] = [{"fn": kind, "line": line, "arg": arg, "want": run_fn(kind, line, arg)} for kind, line, arg in FN_SAMPLES]
+
 Path(sys.argv[2]).write_text(json.dumps(expected, ensure_ascii=False, indent=1), encoding="utf-8")
 print(f"기준 프롬프트 {prompt_count}개, 말투 다듬기 예문 {len(SPEECH_SAMPLES)}개")

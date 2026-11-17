@@ -510,6 +510,43 @@ namespace Jamkkaebi.Npc
             return resealed ? (pick == 0 ? "몸이 흐려지다 못해 봉인됐어." : "다시 봉인될 만큼 흐려졌어.") : (pick == 0 ? "몸이 흐려졌어." : "몸이 많이 흐려졌어.");
         }
 
+        /// <summary>이 요청이 쓸 수 있는 '이미 한 말'(코드가 정한 앞 문장) 전부. 최근 대사에서 앞 문장을 떼어 부탁 부분끼리 견줄 때 쓴다. 흐려진 안부가 아니면 빈 목록.</summary>
+        public static List<string> AskPrefixes(ReactionRequest request)
+        {
+            var list = new List<string>();
+            if (!NpcLineChecks.NeedsAsk(request))
+            {
+                return list;
+            }
+            string n = request.FindFact(NpcFactKeys.LastCareDaysAgo);
+            if (n != null)
+            {
+                list.Add("마지막 관리가 " + n + "일 전이었어.");
+                list.Add("관리받은 지 " + n + "일이 지났어.");
+            }
+            list.Add("몸이 흐려졌어.");
+            list.Add("몸이 많이 흐려졌어.");
+            list.Add("몸이 흐려지다 못해 봉인됐어.");
+            list.Add("다시 봉인될 만큼 흐려졌어.");
+            return list;
+        }
+
+        /// <summary>대사 앞의 '이미 한 말'을 뗀다. 없으면 그대로.</summary>
+        public static string StripAskPrefix(string line, List<string> prefixes)
+        {
+            if (!string.IsNullOrEmpty(line) && prefixes != null)
+            {
+                foreach (string prefix in prefixes)
+                {
+                    if (line.StartsWith(prefix, StringComparison.Ordinal))
+                    {
+                        return line.Substring(prefix.Length).Trim();
+                    }
+                }
+            }
+            return line;
+        }
+
         /// <summary>흐려진 안부의 '할 일' 줄. 재봉인은 깨워 달라고, 흐려짐은 닦아 달라고 이어 부탁한다. 흐려진 안부가 아니면 null.</summary>
         public static string AskTask(ReactionRequest request)
         {

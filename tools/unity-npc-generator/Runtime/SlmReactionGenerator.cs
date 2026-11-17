@@ -54,6 +54,12 @@ namespace Jamkkaebi.Npc
         private readonly PromptAssembler assembler;
         private readonly NpcOutputValidator validator;
 
+        /// <summary>이 입력의 대사 길이 제한(여유 포함). 미리 만들어 둔 대사를 꺼내 칸을 채운 뒤에도 같은 제한을 지키게 한다.</summary>
+        public int MaxLineLength(string input)
+        {
+            return validator.LimitFor(input) + NpcOutputValidator.LengthTolerance;
+        }
+
         public SlmReactionGenerator(INpcModelBackend backend, PromptAssembler assembler, NpcOutputValidator validator)
         {
             if (backend == null)

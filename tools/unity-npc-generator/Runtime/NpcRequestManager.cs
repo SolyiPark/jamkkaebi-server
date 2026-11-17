@@ -205,7 +205,8 @@ namespace Jamkkaebi.Npc
                     if (ready == null)
                     {
                         // 칸 있는 대사: 서버 값을 모르는 채로 미리 만들어 둔 것에 이 요청의 시간대·호칭·방문 횟수를 넣어 바로 완성한다
-                        ready = Cache.TryTakeTemplate(request, request.RecentLines);
+                        SlmReactionGenerator generator = slm as SlmReactionGenerator;
+                        ready = Cache.TryTakeTemplate(request, request.RecentLines, generator != null ? generator.MaxLineLength(request.Input) : int.MaxValue);
                     }
                     if (ready != null)
                     {
@@ -426,11 +427,31 @@ namespace Jamkkaebi.Npc
             }
         }
 
+        // CancelPrefetch 가 줄에서 뺀 작업인지 (화면 종료·NPC 전환). 빠진 작업은 이어 만들지 않는다
+        private bool IsQueued(PrefetchJob job)
+        {
+            lock (gate)
+            {
+                foreach (PrefetchJob queued in prefetchJobs)
+                {
+                    if (queued == job)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+
         // 한 상황의 대사를 목표 수만큼 만든다. 요청 때문에 취소되면 false(나중에 이어 만든다), 다 만들었거나 포기했으면 true
         private async Task<bool> RunPrefetchJob(PrefetchJob job)
         {
             while ((job.IsTemplate ? Cache.TemplateCount(job.Template) : Cache.Count(job.Template)) < job.Count && job.Failures < 3)
             {
+                if (!IsQueued(job))
+                {
+                    return true; // CancelPrefetch 로 줄에서 빠졌다 — 더 만들지 않는다
+                }
                 if (Volatile.Read(ref activeRequests) > 0)
                 {
                     return false;
@@ -462,7 +483,11 @@ namespace Jamkkaebi.Npc
                     }
                     if (result.FailReason == FailReason.Cancelled)
                     {
-                        // 요청이 왔거나(다시 이어 만든다) 시간이 넘었다
+                        // CancelPrefetch 로 줄에서 빠졌으면 끝, 요청이 왔으면(다시 이어 만든다) 나중에, 아니면 시간이 넘은 것이다
+                        if (!IsQueued(job))
+                        {
+                            return true;
+                        }
                         if (Volatile.Read(ref activeRequests) > 0)
                         {
                             return false;

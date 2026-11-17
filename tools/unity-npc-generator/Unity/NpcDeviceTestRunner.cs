@@ -283,7 +283,7 @@ namespace Jamkkaebi.Npc
                     string action = response.ShouldShow ? response.Reaction.ActionId : "";
                     string line = response.ShouldShow ? response.Reaction.Line : "";
                     bool expected = scene.Expected.Contains(action);
-                    long firstToken = fromSlm ? FirstTokenMs() : -1;
+                    long firstToken = fromSlm && !prefetched ? FirstTokenMs() : -1;
                     if (isFixed)
                     {
                         fixedCount++;

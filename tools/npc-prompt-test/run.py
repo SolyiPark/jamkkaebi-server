@@ -59,7 +59,7 @@ FIELDS = [
     ("intimacy", "친밀도"), ("address_expected", "기대호칭"), ("address_used", "대사호칭"), ("address_ok", "호칭OK"),
     ("action", "행동"), ("animation", "애니메이션"), ("target", "대상"), ("line", "대사"),
     ("final", "최종"), ("attempts", "시도"), ("rejected", "거른이유"),
-    ("full_line", "자르기전대사"), ("speech_fixed", "다듬기전대사"), ("fallback_line", "띄운기본대사"), ("cut", "문장자름"), ("truncated", "토큰한도끊김"),
+    ("full_line", "자르기전대사"), ("speech_fixed", "다듬기전대사"), ("ask_filled", "코드가채운부탁"), ("fallback_line", "띄운기본대사"), ("cut", "문장자름"), ("truncated", "토큰한도끊김"),
     ("json_ok", "JSON"), ("pure_json", "순수JSON"), ("action_ok", "행동OK"), ("target_ok", "대상OK"),
     ("expected_ok", "기대행동"), ("forbidden_ok", "금지어없음"), ("mention_ok", "필수어포함"),
     ("bad_ok", "공통금칙어없음"), ("bad_hits", "걸린금칙어"),
@@ -575,6 +575,25 @@ def ask_prefix(scene, variation):
     if variant == "days":
         return ASK_PREFIXES["days"][pick].format(n=fact_of(scene, "last_care_days_ago"))
     return ASK_PREFIXES["resealed" if fact_of(scene, "clarity") in ("재봉인", "RESEALED") else "faded"][pick]
+
+
+def ask_prefix_candidates(scene):
+    """이 장면이 쓸 수 있는 '이미 한 말' 전부 (최근 대사에서 앞 문장을 떼어 부탁 부분끼리 견준다). 흐려진 안부가 아니면 빈 목록. C# PromptAssembler.AskPrefixes 와 같다."""
+    if not needs_ask(scene):
+        return []
+    out = []
+    n = fact_of(scene, "last_care_days_ago")
+    if n is not None:
+        out += [t.format(n=n) for t in ASK_PREFIXES["days"]]
+    out += list(ASK_PREFIXES["faded"]) + list(ASK_PREFIXES["resealed"])
+    return out
+
+
+def strip_ask_prefix(line, prefixes):
+    for prefix in prefixes:
+        if (line or "").startswith(prefix):
+            return line[len(prefix):].strip()
+    return line
 
 
 def ask_task(scene, variation):
@@ -1885,8 +1904,8 @@ def day_ref_contradiction(line, allowed):
 
 
 # 시간대 낱말: 앞이 한글이면 낱말의 일부("지난밤", "한낮")라 뺀다. 뒤는 '이야·에·도·까지·처럼'이나 문장 부호·끝일 때만 ('낮잠', '밤바다', '낮은'은 아님)
-TIME_WORD_RE = re.compile(r"(?<![가-힣])(새벽|아침|저녁|낮|밤)(?=이야|이네|이라|이니|이지|이었|이구나|이다|에|엔|도|까지|부터|처럼|[\s.!?…~,]|$)")
-ALLOWED_TIME_WORDS = {"새벽": {"새벽", "밤"}, "아침": {"아침", "새벽"}, "오전": {"아침", "낮"}, "낮": {"낮"}, "저녁": {"저녁"}, "밤": {"밤", "저녁"}}
+TIME_WORD_RE = re.compile(r"(?<![가-힣])(새벽|아침|오전|저녁|낮|밤)(?=이야|이네|이라|이니|이지|이었|이구나|이다|에|엔|도|까지|부터|처럼|[\s.!?…~,]|$)")
+ALLOWED_TIME_WORDS = {"새벽": {"새벽", "밤"}, "아침": {"아침", "새벽", "오전"}, "오전": {"오전", "아침", "낮"}, "낮": {"낮"}, "저녁": {"저녁"}, "밤": {"밤", "저녁"}}
 
 
 def time_of_day(hour):
@@ -2066,7 +2085,7 @@ QUOTATIVE_RE = re.compile("(다고|라고|냐고|자고|다니까|라니까|자�
 COMPLETE_WORDS = {"여기서", "거기서", "저기서", "어디서", "어서", "그리고", "그러니까", "그러면", "그럼", "아니면", "이러면", "그래서"}
 
 
-def incomplete_ending(line):
+def incomplete_ending(line, address=None):
     """마지막 문장이 끝맺지 못했으면 그 낱말, 아니면 None. 이어 주는 말(~서·~고·~며·~니까·~면…)이나 조사(~은·~는·~을·~를·~의)로 끝난 대사다
     ("꼬리까지 깨끗하게 관리해 줘서"). 끝의 '히힛!' 같은 의성어를 뗀 뒤에 보므로 그 앞이 끊긴 말이면 거른다. 인용("~다고")과 "여기서"·"어서" 같은
     낱말은 끝맺은 것으로 본다. C# NpcLineChecks.IncompleteEnding 과 같다."""
@@ -2076,6 +2095,8 @@ def incomplete_ending(line):
     word = VOCATIVE_RE.sub("", TRAILING_RE.sub("", sentences[-1])).split(" ")[-1]
     if len(word) < 2 or word in COMPLETE_WORDS or QUOTATIVE_RE.search(word):
         return None
+    if address and word in (address, address + "아", address + "야"):
+        return None  # "어서 와, 다은."처럼 닉네임으로 끝나는 부르는 말의 끝 글자('은')는 조사가 아니다 (CodeRabbit 리뷰)
     if DANGLING_CONNECTIVE_RE.search(word) or DANGLING_PARTICLE_RE.search(word):
         return word
     # 문장 부호 없이 '기분이'·'내가'로 끝나면 뒤가 잘린 것이다 (끝의 "히히!"를 떼고 남은 말, 2026-11-13 시험: "…예뻐 보여서 기분이")
@@ -2088,7 +2109,8 @@ ASK_WORDS_RE = re.compile("닦(?!아 ?(줘서|준))|깨워(?! ?(줘서|준))|깨
 
 
 # 부탁 낱말(닦·깨워…)만 있으면 "스스로 닦아야 해"(지어낸 설정)도 부탁으로 봤다 (2026-11-17 21:45 시험 S12 #4). 부탁하는 꼴(~줘·~줄래·~달라·~좋겠·~필요…)이 함께 있어야 한다
-ASK_REQUEST_RE = re.compile("줘(?!서)|줄래|줄까|주면|줄 수|주겠|주길|주렴|주라|달라|부탁|필요|바라|좋겠")
+# "닦아 줄까?"·"닦아 주겠어"는 도깨비가 닦아 주겠다는 제안이라 부탁이 아니다 (CodeRabbit 리뷰)
+ASK_REQUEST_RE = re.compile("줘(?!서)|줄래|주면|줄 수|주길|주렴|주라|달라|부탁|필요|바라|좋겠")
 
 
 # 흐려진 안부에서 모델이 쓰는 부분은 "(말머리) 닦아 줄래?" 꼴이어야 한다 (2026-11-17 22:27 시험). 자유롭게 쓰게 두자 "조심조심 들어와, 내 마음을 좀 닦아줄래?"·"괜찮으면 도와줄래?"·
@@ -2096,7 +2118,7 @@ ASK_REQUEST_RE = re.compile("줘(?!서)|줄래|줄까|주면|줄 수|주겠|주�
 # 지어낸 말이 새어 들었다. 사실 문장은 코드가 말하므로, 모델의 부분이 이 꼴이 아니면 코드가 부탁 문장을 채운다(ask_fallback). C# NpcLineChecks.IsCleanAsk 와 같다
 CLEAN_ASK_RE = re.compile(
     r"^(?:(?:살살|괜찮으면|시간 되면|조심조심|이왕이면|혹시|천천히|조금|잠깐만|잠깐|한 ?번|좀|꼭|부디|가끔|오늘은)[ ,]*){0,3}"
-    r"(?:(?:내 몸을|내 몸|나를|날|몸을|나) ?)?(?:닦아|깨워) ?(?:줘|줄래|줄까|줄 ?수 ?있어|줄 ?수 ?있을까|주면 ?좋겠어|주라|주렴|주겠어)[.?!~]*$")
+    r"(?:(?:내 몸을|내 몸|나를|날|몸을|나) ?)?(?:닦아|깨워) ?(?:줘|줄래|줄 ?수 ?있어|줄 ?수 ?있을까|주면 ?좋겠어|주라|주렴)[.?!~]*$")
 
 
 def is_clean_ask(part):
@@ -2265,7 +2287,7 @@ def game_problem(row, persona, recent, scene=None):
     wrong_spelling = typo(line)
     if wrong_spelling:
         return f"오타 '{wrong_spelling}'"
-    dangling = incomplete_ending(line)
+    dangling = incomplete_ending(line, address_name(scene) if scene is not None else None)
     if dangling:
         return f"문장이 끝나지 않음 '{dangling}'"
     if scene is not None and scene.get("input") == "visit":
@@ -2312,7 +2334,8 @@ def game_problem(row, persona, recent, scene=None):
     repeated_word = inner_repeat(line)
     if repeated_word:
         return f"한 대사 안의 반복 '{repeated_word}'"
-    same = find_similar(line, recent)
+    prefixes = ask_prefix_candidates(scene) if scene is not None else []
+    same = find_similar(strip_ask_prefix(line, prefixes), [strip_ask_prefix(r, prefixes) for r in recent or []]) if prefixes else find_similar(line, recent)
     if same:
         return f"반복 '{same[0]}' ({same[1]})"
     return None
@@ -2361,6 +2384,9 @@ def evaluate(obj, scene, persona, limit, forbidden_groups, truncated=False, norm
     keywords = scene.get("mustMention")
     examples = persona.get("examples")
     hits = forbidden_hits(line, forbidden_groups)
+    if normalize:
+        # 말투 다듬기가 '네가'를 지우면 "네가 관리를 안 해줘서"의 탓하는 말이 문장으로 안 보인다 — 다듬기 전 대사로도 '지나친 퉁명스러움·무시' 묶음을 본다 (CodeRabbit 리뷰)
+        hits += [h for h in forbidden_hits(said, forbidden_groups) if h.startswith("지나친 퉁명스러움·무시:") and h not in hits]
     copied = copied_example(line, examples) if examples and line else ""
     return {
         "json_ok": True,

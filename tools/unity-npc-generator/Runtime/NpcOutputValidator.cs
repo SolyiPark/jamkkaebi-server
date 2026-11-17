@@ -246,8 +246,13 @@ namespace Jamkkaebi.Npc
                 {
                     target = onlyTargets[0];
                 }
+                else if (onlyTargets.Count == 0 && HasCandidateWithoutTargets(request, action))
+                {
+                    target = NpcTargets.None; // 대상이 없는 행동(인사 등)은 'none' — 다른 후보에 대상이 있어도 모델이 target 칸을 비우면 이것으로 채운다
+                }
             }
             string line = CleanLine(Text(json, "line"));
+            string rawLine = line; // 말투 다듬기 전 (탓하는 말을 '네가'를 지우기 전에도 본다)
             Persona persona = personas != null ? personas.Find(request.RelicId) : null;
             // 주인 장면: 대화 기억도 마지막 관리 사실도 없는데 '오랜만'이라고 하면 지어낸 말이다
             bool hasRecord = (request.Memory != null && request.Memory.Count > 0)
@@ -347,6 +352,18 @@ namespace Jamkkaebi.Npc
                 return new OutputCheck(OutputProblem.WrongHistory, "인사에 지어낸 사정·캐묻기 '" + probe + "' ← '" + fitted + "'", action, target, fitted, line, truncated);
             }
             ForbiddenMatch bad = filter.Find(fitted);
+            if (bad == null && NormalizeSpeech)
+            {
+                // 말투 다듬기가 '네가'를 지우면 "네가 관리를 안 해줘서"의 탓하는 말이 문장으로 안 보인다 — 다듬기 전 대사로도 '지나친 퉁명스러움·무시' 묶음(cold)을 본다
+                foreach (ForbiddenMatch rawHit in filter.FindAll(rawLine))
+                {
+                    if (rawHit.GroupId == "cold")
+                    {
+                        bad = rawHit;
+                        break;
+                    }
+                }
+            }
             if (bad != null)
             {
                 return new OutputCheck(OutputProblem.Forbidden, "금칙어 " + bad, action, target, fitted, line, truncated);
@@ -368,32 +385,12 @@ namespace Jamkkaebi.Npc
             {
                 return new OutputCheck(OutputProblem.Typo, "오타 '" + typo + "'", action, target, fitted, line, truncated);
             }
-            string dangling = NpcLineChecks.IncompleteEnding(fitted);
+            string dangling = NpcLineChecks.IncompleteEnding(fitted, request.AddressName);
             if (dangling != null)
             {
                 return new OutputCheck(OutputProblem.Incomplete, "문장이 끝나지 않음 '" + dangling + "'", action, target, fitted, line, truncated);
             }
-            string conflict;
-            if (request.Input == NpcInputs.Visit)
-            {
-                int visits;
-                conflict = NpcLineChecks.HistoryContradiction(fitted,
-                        int.TryParse(request.FindFact(NpcFactKeys.VisitCount30d), out visits) ? visits : (int?)null);
-                if (conflict == null)
-                {
-                    // 3일 전에도 온 친구에게 "오랜만이야"
-                    conflict = NpcLineChecks.LongAbsenceContradiction(fitted, request.FindFact(NpcFactKeys.VisitDays));
-                }
-            }
-            else
-            {
-                conflict = hasRecord ? null : NpcLineChecks.NoRecordContradiction(fitted, request.Situation);
-            }
-            if (conflict == null)
-            {
-                // "이틀 전"·"어제"·"5일 전"은 자료(마지막 관리·방문한 날·기억·상황 문장)의 실제 기록에 있는 날일 때만 말한다
-                conflict = NpcLineChecks.DayRefContradiction(fitted, RecordedDays(request));
-            }
+            string conflict = RecordConflict(fitted, request);
             if (conflict != null)
             {
                 return new OutputCheck(OutputProblem.WrongHistory, "기록과 어긋남 '" + conflict + "'", action, target, fitted, line, truncated);
@@ -458,13 +455,78 @@ namespace Jamkkaebi.Npc
             {
                 return new OutputCheck(OutputProblem.InnerRepeat, "한 대사 안의 반복 '" + repeatedWord + "'", action, target, fitted, line, truncated);
             }
-            KeyValuePair<string, string>? same = NpcLineChecks.FindSimilar(fitted, request.RecentLines);
+            // 흐려진 안부: 코드가 정한 앞 문장("마지막 관리가 9일 전이었어.")은 요청마다 같을 수 있어, 앞 문장을 뗀 부탁 부분끼리 견준다 (앞 문장만 같아 거르던 것을 막는다)
+            string compareLine = fitted;
+            IEnumerable<string> compareRecent = request.RecentLines;
+            if (linePrefix != null)
+            {
+                List<string> prefixes = PromptAssembler.AskPrefixes(request);
+                compareLine = PromptAssembler.StripAskPrefix(fitted, prefixes);
+                var stripped = new List<string>();
+                if (request.RecentLines != null)
+                {
+                    foreach (string recent in request.RecentLines)
+                    {
+                        stripped.Add(PromptAssembler.StripAskPrefix(recent, prefixes));
+                    }
+                }
+                compareRecent = stripped;
+            }
+            KeyValuePair<string, string>? same = NpcLineChecks.FindSimilar(compareLine, compareRecent);
             if (same.HasValue)
             {
                 return new OutputCheck(OutputProblem.Repeated, "최근 대사 '" + same.Value.Key + "' 와 같음 (" + same.Value.Value + ")",
                         action, target, fitted, line, truncated);
             }
             return new OutputCheck(OutputProblem.None, null, action, target, fitted, line, truncated);
+        }
+
+        private static bool HasCandidateWithoutTargets(ReactionRequest request, string action)
+        {
+            if (request.Candidates != null)
+            {
+                foreach (ActionCandidate c in request.Candidates)
+                {
+                    if (c != null && c.ActionId == action && (c.TargetIds == null || c.TargetIds.Count == 0))
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// 대사가 방문·마지막 관리·기억 같은 실제 기록과 어긋나는지 (손님: 방문 횟수·최근 방문, 주인: 기록 없는 '오랜만', 며칠 전 낱말). 어긋나는 말이 없으면 null.
+        /// 출력 검사와, 미리 만들어 둔 칸 있는 대사를 꺼낼 때(NpcLineCache.TryTakeTemplate)가 같은 기준을 쓴다.
+        /// </summary>
+        public static string RecordConflict(string line, ReactionRequest request)
+        {
+            bool hasRecord = (request.Memory != null && request.Memory.Count > 0)
+                    || request.FindFact(NpcFactKeys.LastCareDaysAgo) != null
+                    || request.FindFact(NpcFactKeys.VisitDays) != null;
+            string conflict;
+            if (request.Input == NpcInputs.Visit)
+            {
+                int visits;
+                conflict = NpcLineChecks.HistoryContradiction(line,
+                        int.TryParse(request.FindFact(NpcFactKeys.VisitCount30d), out visits) ? visits : (int?)null);
+                if (conflict == null)
+                {
+                    // 3일 전에도 온 친구에게 "오랜만이야"
+                    conflict = NpcLineChecks.LongAbsenceContradiction(line, request.FindFact(NpcFactKeys.VisitDays));
+                }
+            }
+            else
+            {
+                conflict = hasRecord ? null : NpcLineChecks.NoRecordContradiction(line, request.Situation);
+            }
+            if (conflict == null)
+            {
+                // "이틀 전"·"어제"·"5일 전"은 자료(마지막 관리·방문한 날·기억·상황 문장)의 실제 기록에 있는 날일 때만 말한다
+                conflict = NpcLineChecks.DayRefContradiction(line, RecordedDays(request));
+            }
+            return conflict;
         }
 
         // 자료에 적힌 실제 날수: 마지막 관리, 방문한 날, 대화 기억, 상황 문장에 나온 "N일 전"

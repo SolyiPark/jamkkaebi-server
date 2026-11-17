@@ -161,8 +161,8 @@ namespace Jamkkaebi.Npc
             // LLMUnity 의 LLMAgent.Save / Load(이름) 으로 대화 기록과 llama.cpp 슬롯의 캐시를 파일로 남기고 되살린다 (파일은
             // Application.persistentDataPath). 앱 버전이 바뀌면 내장 llama.cpp 도 바뀌었을 수 있어 이름에 앱 버전을 붙여 옛 기억을 쓰지 않는다.
             // 저장 여부는 PlayerPrefs 표시로 알아, 없는 파일을 읽으려 하지 않는다.
-            // 이 API 이름이 LLMUnity 버전에 따라 달라 컴파일이 안 되면, Scripting Define Symbols 에 JAMKKAEBI_NO_KVSTATE 를 넣어 끄고
-            // 아래 두 메서드만 고친다 (끄면 항상 false 라서 백엔드는 그냥 시스템 메시지를 읽는다).
+            // 기본은 꺼져 있다(항상 false 라서 백엔드는 그냥 시스템 메시지를 읽는다). LLMUnity 3.0.3 의 LLMAgent 에는 Save(이름)·Load(이름)이 없고(SaveHistory·LoadHistory 는 대화 기록만 저장한다)
+            // 컴파일이 깨지므로, 사용 중인 LLMUnity 가 llama.cpp 의 KV 상태를 저장하는 API 를 줄 때만 Scripting Define Symbols 에 JAMKKAEBI_KVSTATE 를 넣어 켜고 아래 두 메서드를 그 API 에 맞게 고친다.
 
             private static string FileName(string key)
             {
@@ -176,7 +176,7 @@ namespace Jamkkaebi.Npc
 
             public async Task<bool> SaveStateAsync(string key)
             {
-#if JAMKKAEBI_NO_KVSTATE
+#if !JAMKKAEBI_KVSTATE
                 await Task.CompletedTask;
                 return false;
 #else
@@ -196,7 +196,7 @@ namespace Jamkkaebi.Npc
 
             public async Task<bool> LoadStateAsync(string key)
             {
-#if JAMKKAEBI_NO_KVSTATE
+#if !JAMKKAEBI_KVSTATE
                 await Task.CompletedTask;
                 return false;
 #else

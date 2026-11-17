@@ -55,7 +55,7 @@ namespace Jamkkaebi.Npc
 
         private static readonly Dictionary<string, string[]> AllowedTimeWords = new Dictionary<string, string[]>
         {
-            { "새벽", new[] { "새벽", "밤" } }, { "아침", new[] { "아침", "새벽" } }, { "오전", new[] { "아침", "낮" } },
+            { "새벽", new[] { "새벽", "밤" } }, { "아침", new[] { "아침", "새벽", "오전" } }, { "오전", new[] { "오전", "아침", "낮" } },
             { "낮", new[] { "낮" } }, { "저녁", new[] { "저녁" } }, { "밤", new[] { "밤", "저녁" } }
         };
 

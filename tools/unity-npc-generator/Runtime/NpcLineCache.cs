@@ -189,7 +189,7 @@ namespace Jamkkaebi.Npc
             string key = TemplateKeyOf(request);
             lock (gate)
             {
-                List<Entry> live = Live(key);
+                List<Entry> live = LiveForWrite(key);
                 if (live.Count >= MaxPerKey)
                 {
                     return false;
@@ -216,6 +216,15 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public ReactionResult TryTakeTemplate(ReactionRequest request, IEnumerable<string> recent)
         {
+            return TryTakeTemplate(request, recent, int.MaxValue);
+        }
+
+        /// <summary>
+        /// maxLength 는 출력 검사의 길이 제한(여유 포함). 칸에 실제 호칭을 넣으면 길어질 수 있어("발굴자"→20자 닉네임) 넣은 뒤에도 제한을 넘지 않을 때만 쓴다.
+        /// 방문 기록·마지막 관리와 어긋나는 대사("처음 와 줬구나"를 단골에게, "오랜만"을 최근 방문한 손님에게)도 쓰지 않는다 — 출력 검사와 같은 기준(NpcOutputValidator.RecordConflict).
+        /// </summary>
+        public ReactionResult TryTakeTemplate(ReactionRequest request, IEnumerable<string> recent, int maxLength)
+        {
             if (request == null)
             {
                 return null;
@@ -230,8 +239,10 @@ namespace Jamkkaebi.Npc
                     ReactionResult stored = live[i].Result;
                     string filled = NpcLineSlots.Fill(stored.Line, actual);
                     if (filled == null
+                            || filled.Length > maxLength
                             || NpcLineChecks.TimeContradiction(filled, actual.TimeWord) != null
-                            || NpcLineChecks.AddressContradiction(filled, request.Nickname, request.Familiar) != null)
+                            || NpcLineChecks.AddressContradiction(filled, request.Nickname, request.Familiar) != null
+                            || NpcOutputValidator.RecordConflict(filled, request) != null)
                     {
                         continue; // 이 요청에는 못 쓰는 대사 — 다른 요청을 위해 둔다
                     }
@@ -302,7 +313,7 @@ namespace Jamkkaebi.Npc
             string key = KeyOf(request);
             lock (gate)
             {
-                List<Entry> live = Live(key);
+                List<Entry> live = LiveForWrite(key);
                 if (live.Count >= MaxPerKey)
                 {
                     return false;
@@ -347,6 +358,18 @@ namespace Jamkkaebi.Npc
             }
         }
 
+        /// <summary>보관 중인 열쇠(칸) 수. 시험용 — 읽기만 해서는 늘지 않고, 지난 칸은 쓸려 나가야 한다.</summary>
+        public int BucketCount
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return entries.Count;
+                }
+            }
+        }
+
         public void Clear()
         {
             lock (gate)
@@ -355,18 +378,49 @@ namespace Jamkkaebi.Npc
             }
         }
 
-        // 잠금 안에서 부른다. 시간이 지난 것을 버리고 남은 목록을 돌려준다
+        // 잠금 안에서 부른다. 시간이 지난 것을 버리고 남은 목록을 돌려준다. 읽기만 하는 호출이 칸(열쇠)을 만들지 않게 없으면 빈 목록(보관하지 않는다)을 돌려준다
         private List<Entry> Live(string key)
         {
+            List<Entry> list;
+            if (!entries.TryGetValue(key, out list))
+            {
+                return new List<Entry>();
+            }
+            DateTime limit = Now() - MaxAge;
+            list.RemoveAll(entry => entry.At < limit);
+            if (list.Count == 0)
+            {
+                entries.Remove(key);
+                return new List<Entry>();
+            }
+            return list;
+        }
+
+        // 잠금 안에서 부른다. 대사를 넣을 때만 칸을 만든다. 먼저 모든 칸의 지난 대사와 빈 칸을 쓸어 내, 상황·기억이 바뀌어 다시 부르지 않는 열쇠가 MaxAge 뒤에도 남지 않게 한다
+        private List<Entry> LiveForWrite(string key)
+        {
+            Sweep();
             List<Entry> list;
             if (!entries.TryGetValue(key, out list))
             {
                 list = new List<Entry>();
                 entries[key] = list;
             }
-            DateTime limit = Now() - MaxAge;
-            list.RemoveAll(entry => entry.At < limit);
             return list;
+        }
+
+        private void Sweep()
+        {
+            DateTime limit = Now() - MaxAge;
+            foreach (string key in new List<string>(entries.Keys))
+            {
+                List<Entry> list = entries[key];
+                list.RemoveAll(entry => entry.At < limit);
+                if (list.Count == 0)
+                {
+                    entries.Remove(key);
+                }
+            }
         }
     }
 }

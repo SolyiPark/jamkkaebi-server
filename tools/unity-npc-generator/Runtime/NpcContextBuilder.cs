@@ -535,8 +535,8 @@ namespace Jamkkaebi.Npc
         // 최근 30일(오늘 포함)의 방문한 날 수. 방문 기록(VisitDates)이 있으면 그것으로, 없으면 RecentVisitDays
         private static int? VisitCount(NpcContextInput input)
         {
-            List<int> ago = VisitDaysAgo(input);
-            return ago.Count > 0 ? ago.Count : input.RecentVisitDays;
+            // 방문 기록(VisitDates)을 받았으면 비었거나 30일 밖이어도 그 날 수(0 포함)다. RecentVisitDays 는 기록을 안 주는 호출자용이다
+            return input.VisitDates != null ? VisitDaysAgo(input).Count : input.RecentVisitDays;
         }
 
         // 방문한 날들을 며칠 전인지로 (0 = 오늘), 가까운 날부터, 같은 날은 하나. 30일 밖·미래는 뺀다
