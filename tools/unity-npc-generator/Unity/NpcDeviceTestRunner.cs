@@ -80,6 +80,12 @@ namespace Jamkkaebi.Npc
         [Tooltip("요청할 때 서버 값을 미리 만들 때와 다르게 준다(시간대를 바꾸고 닉네임 '하늘'을 부른다). 칸 채우기가 실제로 되는지 본다")]
         public bool requestWithOtherServerValues = true;
 
+        [Tooltip("미리 만든 대사를 파일(persistentDataPath/npc_lines.txt)에 남기고, 시작할 때 읽어 들인다 (게임의 로딩 화면처럼). 두 번째 판부터는 파일에 있던 것은 다시 만들지 않는다")]
+        public bool useLineStore = true;
+
+        [Tooltip("대사를 띄운 뒤 그 상황의 칸 있는 대사를 쓴 만큼 뒤에서 다시 만든다 (NpcRequestManager.RefillAfterUse)")]
+        public bool refillAfterUse = true;
+
         public bool autoStart = true;
 
         [Header("데이터 (비우면 Resources/Npc/ 에서 읽는다)")]
@@ -212,7 +218,20 @@ namespace Jamkkaebi.Npc
                 }
             }
 
-            manager = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(slmTimeoutSeconds), PrefetchTimeout = TimeSpan.FromSeconds(prefetchTimeoutSeconds) };
+            manager = new NpcRequestManager(slm, rule)
+            {
+                SlmTimeout = TimeSpan.FromSeconds(slmTimeoutSeconds), PrefetchTimeout = TimeSpan.FromSeconds(prefetchTimeoutSeconds), RefillAfterUse = refillAfterUse
+            };
+            if (useLineStore)
+            {
+                // 게임은 로딩 화면에서 이렇게 읽는다. 버전(콘텐츠·모델)이 바뀌면 칸 있는 대사는 버리고 새로 만든다
+                var lineStore = new NpcLineFileStore(Path.Combine(Application.persistentDataPath, "npc_lines.txt"));
+                string version = NpcLineStoreFormat.VersionOf(personaCatalog.contentVersion, actionCatalog.contentVersion, lineCatalog.contentVersion,
+                        forbiddenCatalog.contentVersion, backend.ToString(), backend == BackendKind.LmStudio ? lmStudioModel : modelFile);
+                Stopwatch loadingLines = Stopwatch.StartNew();
+                int loadedLines = manager.LoadStore(lineStore, version);
+                Say("미리 만든 대사 파일: " + loadedLines + "개 읽음, " + loadingLines.ElapsedMilliseconds + "ms (" + lineStore.Path + ")");
+            }
             // CSV 는 장면 하나가 끝날 때마다 이어 쓴다. 끝에서 한 번에 저장하면 중간에 실패하거나 앱이 꺼졌을 때 지금까지의 기록이 모두 사라진다
             string path = Path.Combine(Application.persistentDataPath,
                     "npc_device_test_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".csv");
@@ -306,7 +325,7 @@ namespace Jamkkaebi.Npc
                         // Note 에는 문장을 잘라 낸 것과 어미를 고친 것이 함께 적힌다 (OutputCheck.ToResult)
                         string reactionNote = response.Reaction.Note ?? "";
                         trimmed += reactionNote.Contains("잘라") || reactionNote.Contains("끊긴") ? 1 : 0;
-                        speechFixed += reactionNote.Contains("어미를 말투에 맞게 고침") ? 1 : 0;
+                        speechFixed += reactionNote.Contains(OutputCheck.SpeechFixNote) ? 1 : 0;
                         slmTimes.Add(watch.ElapsedMilliseconds);
                         if (firstToken >= 0)
                         {
@@ -339,7 +358,7 @@ namespace Jamkkaebi.Npc
 
             Say("=== 요약 ===");
             Say("SLM 대사 " + slmCount + "/" + (total - fixedCount) + " (이야기 " + fixedCount + "건은 정해진 대사, 문장 잘라 씀 " + trimmed + "건"
-                + ", 어미 고침 " + speechFixed + "건)"
+                + ", 다듬어 바로 씀 " + speechFixed + "건)"
                 + ", 기대 행동 일치 " + expectedOk + "/" + total);
             if (prepareTimes.Count > 0)
             {
@@ -362,6 +381,10 @@ namespace Jamkkaebi.Npc
             {
                 int asked = total - fixedCount;
                 Say("미리 만든 대사 적중 " + prefetchHits + "/" + asked + " (적중하면 모델을 부르지 않고 칸에 서버 값을 넣어 바로 완성 — 전체 시간 0ms 안팎)");
+            }
+            if (useLineStore)
+            {
+                Say("미리 만든 대사 파일에 씀: " + (manager.SaveStore() ? "보관한 칸 있는 대사 " + manager.Cache.TotalCount + "개" : "실패"));
             }
             Say("메모리 최대 " + peak + "MB" + MemoryNote());
 

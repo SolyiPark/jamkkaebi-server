@@ -22,6 +22,8 @@ namespace Jamkkaebi.Npc
             public DateTime At;
         }
 
+        private const string TemplatePrefix = "T|";
+
         private readonly object gate = new object();
         private readonly Dictionary<string, List<Entry>> entries = new Dictionary<string, List<Entry>>();
 
@@ -29,6 +31,7 @@ namespace Jamkkaebi.Npc
         {
             MaxPerKey = 3;
             MaxAge = TimeSpan.FromMinutes(30);
+            TemplateMaxAge = TimeSpan.FromDays(30);
             Now = () => DateTime.UtcNow;
         }
 
@@ -37,6 +40,18 @@ namespace Jamkkaebi.Npc
 
         /// <summary>이 시간이 지난 대사는 버린다. 기본 30분 (시간대·날짜가 바뀔 수 있다). 시험에서 시계를 바꿀 때는 Now 를 바꾼다.</summary>
         public TimeSpan MaxAge { get; set; }
+
+        /// <summary>
+        /// 칸 있는 대사(AddTemplate)를 두는 기간. 기본 30일 — 시간대·호칭·방문 횟수·날 수는 칸으로 남아 서버 값이 바뀌어도 맞으므로 오래 둔다.
+        /// 파일(NpcLineStore)에 남겨 앱을 다시 켜도 쓴다. 규칙이 바뀐 것은 버전(NpcLineStore)과 꺼낼 때 다시 하는 출력 검사(Recheck)가 거른다.
+        /// </summary>
+        public TimeSpan TemplateMaxAge { get; set; }
+
+        /// <summary>
+        /// 칸을 채운 대사를 꺼내기 전에 한 번 더 보는 검사. null 이면 보지 않는다. 걸러야 하면 null, 쓸 수 있으면 (다듬어진) 결과를 돌려준다.
+        /// NpcRequestManager 가 SLM 생성기의 출력 검사기로 채운다 — 파일에 오래 남은 대사는 그 뒤에 바뀐 규칙(금칙어 등)을 모르고 만들어졌을 수 있다.
+        /// </summary>
+        public Func<ReactionRequest, ReactionResult, ReactionResult> Recheck { get; set; }
 
         /// <summary>지금 시각. 시험에서 바꿔 쓴다.</summary>
         public Func<DateTime> Now { get; set; }
@@ -95,12 +110,14 @@ namespace Jamkkaebi.Npc
 
         /// <summary>
         /// 칸 있는 대사(템플릿)용 열쇠. KeyOf 와 같되 <b>서버가 넘겨주는 값에 달린 것을 뺀다</b> — 시간대(상황 문장의 "낮에"·사실 time_of_day), 닉네임·친밀도(호칭),
-        /// 방문 횟수(상황 문장의 "7번"·사실 visit_count_30d·visit_days). 그래서 서버 값을 모르는 채로 미리 만든 대사를, 서버 값이 온 뒤의 요청이 같은 열쇠로 찾는다.
-        /// 선명도·마지막 관리·기억처럼 어떤 말을 할지 정하는 사실은 그대로 넣는다.
+        /// 방문 횟수(상황 문장의 "7번"·사실 visit_count_30d·visit_days), 마지막 관리 날 수(사실 last_care_days_ago — 대사에서는 {날수} 칸). 그래서 서버 값을 모르는 채로
+        /// 미리 만든 대사를, 서버 값이 온 뒤의 요청이 같은 열쇠로 찾는다. 이번 정화 때 다음 정화의 날 수를 몰라도 다음 정화가 같은 열쇠로 찾는다.
+        /// 선명도·관리 결과(선명/흐려짐→선명/재봉인→선명)·기억처럼 어떤 말을 할지 정하는 사실은 그대로 넣는다 — 선명도는 날 수로 정해지므로(7일 흐려짐, 14일 재봉인)
+        /// 상태마다 열쇠가 하나씩이다.
         /// </summary>
         public static string TemplateKeyOf(ReactionRequest request)
         {
-            var builder = new StringBuilder("T|");
+            var builder = new StringBuilder(TemplatePrefix);
             string situation = SituationCount.Replace(SituationTime.Replace(request.Situation ?? "", NpcLineSlots.TimeSlot), NpcLineSlots.CountSlot);
             builder.Append(request.RelicId).Append('|').Append(request.Mode).Append('|').Append(request.Input).Append('|').Append(situation);
             if (request.Candidates != null)
@@ -120,7 +137,7 @@ namespace Jamkkaebi.Npc
                 foreach (Fact fact in request.Facts)
                 {
                     if (fact != null && fact.Key != NpcFactKeys.Awakening && fact.Key != NpcFactKeys.StoryIndex && fact.Key != NpcFactKeys.TimeOfDay
-                            && fact.Key != NpcFactKeys.VisitCount30d && fact.Key != NpcFactKeys.VisitDays)
+                            && fact.Key != NpcFactKeys.VisitCount30d && fact.Key != NpcFactKeys.VisitDays && fact.Key != NpcFactKeys.LastCareDaysAgo)
                     {
                         facts.Add(fact.Key + "=" + fact.Value);
                     }
@@ -252,10 +269,23 @@ namespace Jamkkaebi.Npc
                         i--;
                         continue;
                     }
-                    live.RemoveAt(i);
                     string names = NpcLineSlots.SlotNames(stored.Line);
-                    return ReactionResult.Success(stored.RequestId, stored.ActionId, stored.TargetId, filled, stored.Source,
+                    ReactionResult taken = ReactionResult.Success(stored.RequestId, stored.ActionId, stored.TargetId, filled, stored.Source,
                             names.Length > 0 ? "칸 채움: " + names : stored.Note);
+                    if (Recheck != null)
+                    {
+                        ReactionResult rechecked = Recheck(request, taken);
+                        if (rechecked == null)
+                        {
+                            // 지금 규칙에 걸리는 대사 — 다른 요청에도 걸릴 수 있어 버린다 (쓴 만큼 다시 만들기가 새로 채운다)
+                            live.RemoveAt(i);
+                            i--;
+                            continue;
+                        }
+                        taken = ReactionResult.Success(stored.RequestId, rechecked.ActionId, rechecked.TargetId, rechecked.Line, stored.Source, taken.Note);
+                    }
+                    live.RemoveAt(i);
+                    return taken;
                 }
                 return null;
             }
@@ -370,6 +400,74 @@ namespace Jamkkaebi.Npc
             }
         }
 
+        /// <summary>파일에 남길 칸 있는 대사 한 줄 (NpcLineStore 가 쓴다).</summary>
+        public sealed class StoredTemplate
+        {
+            public string Key;
+            public DateTime At;
+            public ReactionResult Result;
+        }
+
+        /// <summary>칸 있는 대사 전부 (지난 것은 버린 뒤). 파일에 남길 때 쓴다 — 서버 값에 달린 기존 보관함(KeyOf)은 30분짜리라 남기지 않는다.</summary>
+        public List<StoredTemplate> ExportTemplates()
+        {
+            lock (gate)
+            {
+                var list = new List<StoredTemplate>();
+                foreach (string key in new List<string>(entries.Keys))
+                {
+                    if (!key.StartsWith(TemplatePrefix, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+                    foreach (Entry entry in Live(key))
+                    {
+                        list.Add(new StoredTemplate { Key = key, At = entry.At, Result = entry.Result });
+                    }
+                }
+                return list;
+            }
+        }
+
+        /// <summary>
+        /// 파일에서 읽은 칸 있는 대사를 넣는다. 지난 것(TemplateMaxAge)·꽉 찬 칸·이미 있는 대사와 90% 이상 겹치는 것은 넣지 않는다. 넣은 수를 돌려준다.
+        /// </summary>
+        public int ImportTemplates(IEnumerable<StoredTemplate> stored)
+        {
+            if (stored == null)
+            {
+                return 0;
+            }
+            int added = 0;
+            lock (gate)
+            {
+                DateTime limit = Now() - TemplateMaxAge;
+                foreach (StoredTemplate item in stored)
+                {
+                    if (item == null || item.Result == null || string.IsNullOrEmpty(item.Result.Line) || string.IsNullOrEmpty(item.Key)
+                            || !item.Key.StartsWith(TemplatePrefix, StringComparison.Ordinal) || item.At < limit)
+                    {
+                        continue;
+                    }
+                    List<Entry> list;
+                    entries.TryGetValue(item.Key, out list);
+                    string line = item.Result.Line;
+                    if (list != null && (list.Count >= MaxPerKey || list.Exists(entry => NpcLineChecks.Similar(line, entry.Result.Line) != null)))
+                    {
+                        continue;
+                    }
+                    if (list == null)
+                    {
+                        list = new List<Entry>(); // 넣을 때만 칸을 만든다 (넣지 않는 줄이 빈 칸을 남기지 않게)
+                        entries[item.Key] = list;
+                    }
+                    list.Add(new Entry { Result = item.Result, At = item.At });
+                    added++;
+                }
+            }
+            return added;
+        }
+
         public void Clear()
         {
             lock (gate)
@@ -386,7 +484,7 @@ namespace Jamkkaebi.Npc
             {
                 return new List<Entry>();
             }
-            DateTime limit = Now() - MaxAge;
+            DateTime limit = Now() - AgeOf(key);
             list.RemoveAll(entry => entry.At < limit);
             if (list.Count == 0)
             {
@@ -409,12 +507,18 @@ namespace Jamkkaebi.Npc
             return list;
         }
 
+        // 칸 있는 대사(열쇠가 "T|"로 시작)는 TemplateMaxAge, 나머지는 MaxAge
+        private TimeSpan AgeOf(string key)
+        {
+            return key.StartsWith(TemplatePrefix, StringComparison.Ordinal) ? TemplateMaxAge : MaxAge;
+        }
+
         private void Sweep()
         {
-            DateTime limit = Now() - MaxAge;
             foreach (string key in new List<string>(entries.Keys))
             {
                 List<Entry> list = entries[key];
+                DateTime limit = Now() - AgeOf(key);
                 list.RemoveAll(entry => entry.At < limit);
                 if (list.Count == 0)
                 {

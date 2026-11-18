@@ -16,15 +16,21 @@ namespace Jamkkaebi.Npc
         /// <summary>최근 30일 방문한 날 수. 손님 장면에만 있다.</summary>
         public int? VisitCount { get; set; }
 
+        /// <summary>마지막 관리(정화)가 며칠 전인지 (사실 last_care_days_ago). 주인 장면의 안부·관리에만 있다.</summary>
+        public int? CareDays { get; set; }
+
         public static SlotValues FromRequest(ReactionRequest request)
         {
             int count;
+            int days;
             string visits = request.FindFact(NpcFactKeys.VisitCount30d);
+            string care = request.FindFact(NpcFactKeys.LastCareDaysAgo);
             return new SlotValues
             {
                 TimeWord = request.FindFact(NpcFactKeys.TimeOfDay),
                 Address = request.AddressName,
-                VisitCount = visits != null && int.TryParse(visits, out count) ? count : (int?)null
+                VisitCount = visits != null && int.TryParse(visits, out count) ? count : (int?)null,
+                CareDays = care != null && int.TryParse(care, out days) ? days : (int?)null
             };
         }
     }
@@ -33,10 +39,15 @@ namespace Jamkkaebi.Npc
     /// 미리 만든 대사 중 서버 값(시간대·호칭·방문 횟수)에 달린 말을 <b>변수 칸</b>으로 남겨 두고, 서버 값이 오자마자 칸에 넣어 대사를 완성한다.
     /// 서버 값을 기다리지 않고 미리 만들 수 있고, 시간대가 바뀌거나 닉네임·방문 횟수가 달라져도 같은 대사를 다시 쓸 수 있다.
     ///
-    /// <para>칸: <c>{시간대}</c>(아침에→저녁에), <c>{호칭}</c>(발굴자→닉네임), <c>{호칭아}</c>(부르는 말 "발굴자"/"도윤아"), <c>{횟수}</c>("7번").</para>
+    /// <para>칸: <c>{시간대}</c>(아침에→저녁에), <c>{호칭}</c>(발굴자→닉네임), <c>{호칭아}</c>(부르는 말 "발굴자"/"도윤아"), <c>{횟수}</c>("7번"),
+    /// <c>{날수}</c>(마지막 관리 "9일 만이야"·"9일 전" → 실제 날 수).</para>
     ///
-    /// <para>칸으로 만들 수 없는 대사는 보관하지 않는다(Slotify 가 null): 며칠 전·어제처럼 기록 날짜에 달린 말, "아침 일찍"처럼 시간대 뒤에 조사가 없는 말,
-    /// 호칭 뒤에 조사가 바로 붙은 말("도윤이"), "세 번"처럼 한글 숫자. 이런 대사는 서버 값이 바뀌면 틀릴 수 있어서다.</para>
+    /// <para>칸으로 만들 수 없는 대사는 보관하지 않는다(Slotify 가 null): 어제·사흘 전처럼 한글로 쓴 날짜, 마지막 관리가 아닌 날 수("3일 전"인데 견본은 9일),
+    /// '일주일·열흘·보름·한 달·사흘'처럼 정해진 길이, "아침 일찍"처럼 시간대 뒤에 조사가 없는 말, 호칭 뒤에 조사가 바로 붙은 말("도윤이"), "세 번"처럼 한글 숫자.
+    /// 이런 대사는 서버 값이 바뀌면 틀릴 수 있어서다.</para>
+    ///
+    /// <para>선명도(선명·흐려짐·재봉인)는 칸으로 만들지 않는다 — 낱말 하나가 아니라 무슨 말을 할지(고마움·닦아 달라는 부탁·깨워 줘서 고마움)를 정해서,
+    /// 상태마다 따로 만들어 둔다(NpcLineCache.TemplateKeyOf 의 열쇠에 남는다).</para>
     /// </summary>
     public static class NpcLineSlots
     {
@@ -44,11 +55,15 @@ namespace Jamkkaebi.Npc
         public const string AddressSlot = "{호칭}";
         public const string AddressVocativeSlot = "{호칭아}";
         public const string CountSlot = "{횟수}";
+        public const string DaysSlot = "{날수}";
 
         private static readonly Regex DayRef = new Regex("어제|그제|그저께|엊그제|이틀 ?전|사흘 ?전|나흘 ?전|닷새 ?전|[0-9]+ ?일 ?전|하루 ?전|지난 ?주|저번 ?주|[0-9]+ ?주", RegexOptions.CultureInvariant);
         private static readonly Regex TimeWord = new Regex("(?<![가-힣])(새벽|아침|오전|낮|저녁|밤)", RegexOptions.CultureInvariant);
         private static readonly Regex KoreanCount = new Regex("(한|두|세|네|다섯|여섯|일곱|여덟|아홉|열) ?번", RegexOptions.CultureInvariant);
         private static readonly Regex AnyCount = new Regex("([0-9]+) ?번", RegexOptions.CultureInvariant);
+        private static readonly Regex AnyDays = new Regex("[0-9]+ ?일", RegexOptions.CultureInvariant);
+        // 정해진 길이를 한글로 말한 것 — 날 수 칸에 넣을 수 없어 실제 날 수와 어긋날 수 있다 ("일주일 만이야"를 12일 만에 쓰면 틀린다)
+        private static readonly Regex FixedSpan = new Regex("일주일|열흘|보름(?!달)|한 ?달|이틀|사흘|나흘|닷새|엿새|여드레|아흐레", RegexOptions.CultureInvariant);
 
         // 시간대 뒤에 와도 되는 조사 (여섯 낱말 모두 받침으로 끝나 같은 조사를 쓴다). 긴 것부터
         private static readonly string[] TimeParticles = { "에는", "이라서", "이라고", "이구나", "부터", "마다", "까지", "이라", "이야", "이네", "이군", "에", "엔", "도", "이" };
@@ -62,7 +77,7 @@ namespace Jamkkaebi.Npc
         public static bool HasSlots(string line)
         {
             return !string.IsNullOrEmpty(line) && line.IndexOf('{') >= 0
-                    && (line.Contains(TimeSlot) || line.Contains(AddressSlot) || line.Contains(AddressVocativeSlot) || line.Contains(CountSlot));
+                    && (line.Contains(TimeSlot) || line.Contains(AddressSlot) || line.Contains(AddressVocativeSlot) || line.Contains(CountSlot) || line.Contains(DaysSlot));
         }
 
         /// <summary>대사에 들어 있는 칸의 이름 ("시간대·호칭" 꼴). 없으면 빈 글.</summary>
@@ -72,6 +87,7 @@ namespace Jamkkaebi.Npc
             if (line != null && line.Contains(TimeSlot)) names.Add("시간대");
             if (line != null && (line.Contains(AddressSlot) || line.Contains(AddressVocativeSlot))) names.Add("호칭");
             if (line != null && line.Contains(CountSlot)) names.Add("횟수");
+            if (line != null && line.Contains(DaysSlot)) names.Add("날수");
             return string.Join("·", names.ToArray());
         }
 
@@ -85,11 +101,16 @@ namespace Jamkkaebi.Npc
             {
                 return null;
             }
-            if (DayRef.IsMatch(line) || KoreanCount.IsMatch(line))
+            string text = line;
+            // 0) 마지막 관리 날 수: 견본과 같은 숫자 + '일'만 칸으로 ("9일 만이야"·"마지막 관리가 9일 전이었어"). 다른 숫자의 '며칠'은 지어낸 말일 수 있다
+            if (sample.CareDays.HasValue)
+            {
+                text = Regex.Replace(text, "(?<![0-9])" + sample.CareDays.Value + "(?= ?일)", DaysSlot, RegexOptions.CultureInvariant);
+            }
+            if (DayRef.IsMatch(text) || KoreanCount.IsMatch(text) || AnyDays.IsMatch(text) || FixedSpan.IsMatch(text))
             {
                 return null;
             }
-            string text = line;
 
             // 1) 시간대
             string[] allowed;
@@ -192,6 +213,14 @@ namespace Jamkkaebi.Npc
                     return null;
                 }
                 text = text.Replace(CountSlot, actual.VisitCount.Value.ToString());
+            }
+            if (text.Contains(DaysSlot))
+            {
+                if (actual == null || !actual.CareDays.HasValue)
+                {
+                    return null;
+                }
+                text = text.Replace(DaysSlot, actual.CareDays.Value.ToString());
             }
             return text;
         }

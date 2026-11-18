@@ -60,6 +60,51 @@ namespace Jamkkaebi.Npc
             return validator.LimitFor(input) + NpcOutputValidator.LengthTolerance;
         }
 
+        /// <summary>
+        /// 미리 만들어 둔 대사(칸을 채운 뒤)를 지금 규칙의 출력 검사에 한 번 더 넣는다. 통과하면 다듬어진 결과, 걸리면 null.
+        /// 파일에 남겨 둔 대사는 그 뒤에 바뀐 금칙어·검사 규칙을 모르고 만들어졌을 수 있다 (NpcLineCache.Recheck 로 쓴다).
+        /// 흐려진 안부의 '이미 한 말'(코드가 붙인 앞 문장)은 떼고 넣는다 — 검사기가 다시 붙인다.
+        /// </summary>
+        public ReactionResult Recheck(ReactionRequest request, ReactionResult stored)
+        {
+            if (request == null || stored == null || string.IsNullOrEmpty(stored.Line))
+            {
+                return null;
+            }
+            string line = PromptAssembler.StripAskPrefix(stored.Line, PromptAssembler.AskPrefixes(request));
+            string raw = "{\"action\": \"" + JsonText(stored.ActionId) + "\", \"target\": \"" + JsonText(stored.TargetId) + "\", \"line\": \"" + JsonText(line) + "\"}";
+            OutputCheck check;
+            try
+            {
+                check = validator.Check(raw, request);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+            return check.IsValid
+                    ? ReactionResult.Success(stored.RequestId, check.ActionId, check.TargetId, check.Line, stored.Source, stored.Note)
+                    : null;
+        }
+
+        private static string JsonText(string value)
+        {
+            var builder = new System.Text.StringBuilder();
+            foreach (char c in value ?? "")
+            {
+                switch (c)
+                {
+                    case '"': builder.Append("\\\""); break;
+                    case '\\': builder.Append("\\\\"); break;
+                    case '\n': builder.Append("\\n"); break;
+                    case '\r': builder.Append("\\r"); break;
+                    case '\t': builder.Append("\\t"); break;
+                    default: builder.Append(c); break;
+                }
+            }
+            return builder.ToString();
+        }
+
         public SlmReactionGenerator(INpcModelBackend backend, PromptAssembler assembler, NpcOutputValidator validator)
         {
             if (backend == null)

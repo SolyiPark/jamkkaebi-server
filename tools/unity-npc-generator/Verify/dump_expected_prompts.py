@@ -124,6 +124,7 @@ CALL_SAMPLES = [
 # 기록 없는 주인 장면의 "오랜만이야"·"또 왔구나" (2026-11-17), "덕분에 관리해 줘서"
 NO_RECORD_SAMPLES = [
     "왔구나, 오랜만이야!", "오랜만에 왔구나, 반가워!", "또 왔구나! 오랜만이야.", "다시 왔네, 기다렸어.", "덕분에 관리해 줘서 고마워.", "덕분에 닦아 주셔서 개운해요.",
+    "왔구나, 오랜만에 보자! 반갑다.",  # 2026-11-18 22:16 시험 S22 #3
 ]
 for line in NO_RECORD_SAMPLES:
     expected["_speechSamples"].append({"label": "반말", "line": line, "noRecord": True, "want": run.normalize_speech(line, "반말", None, None, None, None, "발굴자", True)})
@@ -137,6 +138,13 @@ ONE_SAMPLES = [
 ]
 for line, flag in ONE_SAMPLES:
     expected["_speechSamples"].append({"label": "반말", "line": line, "oneSentence": True, "needsAsk": flag, "want": run.keep_one_sentence(line, flag)})
+# 2026-11-18 23:45 시험 S06 #4: "어서 왔어?"·"어서 와?" → "어서 와!"
+CALL_SAMPLES += [("발굴자", "어서 왔어? 반가워."), ("발굴자", "어서 와? 또 왔네."), ("발굴자", "어서 와서 쉬어.")]
+# 2026-11-18: 첫 낱말 '개운하게·깨끗하게'가 꾸밀 움직임말 없이 이어진 정화 대사 (fix_starter_adverb)
+CALL_SAMPLES += [
+    ("발굴자", "개운하게 덕분에 기분이 좋네"), ("발굴자", "개운하게 돌아온 발굴자, 오랜만에 관리해줘서 고마워."), ("발굴자", "개운하게 돌아온 관리님, 오랜만에 관리해줘서 고마워."),
+    ("발굴자", "개운하게 관리해줘서 고마워!"), ("발굴자", "깨끗하게 오랜만에 나를 관리해줘서 고마워!"), ("발굴자", "개운하게 고마워!"), ("발굴자", "깨끗하게 몸이 가벼워졌어!"),
+]
 for call, line in CALL_SAMPLES:
     expected["_speechSamples"].append({"label": "반말", "line": line, "call": call, "want": run.normalize_speech(line, "반말", None, None, None, None, call)})
 
