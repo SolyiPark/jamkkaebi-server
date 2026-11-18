@@ -62,10 +62,11 @@ class ExhibitionServiceValidateTest {
     @Test
     @DisplayName("필드 경로와 사유의 숫자는 JVM 로캘과 상관없이 아라비아 숫자로 적는다")
     void 로캘과_상관없는_숫자() {
-        Locale saved = Locale.getDefault();
+        // 숫자를 적는 데 쓰는 FORMAT 로캘만 바꾸고 되돌린다. Locale.setDefault(Locale) 는 일반·DISPLAY·FORMAT 을 모두 바꿔, 되돌릴 때 따로 정해 둔 FORMAT 로캘을 잃는다
+        Locale saved = Locale.getDefault(Locale.Category.FORMAT);
         try {
             // 타이 숫자를 쓰는 로캘: String.formatted 를 쓰면 'items[๐]', '๗×๑' 로 적힌다
-            Locale.setDefault(Locale.forLanguageTag("th-TH-u-nu-thai"));
+            Locale.setDefault(Locale.Category.FORMAT, Locale.forLanguageTag("th-TH-u-nu-thai"));
             List<FieldError> tooSmall = errorsOf(service(7, 1), new ExhibitionLayoutRequest.Item(ExhibitItemType.BUILDING, 1, 0, 0));
             List<FieldError> outside = errorsOf(service(7, 7), new ExhibitionLayoutRequest.Item(ExhibitItemType.BUILDING, 1, 6, 0));
 
@@ -74,7 +75,7 @@ class ExhibitionServiceValidateTest {
             assertThat(outside).extracting(FieldError::getField).containsExactly("items[0].x");
             assertThat(outside.get(0).getReason()).isEqualTo("0 이상 6 미만이어야 합니다.");
         } finally {
-            Locale.setDefault(saved);
+            Locale.setDefault(Locale.Category.FORMAT, saved);
         }
     }
 }

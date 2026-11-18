@@ -101,6 +101,10 @@ SPEECH_SAMPLES = [
     ("반말", "향로를 닦아줘서 고마워, 정말 고마워! 고마워 정말 고마워."),
     ("반말", "반가워, 또 왔네, 다시 왔네, 반가워! 나는 좋아, 나는 행복해."),
     ("해요체", "또 오셨네요, 다시 오셨네요."),
+    # 같은 말일 때만 지운다, 문장 끝은 출력 검사와 같게, 마디 길이는 코드 포인트로 (CodeRabbit 리뷰)
+    ("반말", "나는 좋아, 너는 안 좋아. 좋아, 정말 안 좋아."),
+    ("반말", "몸이 가벼워。 마음도 가벼워! 고마워… 정말 고마워!"),
+    ("반말", "참 고마워, 😀 고마워!"),
 ]
 expected["_speechSamples"] = [
     {"label": label, "line": line, "want": run.normalize_speech(line, label)} for label, line in SPEECH_SAMPLES
@@ -157,6 +161,12 @@ FN_SAMPLES = [
     ("pronouns", "와, 처음 온 너를 만나니 기쁘다!", "발굴자"), ("pronouns", "다시 만난 도윤을 보니 좋아.", "도윤"), ("pronouns", "보고 싶던 너를 만나 기뻐!", "도윤"),
     ("pronouns", "그건 너를 위한 거야.", "도윤"), ("pronouns", "도윤을 위해 준비했어.", "도윤"), ("pronouns", "오늘 너를 만나서 기뻐!", "도윤"),
     ("pronouns", "난 너를 기다렸어.", "도윤"), ("pronouns", "정말 너를 기다렸어.", "도윤"), ("pronouns", "오랜만에 너를 찾아줘서 고마워!", "도윤"),
+    ("pronouns", "잘 아는 너를 만나서 기뻐.", "도윤"), ("pronouns", "나는 너를 기다렸어.", "도윤"), ("pronouns", "사실 너를 기다렸어.", "도윤"),
+    ("pronouns", "친구는 너를 좋아해.", "도윤"), ("pronouns", "처음 온 네가 반가워!", "발굴자"),
+    ("thirdPerson", "처음 온 발굴자가 반가워!", "발굴자"), ("thirdPerson", "도윤이, 반가워!", "도윤"), ("thirdPerson", "도윤이야, 반가워.", "도윤"),
+    ("subject", "자개가 반짝이고, 그림은 정성스럽게 완성됐어.", ""), ("subject", "자개가 반짝이고 그림은 정성스럽게 완성됐어.", ""),
+    ("subject", "자개가 정성껏 빚은 거네.", ""), ("subject", "자개가 많이 정성스럽게 만들어졌네.", ""),
+    ("narrationKept", "발굴자가그림을그리고있다.", "그림을그리고있다."), ("narrationKept", "발굴자가그림을그리고있다.", "와,반가워!"),
     ("probe", "안녕, 오늘은 좀 일찍 왔구나.", "greet"), ("probe", "어서 와, 반가워!", "greet"), ("probe", "무슨 일이야?", "thank_calm"), ("probe", "뭘 찾으러 왔어?", "wander_greet"),
 ]
 
@@ -180,6 +190,8 @@ def run_fn(kind, line, arg):
         return run.greeting_probe(line, arg) or ""
     if kind == "subject":
         return run.subject_contradiction(line, OWN_THINGS) or ""
+    if kind == "narrationKept":
+        return "true" if run.narration_kept(line, arg) else "false"
     if kind == "pronouns":
         return run.drop_player_reference(run.player_pronouns_to_name(line, arg), arg)
     raise ValueError(kind)
