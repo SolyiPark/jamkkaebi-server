@@ -74,6 +74,9 @@ namespace Jamkkaebi.Npc
         [Tooltip("미리 만들기를 기다리는 최대 시간(초). 느린 기기는 길게")]
         public float prefetchWaitSeconds = 900f;
 
+        [Tooltip("미리 만들 대사 하나를 기다리는 시간(초) = PrefetchTimeout. 기기가 대사 하나를 만드는 시간보다 길게 둔다. 짧으면 모든 시도가 잘려 하나도 보관하지 못한다 (S22 는 하나에 100초 안팎)")]
+        public float prefetchTimeoutSeconds = 120f;
+
         [Tooltip("요청할 때 서버 값을 미리 만들 때와 다르게 준다(시간대를 바꾸고 닉네임 '하늘'을 부른다). 칸 채우기가 실제로 되는지 본다")]
         public bool requestWithOtherServerValues = true;
 
@@ -135,6 +138,9 @@ namespace Jamkkaebi.Npc
             running = true;
             lines.Clear();
             csvPath = null;
+            // 시험 중에는 화면이 꺼지지 않게 한다. 느린 기기는 한 판이 길어서, 잠기면 앱이 멈춰 시간이 틀리게 잡히고 무선 adb 도 끊긴다.
+            // 전원 버튼으로 직접 잠그는 것은 막지 못한다. 끝나면 기기 설정으로 되돌린다
+            Screen.sleepTimeout = SleepTimeout.NeverSleep;
             try
             {
                 await RunAll(stopping.Token);
@@ -151,6 +157,7 @@ namespace Jamkkaebi.Npc
             finally
             {
                 running = false;
+                Screen.sleepTimeout = SleepTimeout.SystemSetting;
             }
         }
 
@@ -205,7 +212,7 @@ namespace Jamkkaebi.Npc
                 }
             }
 
-            manager = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(slmTimeoutSeconds) };
+            manager = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(slmTimeoutSeconds), PrefetchTimeout = TimeSpan.FromSeconds(prefetchTimeoutSeconds) };
             // CSV 는 장면 하나가 끝날 때마다 이어 쓴다. 끝에서 한 번에 저장하면 중간에 실패하거나 앱이 꺼졌을 때 지금까지의 기록이 모두 사라진다
             string path = Path.Combine(Application.persistentDataPath,
                     "npc_device_test_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".csv");

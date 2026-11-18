@@ -3123,7 +3123,8 @@ public static class Program
             Check(cancelled == "OperationCanceledException" && first.Cancels == cancels + 1 && watch.ElapsedMilliseconds < 1500,
                     "취소되면 모델에 CancelRequests 하고 바로 OperationCanceledException ← " + cancelled + ", " + watch.ElapsedMilliseconds + "ms");
 
-            // 멈추라고 해도 안 멈추는 모델: CancelGrace 뒤에는 기다리지 않고, 다음 요청을 받는다
+            // 멈추라고 해도 안 멈추는 모델 (LlamaLib 은 프롬프트를 읽는 도중에는 멈추지 않는다): 부른 쪽은 CancelGrace 뒤 돌아오지만,
+            // 그 생성이 끝날 때까지 다음 요청을 모델에 보내지 않는다. 보내면 llama.cpp 줄에 쌓여 취소되지 않는다 (2026-11-18 S22)
             first.NeverReturn = true;
             var stuck = new CancellationTokenSource();
             stuck.CancelAfter(100);
@@ -3134,7 +3135,26 @@ public static class Program
             first.Delay = TimeSpan.FromMilliseconds(20);
             Check(stuckError == "OperationCanceledException" && watch.ElapsedMilliseconds < 1500,
                     "안 멈추는 모델도 CancelGrace(300ms) 뒤 돌아옴 ← " + watch.ElapsedMilliseconds + "ms");
-            Check(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)).Result == reply, "그 뒤 요청도 정상");
+            int callsWhileStuck = first.Calls.Count;
+            var waiting = new CancellationTokenSource();
+            waiting.CancelAfter(300);
+            string waitError = Error(Task.Run(() => backend.CompleteAsync(prompt, waiting.Token)));
+            Check(waitError == "OperationCanceledException" && first.Calls.Count == callsWhileStuck,
+                    "안 멈춘 생성이 끝나기 전에는 다음 요청을 모델에 보내지 않고 자기 시간 초과로 끝남 ← " + waitError + ", 모델 호출 "
+                    + (first.Calls.Count - callsWhileStuck) + "번");
+            first.FinishStuck();
+            Check(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)).Result == reply, "멈추지 않던 생성이 끝나면 다음 요청도 정상");
+
+            // 끝내 안 끝나는 모델: CancelHold 가 지나면 멈춘 모델로 보고 다음 요청을 받는다
+            options.CancelHold = TimeSpan.FromMilliseconds(400);
+            first.NeverReturn = true;
+            var hung = new CancellationTokenSource();
+            hung.CancelAfter(100);
+            Error(Task.Run(() => backend.CompleteAsync(prompt, hung.Token)));
+            first.NeverReturn = false;
+            Thread.Sleep(600);
+            Check(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)).Wait(1500), "CancelHold 가 지나면 안 끝난 생성을 두고 다음 요청을 받음");
+            options.CancelHold = TimeSpan.FromMinutes(5);
 
             // 취소된 생성 뒤에는 모델이 무엇을 기억하는지 모르니 같은 시스템 메시지도 다시 읽는다
             first.Delay = TimeSpan.FromSeconds(3);
@@ -3491,6 +3511,16 @@ public static class Program
             if (current != null && !NeverReturn)
             {
                 current.TrySetResult(""); // 멈추면 지금까지의 글(여기서는 빈 글)을 돌려준다
+            }
+        }
+
+        // NeverReturn 으로 멈추지 않던 생성을 뒤늦게 끝낸다 (프롬프트를 다 읽고 나서야 멈추는 llama.cpp 처럼)
+        public void FinishStuck()
+        {
+            TaskCompletionSource<string> current = pending;
+            if (current != null)
+            {
+                current.TrySetResult("");
             }
         }
 

@@ -28,6 +28,7 @@ namespace Jamkkaebi.Npc
             DisableThinking = true;
             WarmUp = true;
             CancelGrace = TimeSpan.FromSeconds(2);
+            CancelHold = TimeSpan.FromMinutes(5);
             SaveSystemState = true;
             StateVersion = "1";
         }
@@ -66,8 +67,16 @@ namespace Jamkkaebi.Npc
         /// <summary>LoadAsync 에서 짧게 한 번 생성해 둔다. 첫 요청이 준비 작업(GPU 셰이더 등) 때문에 시간 초과되지 않게 한다.</summary>
         public bool WarmUp { get; set; }
 
-        /// <summary>취소한 뒤 모델이 멈추기를 기다리는 최대 시간. 지나면 기다리지 않고 다음 요청을 받는다.</summary>
+        /// <summary>취소한 뒤 모델이 멈추기를 기다리는 최대 시간. 지나면 부른 쪽에는 바로 취소로 돌려준다 (모델은 CancelHold 동안 계속 붙잡아 둔다).</summary>
         public TimeSpan CancelGrace { get; set; }
+
+        /// <summary>
+        /// 취소했는데 CancelGrace 안에 멈추지 않은 생성이 실제로 끝날 때까지 다음 요청을 모델에 보내지 않는 최대 시간.
+        /// LlamaLib 2.0.5 의 취소는 슬롯에서 처리 중인 요청에만 걸리고 프롬프트를 읽는 도중에는 멈추지 않는다. 그래서 그 사이 보낸 요청은
+        /// llama.cpp 의 줄에 쌓여 취소되지 않은 채 하나씩 끝까지 계산된다 (2026-11-18 S22: 미리 만들기 시간 초과 약 40번이 73분 동안 줄을 이뤘다).
+        /// 그동안 온 요청은 모델에 닿지 않고 자기 시간 초과로 끝난다(요청 관리자는 기본 대사). 지나도 안 끝나면 멈춘 모델로 보고 다음 요청을 받는다.
+        /// </summary>
+        public TimeSpan CancelHold { get; set; }
 
         /// <summary>
         /// 시스템 메시지를 읽은 모델의 기억(KV 캐시)을 파일로 저장해 두고, 다음에 같은 시스템 메시지를 미리 읽을 때 읽는 대신
@@ -146,7 +155,8 @@ namespace Jamkkaebi.Npc
     /// <item>메인 스레드: LLMUnity 호출은 모두 Unity 메인 스레드로 넘겨서 한다. 요청 관리자가 시간 초과로 다른 스레드에서
     /// 취소해도 안전하다. 그래서 반드시 메인 스레드에서 만든다(그때의 SynchronizationContext 를 기억한다).</item>
     /// <item>한 번에 하나씩: 기기의 모델은 하나라 생성 요청을 줄 세운다.</item>
-    /// <item>취소: 취소되면 모델에 멈추라고 하고, CancelGrace 안에 멈추지 않아도 기다리지 않는다.</item>
+    /// <item>취소: 취소되면 모델에 멈추라고 하고, CancelGrace 안에 멈추지 않아도 부른 쪽은 기다리지 않는다. 다만 그 생성이 실제로
+    /// 끝날 때까지(최대 CancelHold, 또는 Unload) 다음 요청을 모델에 보내지 않는다 — llama.cpp 줄에 취소되지 않는 요청이 쌓이지 않게.</item>
     /// <item>올리기·내리기: LoadAsync 가 모델을 올리고(실패하면 예외, IsLoaded 는 false) 미리 한 번 생성해 둔다.
     /// Unload 는 진행 중인 요청을 취소하고 모델을 내려 메모리를 돌려준다. 올리는 도중에 Unload 하면 올린 모델을 바로 내린다.</item>
     /// <item>미리 읽기: PrepareAsync 가 시스템 메시지로 1토큰만 생성해 llama.cpp 가 그 앞부분을 기억하게 한다. 마지막으로 읽은
@@ -357,6 +367,7 @@ namespace Jamkkaebi.Npc
             {
                 CancellationToken token = linked.Token;
                 await oneAtATime.WaitAsync(token).ConfigureAwait(false);
+                bool releaseLater = false; // 멈추지 않은 생성이 끝날 때 ReleaseWhenDone 이 놓는다
                 try
                 {
                     token.ThrowIfCancellationRequested();
@@ -390,10 +401,16 @@ namespace Jamkkaebi.Npc
                         Task first = await Task.WhenAny(chat, cancelled.Task).ConfigureAwait(false);
                         if (first != chat)
                         {
-                            // 모델에 멈추라고 하고, 잠깐만 기다린다. 그래도 안 멈추면 버리고 다음 요청을 받는다
+                            // 모델에 멈추라고 하고, 잠깐만 기다린다. 그래도 안 멈추면 부른 쪽에는 바로 돌려주되,
+                            // 모델은 그 생성이 끝날 때까지 붙잡아 둔다 (다음 요청을 보내면 llama.cpp 줄에 쌓여 취소되지 않는다)
                             Post(current.CancelRequests);
                             await Task.WhenAny(chat, Task.Delay(options.CancelGrace)).ConfigureAwait(false);
                             Observe(chat);
+                            if (!chat.IsCompleted)
+                            {
+                                releaseLater = true;
+                                ReleaseWhenDone(chat, alive);
+                            }
                             throw new OperationCanceledException(token);
                         }
                     }
@@ -420,9 +437,24 @@ namespace Jamkkaebi.Npc
                 }
                 finally
                 {
-                    oneAtATime.Release();
+                    if (!releaseLater)
+                    {
+                        oneAtATime.Release();
+                    }
                 }
             }
+        }
+
+        // 취소했는데 멈추지 않은 생성: 끝나거나, 모델을 내리거나(Unload), CancelHold 가 지나면 줄을 놓는다
+        private void ReleaseWhenDone(Task chat, CancellationToken alive)
+        {
+            var unloaded = new TaskCompletionSource<bool>();
+            CancellationTokenRegistration registration = alive.Register(() => unloaded.TrySetResult(true));
+            Task.WhenAny(chat, unloaded.Task, Task.Delay(options.CancelHold)).ContinueWith(_ =>
+            {
+                registration.Dispose();
+                oneAtATime.Release();
+            }, TaskContinuationOptions.ExecuteSynchronously);
         }
 
         // 저장해 둔 기억 되살리기. 실패(없음·깨짐·예외)는 읽기로 대신하면 되므로 false
