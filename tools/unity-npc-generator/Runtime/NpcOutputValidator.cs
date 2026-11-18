@@ -36,6 +36,9 @@ namespace Jamkkaebi.Npc
     /// <summary>모델 출력 한 건의 검사 결과.</summary>
     public sealed class OutputCheck
     {
+        /// <summary>대사를 다듬어서(어미·'오랜만'·호칭·한 문장 줄이기) 그대로 쓴 경우 Note 에 붙는 말. 거른 것이 아니다.</summary>
+        public const string SpeechFixNote = "대사를 다듬어 바로 씀";
+
         internal OutputCheck(OutputProblem problem, string detail, string actionId, string targetId, string line)
                 : this(problem, detail, actionId, targetId, line, line, false)
         {
@@ -99,8 +102,10 @@ namespace Jamkkaebi.Npc
                       + " (" + FullLine.Length + "자 → " + Line.Length + "자)";
             if (LineBeforeSpeechFix != null)
             {
+                // 거른 것이 아니라 다듬어서 바로 쓴 것이다 (어미뿐 아니라 '오랜만'·호칭·한 문장 줄이기도 포함). 예전 문구 "어미를 말투에 맞게 고침"은
+                // 다듬기만 해도 붙어 거른 이유처럼 읽혔다 (2026-11-18). 다시 만든 것은 "앞 시도 n번 거름"으로 따로 적힌다.
                 // 고친 뒤 코드가 앞 문장·부탁을 붙이거나 바꾸기도 해서(흐려진 안부) 고치기 전 대사만 적으면 최종 대사와 전혀 달라 보였다 (2026-11-18 기기 시험 S03). 최종 대사를 함께 적는다
-                string fix = "어미를 말투에 맞게 고침 ('" + LineBeforeSpeechFix + "' → '" + Line + "')";
+                string fix = SpeechFixNote + " ('" + LineBeforeSpeechFix + "' → '" + Line + "')";
                 note = note == null ? fix : note + "; " + fix;
             }
             return ReactionResult.Success(requestId, ActionId, TargetId, Line, ReactionSource.Slm, note);
@@ -208,6 +213,42 @@ namespace Jamkkaebi.Npc
             return check;
         }
 
+        // 반복 검사에 넣을 글: 길이에 맞춰 줄인 대사 (줄이지 못하면 그대로)
+        private static string Comparable(string line, int limit, bool truncated)
+        {
+            string fitted = string.IsNullOrEmpty(line) ? null : FitSentences(line, limit, truncated);
+            return fitted ?? line;
+        }
+
+        // 말투 다듬기 → 한 문장 줄이기 → 인사 끝·'오늘도'·자기 솜씨 고치기 (run.py 의 evaluate 앞부분과 같다)
+        private static string SpeechFixed(string line, string action, ReactionRequest request, Persona persona, bool noRecord, int noRecordVariant)
+        {
+            string fixedLine = NpcLineChecks.NormalizeSpeech(line, persona.endingHint != null ? persona.endingHint.label : null, persona.name,
+                    persona.ownThings, request.Nickname, request.FindFact(NpcFactKeys.VisitDays), request.AddressName, noRecord, noRecordVariant);
+            // 상황에 맞는 한 문장으로 줄인다 (지난 대화 꺼내기는 기억의 내용이 뒤 문장에 있을 수 있어 건드리지 않는다)
+            if (action != NpcActions.RecallTalk)
+            {
+                fixedLine = NpcLineChecks.KeepOneSentence(fixedLine, NpcLineChecks.NeedsAsk(request));
+                if (NpcLineChecks.NeedsAsk(request) || noRecord)
+                {
+                    fixedLine = NpcLineChecks.FixTodayAlso(fixedLine);
+                }
+                if (action == NpcActions.Greet || action == NpcActions.WanderGreet || action == NpcActions.WanderRecall)
+                {
+                    fixedLine = NpcLineChecks.FixGreetingTail(fixedLine);
+                }
+            }
+            if (action == NpcActions.ThankCalm || action == NpcActions.ThankJoyful || action == NpcActions.AnswerStatus || action == NpcActions.RecallTalk)
+            {
+                fixedLine = NpcLineChecks.FixBareOwnThing(NpcLineChecks.FixCraftSpectator(fixedLine), persona.ownThings);
+            }
+            if (action == NpcActions.RecallTalk)
+            {
+                fixedLine = NpcLineChecks.FixRecallFragment(fixedLine);
+            }
+            return fixedLine;
+        }
+
         // said: 어미를 고쳤으면 고치기 전 대사, 아니면 null
         private OutputCheck Inspect(string raw, ReactionRequest request, out string said)
         {
@@ -261,25 +302,28 @@ namespace Jamkkaebi.Npc
                     || request.FindFact(NpcFactKeys.VisitDays) != null;
             if (NormalizeSpeech && persona != null)
             {
-                string fixedLine = NpcLineChecks.NormalizeSpeech(line, persona.endingHint != null ? persona.endingHint.label : null, persona.name,
-                        persona.ownThings, request.Nickname, request.FindFact(NpcFactKeys.VisitDays), request.AddressName,
-                        NpcLineChecks.NoRecordApplies(request.Input == NpcInputs.Visit, hasRecord, request.Situation));
-                // 상황에 맞는 한 문장으로 줄인다 (지난 대화 꺼내기는 기억의 내용이 뒤 문장에 있을 수 있어 건드리지 않는다)
-                if (action != NpcActions.RecallTalk)
+                bool noRecord = NpcLineChecks.NoRecordApplies(request.Input == NpcInputs.Visit, hasRecord, request.Situation);
+                string fixedLine = SpeechFixed(line, action, request, persona, noRecord, 0);
+                // 기록 없는 '오랜만'을 바꿔 넣은 말 때문에 최근 대사와 같아졌으면 다른 말을 넣는다 (늘 "반가워"면 다른 인사들이 같은 대사로 모인다, 2026-11-18 22:16 시험)
+                // 견주는 것은 길이에 맞춰 줄인 뒤의 대사(마지막 반복 검사와 같은 글)이고, 인사에 지어낸 사정이 남는 말은 건너뛴다 (CodeRabbit 리뷰)
+                int fitLimit = LimitFor(request.Input) + LengthTolerance;
+                if (noRecord && NpcLineChecks.HasLongAbsenceWord(line) && request.RecentLines != null && request.RecentLines.Count > 0
+                        && NpcLineChecks.FindSimilar(Comparable(fixedLine, fitLimit, truncated), request.RecentLines).HasValue)
                 {
-                    fixedLine = NpcLineChecks.KeepOneSentence(fixedLine, NpcLineChecks.NeedsAsk(request));
-                    if (NpcLineChecks.NeedsAsk(request) || NpcLineChecks.NoRecordApplies(request.Input == NpcInputs.Visit, hasRecord, request.Situation))
+                    for (int variant = 1; variant < NpcLineChecks.NoRecordGreetings.Length; variant++)
                     {
-                        fixedLine = NpcLineChecks.FixTodayAlso(fixedLine);
+                        string other = SpeechFixed(line, action, request, persona, true, variant);
+                        string otherFitted = string.IsNullOrEmpty(other) ? other : FitSentences(other, fitLimit, truncated);
+                        if (otherFitted == null)
+                        {
+                            continue; // 길이에 맞지 않는 말은 고르면 뒤에서 TooLong 으로 걸린다 (CodeRabbit 리뷰)
+                        }
+                        if (NpcLineChecks.GreetingProbe(otherFitted, action) == null && !NpcLineChecks.FindSimilar(otherFitted, request.RecentLines).HasValue)
+                        {
+                            fixedLine = other;
+                            break;
+                        }
                     }
-                    if (action == NpcActions.Greet || action == NpcActions.WanderGreet || action == NpcActions.WanderRecall)
-                    {
-                        fixedLine = NpcLineChecks.FixGreetingTail(fixedLine);
-                    }
-                }
-                if (action == NpcActions.ThankCalm || action == NpcActions.ThankJoyful || action == NpcActions.AnswerStatus || action == NpcActions.RecallTalk)
-                {
-                    fixedLine = NpcLineChecks.FixCraftSpectator(fixedLine);
                 }
                 if (fixedLine != line)
                 {
@@ -441,6 +485,12 @@ namespace Jamkkaebi.Npc
                 if (subjectThing != null)
                 {
                     return new OutputCheck(OutputProblem.WrongSubject, "주체가 어긋남 '" + subjectThing + "' (자기 것은 '내 " + subjectThing + "'처럼 말한다)",
+                            action, target, fitted, line, truncated);
+                }
+                string praised = NpcLineChecks.CraftPraise(fitted, action);
+                if (praised != null)
+                {
+                    return new OutputCheck(OutputProblem.WrongSubject, "자기 솜씨를 남의 것처럼 칭찬 '" + praised + "' (자기 것은 '내 ~'라고 말한다)",
                             action, target, fitted, line, truncated);
                 }
                 string wrong;

@@ -91,6 +91,16 @@ namespace Jamkkaebi.Npc
         private bool prefetchRunning;
         private int activeRequests;
 
+        // 미리 만든 대사를 남겨 두는 곳(LoadStore)과 그 버전. 쓰기는 한 번에 하나만, 바뀔 때마다 뒤에서 쓴다(SaveSoon)
+        private INpcLineStore store;
+        private string storeVersion;
+        private readonly object storeWriteGate = new object();
+        private int savePending;
+        private bool closed;   // CloseStore 뒤 — 새 미리 만들기를 받지 않는다
+
+        // 쓴 만큼 다시 만드는 선택지 (NpcContextBuilder.PrefetchTemplates 가 미리 만드는 것과 같다)
+        private static readonly string[] RefillInputs = { NpcInputs.Tap, NpcInputs.AskStatus, NpcInputs.Care, NpcInputs.Visit };
+
         // 진행 중인 시스템 프롬프트 미리 읽기. 모델은 하나라 한 번에 하나만 둔다
         private Session preparing;
         private int preparingRelicId;
@@ -111,6 +121,247 @@ namespace Jamkkaebi.Npc
             Cache = new NpcLineCache();
             UsePrefetched = true;
             PrefetchTimeout = TimeSpan.FromSeconds(30);
+            RefillTarget = request => request.Input == NpcInputs.Tap || request.Input == NpcInputs.Visit ? 2 : 1;
+            SaveDelay = TimeSpan.FromSeconds(1);
+            // 꺼낼 때 지금 규칙의 출력 검사를 한 번 더 한다 (파일에 남겨 둔 대사는 그 뒤에 바뀐 규칙을 모르고 만들어졌을 수 있다)
+            SlmReactionGenerator generator = slm as SlmReactionGenerator;
+            if (generator != null)
+            {
+                Cache.Recheck = generator.Recheck;
+            }
+        }
+
+        /// <summary>
+        /// 미리 만든 대사를 꺼내 쓰거나(또는 보관함이 비어 그 자리에서 만들거나) 띄운 뒤, 그 상황의 칸 있는 대사를 <b>쓴 만큼</b> 뒤에서 다시 만들어 채우는지.
+        /// 다음 번 같은 상황(정화·탭 인사·안부·손님 관람)은 이번에 뒤에서 만든 대사를 바로 꺼내 쓴다. 기본 false — 게임은 켠다(README "미리 만든 대사 파일").
+        /// 채울 개수는 RefillTarget. 기억을 꺼내는 대화(지난 대화)는 기억이 바뀌어 다시 쓰지 않으므로 채우지 않는다.
+        /// </summary>
+        public bool RefillAfterUse { get; set; }
+
+        /// <summary>
+        /// 쓴 뒤 그 상황에 채워 둘 칸 있는 대사 수. 기본: 탭 인사·손님 관람 2(자주 하거나 여러 친구가 잇달아 와 다시 만들기가 끝나기 전에 또 올 수 있다), 나머지 1(쓴 만큼 하나).
+        /// 정화는 상태(선명·흐려짐·재봉인)마다 열쇠가 따로라, 쓴 상태의 대사 하나만 다시 만든다.
+        /// </summary>
+        public Func<ReactionRequest, int> RefillTarget { get; set; }
+
+        /// <summary>LoadStore 로 붙인 저장소. 없으면 null.</summary>
+        public INpcLineStore Store
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return store;
+                }
+            }
+        }
+
+        /// <summary>
+        /// 미리 만든 대사 파일을 붙이고 읽어 들인다 — 게임을 처음 켤 때(로딩 화면) 부른다. 읽은 칸 있는 대사 수를 돌려준다 (파일이 없거나 깨졌거나 버전이 다르면 0).
+        /// 그 뒤로는 대사를 만들거나 꺼내 쓸 때마다 뒤에서 파일을 고쳐 쓴다. 버전(NpcLineStoreFormat.VersionOf)이 다르면 칸 있는 대사는 버리고(최근 띄운 대사는 되살린다)
+        /// 다음 저장 때 새 버전으로 덮어쓴다. 읽은 뒤 PrefetchTemplate 을 부르면 파일에 있던 것은 다시 만들지 않고 모자란 것만 만든다.
+        /// </summary>
+        public int LoadStore(INpcLineStore lineStore, string version)
+        {
+            if (lineStore == null)
+            {
+                throw new ArgumentNullException("lineStore");
+            }
+            // 다 읽고 넣은 뒤에 저장소를 붙인다 — 먼저 붙이면 읽는 사이에 뒤에서 도는 저장(SaveSoon)이 빈 보관함으로 파일을 덮어쓸 수 있다
+            string text;
+            try
+            {
+                text = lineStore.Read();
+            }
+            catch (Exception)
+            {
+                text = null; // 못 읽는 파일 — 처음부터 만든다. 다음 저장이 덮어쓴다
+            }
+            List<NpcLineCache.StoredTemplate> templates;
+            Dictionary<string, List<string>> recent;
+            bool versionMatched;
+            if (!NpcLineStoreFormat.TryRead(text, version ?? "", out templates, out recent, out versionMatched))
+            {
+                AttachStore(lineStore, version);
+                return 0;
+            }
+            lock (gate)
+            {
+                foreach (KeyValuePair<string, List<string>> pair in recent)
+                {
+                    List<string> lines;
+                    if (!shown.TryGetValue(pair.Key, out lines))
+                    {
+                        lines = new List<string>();
+                        shown[pair.Key] = lines;
+                    }
+                    foreach (string line in pair.Value)
+                    {
+                        lines.Remove(line);
+                        lines.Add(line);
+                    }
+                    while (lines.Count > Math.Max(0, RecentLineCount))
+                    {
+                        lines.RemoveAt(0);
+                    }
+                }
+            }
+            int imported = Cache.ImportTemplates(templates);
+            AttachStore(lineStore, version);
+            return imported;
+        }
+
+        private void AttachStore(INpcLineStore lineStore, string version)
+        {
+            lock (gate)
+            {
+                store = lineStore;
+                storeVersion = version ?? "";
+            }
+        }
+
+        /// <summary>지금 보관함의 칸 있는 대사와 최근 띄운 대사를 저장소에 쓴다. 저장소가 없거나 쓰지 못하면 false. 보통은 알아서 뒤에서 쓰고, 앱을 내릴 때 한 번 더 부른다.</summary>
+        public bool SaveStore()
+        {
+            // 지금 내용을 찍는 것과 쓰는 것을 한 잠금 안에서 한다. 찍은 뒤 잠금을 잡으면 겹친 저장 둘 중 먼저 찍은(옛) 내용이 나중에 쓰여 새 내용을 덮을 수 있다
+            lock (storeWriteGate)
+            {
+                INpcLineStore target;
+                string version;
+                var recent = new Dictionary<string, List<string>>();
+                // 최근 대사와 칸 있는 대사를 한 잠금(gate) 안에서 함께 찍는다 — 따로 찍으면 꺼낸 대사 A 를 기억하기 전의 최근 대사와 A 대신 다시 만든 B 가 섞여
+                // 저장될 수 있다 (CodeRabbit 리뷰). 다시 만들기는 Remember 뒤에 줄에 들어가므로 B 가 보이면 A 의 기억도 보인다
+                List<NpcLineCache.StoredTemplate> templates;
+                lock (gate)
+                {
+                    target = store;
+                    version = storeVersion;
+                    foreach (KeyValuePair<string, List<string>> pair in shown)
+                    {
+                        recent[pair.Key] = new List<string>(pair.Value);
+                    }
+                    templates = target != null ? Cache.ExportTemplates() : null;
+                }
+                if (target == null)
+                {
+                    return false;
+                }
+                string text = NpcLineStoreFormat.Write(version, templates, recent);
+                try
+                {
+                    target.Write(text);
+                    return true;
+                }
+                catch (Exception)
+                {
+                    return false; // 쓰지 못해도 요청 처리에는 영향이 없다. 다음 변경 때 다시 쓴다
+                }
+            }
+        }
+
+        /// <summary>
+        /// 이 관리자를 버리기 전에 부른다 (화면 종료·판 다시 돌리기·앱 종료). 미리 만들기와 쓴 만큼 다시 만들기를 멈추고(최대 wait 만큼 기다린다),
+        /// save 면 지금 내용을 한 번 쓴 뒤 저장소를 뗀다. 뗀 뒤에는 뒤에서 기다리던 저장도 쓰지 않는다 — 버린 관리자가 늦게 쓴 저장이 다음 관리자(같은 파일)의 내용을
+        /// 덮어쓰지 않게 한다 (CodeRabbit 리뷰). 쓰기 잠금이 관리자마다라서 관리자끼리는 서로 막지 못한다.
+        /// </summary>
+        public void CloseStore(bool save, TimeSpan wait)
+        {
+            // 닫는 중에 끝난 요청이 다시 만들기를 줄에 넣지 못하게 먼저 닫힘을 표시한다 — 그대로 두면 모델을 내린 뒤에도 일꾼이 남아 그 일을 기다렸다 (CodeRabbit 리뷰)
+            lock (gate)
+            {
+                closed = true;
+            }
+            CancelPrefetch();
+            try
+            {
+                PrefetchCompletion.Wait(wait);
+            }
+            catch (AggregateException)
+            {
+                // 미리 만들기의 오류는 덤이다
+            }
+            lock (storeWriteGate)
+            {
+                if (save)
+                {
+                    SaveStore();
+                }
+                lock (gate)
+                {
+                    store = null;
+                }
+            }
+        }
+
+        private int MaxLineLength(ReactionRequest request)
+        {
+            SlmReactionGenerator generator = slm as SlmReactionGenerator;
+            return generator != null ? generator.MaxLineLength(request.Input) : int.MaxValue;
+        }
+
+        // 바뀐 것을 뒤에서 쓴다. 이미 쓰려고 기다리는 것이 있으면 그것이 이번 변경까지 쓴다
+        private void SaveSoon()
+        {
+            if (Store == null || Interlocked.Exchange(ref savePending, 1) == 1)
+            {
+                return;
+            }
+            TimeSpan delay = SaveDelay;
+            Task.Run(async () =>
+            {
+                // 꺼내기·기억·다시 만들기가 잇달아 일어나면 파일을 여러 번 쓰던 것을 SaveDelay 동안 모아 한 번 쓴다 (성능 리뷰 2026-11-19)
+                if (delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay).ConfigureAwait(false);
+                }
+                Interlocked.Exchange(ref savePending, 0);
+                SaveStore();
+            });
+        }
+
+        /// <summary>
+        /// 바뀐 것을 파일에 쓰기 전에 모으는 시간. 기본 1초 — 그 사이의 변경은 한 번에 쓴다. 앱을 내릴 때는 SaveStore(또는 CloseStore)로 바로 쓴다.
+        /// </summary>
+        public TimeSpan SaveDelay { get; set; }
+
+        // 쓴 만큼 다시 만든다 (RefillAfterUse). 이 요청을 견본으로 칸 있는 대사를 RefillTarget 개까지 채운다 — 요청의 서버 값은 칸으로 남는다
+        private void Refill(ReactionRequest request)
+        {
+            if (!RefillAfterUse || !UsePrefetched || !SlmEnabled || slm == null || request == null || Array.IndexOf(RefillInputs, request.Input) < 0
+                    || (request.Memory != null && request.Memory.Count > 0) || request.Candidates == null || NpcActions.SkipsModel(request.Candidates))
+            {
+                return;
+            }
+            int target;
+            try
+            {
+                target = RefillTarget != null ? RefillTarget(request) : 1;
+            }
+            catch (Exception)
+            {
+                return; // 채울 수를 정하지 못하면 다시 만들지 않는다 — 이미 띄울 대사가 있는 응답을 실패로 만들지 않는다 (CodeRabbit 리뷰)
+            }
+            if (target <= 0)
+            {
+                return;
+            }
+            var copy = new ReactionRequest
+            {
+                InteractionId = request.InteractionId,
+                RelicId = request.RelicId,
+                Mode = request.Mode,
+                Input = request.Input,
+                Situation = request.Situation,
+                Candidates = request.Candidates,
+                Facts = request.Facts != null ? new List<Fact>(request.Facts) : new List<Fact>(),
+                Memory = new List<MemoryEntry>(),
+                ContentVersion = request.ContentVersion,
+                Variation = request.Variation + 1,   // 방금 쓴 곁들일 거리 다음 것으로
+                Nickname = request.Nickname,
+                Intimacy = request.Intimacy,
+                RecentLines = request.RecentLines != null ? new List<string>(request.RecentLines) : new List<string>()
+            };
+            EnqueuePrefetch(copy, target, true);
         }
 
         /// <summary>미리 만들어 둔 대사 보관함 (Prefetch 가 채우고 요청이 꺼내 쓴다).</summary>
@@ -186,9 +437,10 @@ namespace Jamkkaebi.Npc
                 request.InteractionId = NewId();
             }
 
-            // 진행 중인 요청이 있는 동안에는 미리 만들기를 멈춘다 (모델은 하나라 요청이 먼저다). 만들던 것은 취소하고 요청이 끝나면 이어 만든다
+            // 진행 중인 요청이 있는 동안에는 미리 만들기의 다음 생성을 시작하지 않는다 (모델은 하나라 요청이 먼저다). 만들던 것은 <b>이 요청이 모델을 쓸 때만</b>
+            // 취소한다(RunSlm 앞). 미리 만든 대사로 바로 답하는 요청·정해진 대사·기본 대사는 모델을 쓰지 않으므로 만들던 것을 버리지 않는다 — 예전에는 탭할 때마다
+            // 취소해, 기기(대사 하나에 수십 초)에서 자주 누르면 쓴 만큼 다시 만들기가 끝나지 못했다 (성능 리뷰 2026-11-19)
             Interlocked.Increment(ref activeRequests);
-            CancelCurrentPrefetch();
             Session session = Begin(request.RelicId, ct);
             try
             {
@@ -214,6 +466,8 @@ namespace Jamkkaebi.Npc
                         ReactionResult served = ReactionResult.Success(request.RequestId, ready.ActionId, ready.TargetId, ready.Line, ReactionSource.Slm,
                                 ready.Note);
                         Remember(request, served.Line);
+                        Refill(request);
+                        SaveSoon(); // 꺼낸 대사가 파일에서 빠지게 한다 (RecentLineCount 가 0 이면 Remember 가 저장하지 않는다, CodeRabbit 리뷰)
                         return NpcResponse.Show(served, null, PrefetchedNote);
                     }
                 }
@@ -239,6 +493,7 @@ namespace Jamkkaebi.Npc
                 }
                 else
                 {
+                    CancelCurrentPrefetch(); // 이 요청이 모델을 쓴다 — 만들던 미리 만들기는 멈추고 요청이 끝나면 이어 만든다
                     slmAttempt = await RunSlm(request, session).ConfigureAwait(false);
                     if (session.Token.IsCancellationRequested)
                     {
@@ -247,6 +502,7 @@ namespace Jamkkaebi.Npc
                     if (!session.TimedOut && slmAttempt.IsSuccess && slmAttempt.RequestId == request.RequestId)
                     {
                         Remember(request, slmAttempt.Line);
+                        Refill(request);
                         return NpcResponse.Show(slmAttempt, slmAttempt, slmAttempt.Note != null ? "SLM (" + slmAttempt.Note + ")" : "SLM");
                     }
                     fallbackNote = session.TimedOut
@@ -273,6 +529,7 @@ namespace Jamkkaebi.Npc
                 if (fallback.IsSuccess && fallback.RequestId == request.RequestId)
                 {
                     Remember(request, fallback.Line);
+                    Refill(request);
                     return NpcResponse.Show(fallback, slmAttempt, fallbackNote);
                 }
                 return NpcResponse.Discard(slmAttempt, "기본 대사도 실패 " + fallback.FailReason + " (" + fallbackNote + ")");
@@ -317,6 +574,10 @@ namespace Jamkkaebi.Npc
             }
             lock (gate)
             {
+                if (closed)
+                {
+                    return; // CloseStore 뒤에는 미리 만들기·다시 만들기를 받지 않는다
+                }
                 // 같은 상황이 이미 줄에 있으면 더하지 않는다
                 string key = isTemplate ? NpcLineCache.TemplateKeyOf(template) : NpcLineCache.KeyOf(template);
                 foreach (PrefetchJob queued in prefetchJobs)
@@ -446,7 +707,8 @@ namespace Jamkkaebi.Npc
         // 한 상황의 대사를 목표 수만큼 만든다. 요청 때문에 취소되면 false(나중에 이어 만든다), 다 만들었거나 포기했으면 true
         private async Task<bool> RunPrefetchJob(PrefetchJob job)
         {
-            while ((job.IsTemplate ? Cache.TemplateCount(job.Template) : Cache.Count(job.Template)) < job.Count && job.Failures < 3)
+            // 칸 있는 대사는 이 요청이 쓸 수 있는 것만 센다 (긴 닉네임을 넣으면 길이를 넘는 대사는 세지 않는다)
+            while ((job.IsTemplate ? Cache.UsableTemplateCount(job.Template, MaxLineLength(job.Template)) : Cache.Count(job.Template)) < job.Count && job.Failures < 3)
             {
                 if (!IsQueued(job))
                 {
@@ -495,10 +757,14 @@ namespace Jamkkaebi.Npc
                         job.Failures++;
                         continue;
                     }
-                    if (!result.IsSuccess || !(job.IsTemplate ? Cache.AddTemplate(job.Template, result) : Cache.Add(job.Template, result)))
+                    if (!result.IsSuccess || !(job.IsTemplate ? Cache.AddTemplate(job.Template, result, MaxLineLength(job.Template)) : Cache.Add(job.Template, result)))
                     {
                         // 검사에 걸렸거나 보관한 대사·최근 대사와 90% 이상 겹침 → 다음 곁들일 거리·첫 낱말로 다시
                         job.Failures++;
+                    }
+                    else if (job.IsTemplate)
+                    {
+                        SaveSoon();
                     }
                 }
             }
@@ -584,6 +850,7 @@ namespace Jamkkaebi.Npc
                     lines.RemoveAt(0);
                 }
             }
+            SaveSoon();
         }
 
         /// <summary>그 도깨비가 모든 선택지에서 띄운 최근 대사. 게임이 저장해 두었다가 다음 실행에 RecentLines 로 넘길 때 쓴다 (선택지마다 이어 붙인다).</summary>

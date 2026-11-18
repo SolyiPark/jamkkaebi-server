@@ -140,6 +140,9 @@ namespace Jamkkaebi.Npc
         /// <summary>관리 전 이만큼 지났으면 "오랜만에" 관리한 것이다. 서버에서 7일이 지나면 흐려진다.</summary>
         public const int LongGapDays = 7;
 
+        /// <summary>서버에서 마지막 정화 뒤 이만큼 지나면 재봉인된다 (ClarityPolicy.resealedAfter 기본 14일). 7일(LongGapDays)이 지나면 흐려진다.</summary>
+        public const int ResealedAfterDays = 14;
+
         /// <summary>이 일수 안의 대화 기억만 꺼낸다.</summary>
         public const int RecallWindowDays = 7;
 
@@ -287,6 +290,7 @@ namespace Jamkkaebi.Npc
         /// 시간대는 낮(state.Now 가 없으면 Today 13시), 호칭은 '발굴자'(닉네임 없음), 손님 방문은 처음 온 친구(1번)와 단골(3번) 두 가지.
         /// 만든 대사에서 견본 값에 달린 말은 칸으로 남고(NpcLineSlots), 서버 값이 온 뒤의 요청이 그 칸에 실제 값을 넣어 완성한다.
         /// 주인 장면은 탭 인사, 선명도(state.Clarity)를 알면 안부 묻기·관리하기도. 손님 장면은 손님 관람. 선명도·마지막 관리·기억은 어떤 말을 할지 정하므로 견본이 아니라 state 의 값을 쓴다.
+        /// 단 관리하기(정화)는 다음 정화 때 쓸 대사라 선명·흐려짐·재봉인 세 상태를 모두 만든다(ClaritySamples) — 주인 장면은 탭 인사·안부·정화 셋으로 5개.
         /// </summary>
         public List<ReactionRequest> PrefetchTemplates(NpcContextInput state)
         {
@@ -322,12 +326,13 @@ namespace Jamkkaebi.Npc
             }
             foreach (string input in inputs)
             {
+                foreach (KeyValuePair<string, DateTime?> clarity in ClaritySamples(input, state))
                 foreach (List<DateTime> visits in visitSamples)
                 {
                     var copy = new NpcContextInput
                     {
-                        RelicId = state.RelicId, Mode = state.Mode, Input = input, Today = state.Today, Clarity = state.Clarity,
-                        AwakeningStage = state.AwakeningStage, LastPurifiedAt = state.LastPurifiedAt, RealStory = state.RealStory,
+                        RelicId = state.RelicId, Mode = state.Mode, Input = input, Today = state.Today, Clarity = clarity.Key,
+                        AwakeningStage = state.AwakeningStage, LastPurifiedAt = clarity.Value, RealStory = state.RealStory,
                         Now = state.Now.HasValue ? state.Now : state.Today.Date.AddHours(13),
                         Nickname = null,
                         VisitDates = visits,
@@ -341,6 +346,24 @@ namespace Jamkkaebi.Npc
                 }
             }
             return requests;
+        }
+
+        // 정화(관리)는 지금 상태가 아니라 <b>다음 정화 때의 상태</b>로 쓸 대사다. 다음 정화가 언제일지 모르므로 세 상태(선명·흐려짐·재봉인)를 모두 견본으로 만든다.
+        // 선명도는 마지막 정화 뒤 날 수로만 정해져서(7일 흐려짐, 14일 재봉인) 이 셋뿐이다. 날 수는 견본(1·9·16일)이고 대사에서는 {날수} 칸으로 남는다.
+        // 다른 선택지는 지금 상태 하나만 쓴다
+        private static List<KeyValuePair<string, DateTime?>> ClaritySamples(string input, NpcContextInput state)
+        {
+            var samples = new List<KeyValuePair<string, DateTime?>>();
+            if (input != NpcInputs.Care)
+            {
+                samples.Add(new KeyValuePair<string, DateTime?>(state.Clarity, state.LastPurifiedAt));
+                return samples;
+            }
+            DateTime today = state.Today.Date;
+            samples.Add(new KeyValuePair<string, DateTime?>("CLEAR", today.AddDays(-1)));
+            samples.Add(new KeyValuePair<string, DateTime?>("FADED", today.AddDays(-(LongGapDays + 2))));
+            samples.Add(new KeyValuePair<string, DateTime?>("RESEALED", today.AddDays(-(ResealedAfterDays + 2))));
+            return samples;
         }
 
         // ---------- 선택지별 ----------
@@ -612,7 +635,7 @@ namespace Jamkkaebi.Npc
             return null;
         }
 
-        // "주인에게 암행어사 이야기를 들려줬다" → "너는 이틀 전 주인에게 암행어사 이야기를 들려줬던 일이 떠올랐다."
+        // "주인에게 암행어사 이야기를 들려줬다" → "너는 2일 전 주인에게 암행어사 이야기를 들려줬던 일이 떠올랐다."
         private static string RecallSentence(MemoryEntry memory)
         {
             string summary = memory.Summary.Trim().TrimEnd('.');
@@ -721,20 +744,19 @@ namespace Jamkkaebi.Npc
             return Math.Max(0, (today.Date - at.Value.Date).Days);
         }
 
+        // 며칠 전: 오늘·어제만 낱말로, 2일 전부터는 숫자로 쓴다("2일 전"). 모델은 상황 문장의 날 수를 그대로 옮기는데, "이틀·사흘"처럼 한글로 주면
+        // 대사에도 한글 날 수가 나와 미리 만든 대사의 날 수 칸({날수})으로 만들 수 없다 — 숫자로 주면 "2일 전"이 칸이 되어 다른 날 수에도 쓴다 (2026-11-18)
         private static string WhenAgo(int days)
         {
             switch (days)
             {
                 case 0: return "오늘";
                 case 1: return "어제";
-                case 2: return "이틀 전";
-                case 3: return "사흘 전";
-                case 4: return "나흘 전";
                 default: return days + "일 전";
             }
         }
 
-        // 문장 앞에 붙는 때: "오늘", "어제", "이틀 전에"
+        // 문장 앞에 붙는 때: "오늘", "어제", "2일 전에"
         private static string WhenAt(int days)
         {
             return days <= 1 ? WhenAgo(days) : WhenAgo(days) + "에";

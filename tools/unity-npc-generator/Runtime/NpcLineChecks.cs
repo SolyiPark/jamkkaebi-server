@@ -629,7 +629,71 @@ namespace Jamkkaebi.Npc
             return Barae.Replace(line, m => m.Groups[1].Value + " 바라");
         }
 
-        private static readonly Regex StarterComma = new Regex("^(덕분에|이제|훨씬|한결|역시|요즘|조금|점점|많이|어느새|자꾸|몸이|기분이|개운하게|깨끗하게|마지막|벌써|드디어|어서|살살|괜찮으면|시간 되면|조심조심|혹시|이왕이면),\\s*", RegexOptions.CultureInvariant);
+        // 첫 낱말 '개운하게·깨끗하게'(정화 대사, PromptAssembler.StartersClear)는 뒤의 움직임말을 꾸민다 ("개운하게 관리해 줘서 고마워"). 모델이 뒤를 다른 말로 이으면
+        // "개운하게 덕분에 기분이 좋네"·"개운하게 돌아온 발굴자, 오랜만에 관리해줘서 고마워"처럼 어색하다 (2026-11-18 --live-store 미리 만든 정화 대사). run.py 의 fix_starter_adverb 와 같다
+        // 가로 공백만 본다 — 줄바꿈("개운하게\\n덕분에…")은 그대로 두어 출력 검사의 줄바꿈 검사가 거르게 한다 (CodeRabbit 리뷰)
+        private static readonly Regex StarterAdverb = new Regex("^(개운|깨끗)하게[ \\t]+([가-힣]+)([ \\t]*)", RegexOptions.CultureInvariant);
+        private static readonly Regex StarterVocative = new Regex("^(개운|깨끗)하게[ \\t]+[가-힣]+[ \\t]+([가-힣]+)[ \\t]*,[ \\t]*", RegexOptions.CultureInvariant);
+        // '~하게'가 꾸밀 수 있는 움직임말 (관리해·닦아·씻은…). 첫 마디(쉼표·문장 끝 앞) 안에 하나라도 있으면 자연스럽다 ("개운하게 오랜만에 나를 관리해줘서")
+        private static readonly string[] AdverbFollowers =
+        {
+            "관리해", "관리받", "닦", "씻", "해", "돌봐", "돌보", "챙겨", "챙기", "만들", "다듬", "정리", "손질", "가꿔", "가꾸", "보살", "치워", "털어",
+            "빛나", "빛날", "반짝", "맑아", "느껴", "깨어", "깨워", "일어", "되", "됐", "돼", "지내", "쉬"
+        };
+        private static readonly Regex FirstClauseEnd = new Regex("[,.!?…~]", RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 첫 낱말 '개운하게·깨끗하게'가 꾸밀 움직임말 없이 이어진 대사를 고친다. 뒤가 움직임말이면 그대로 둔다 ("개운하게 관리해 줘서 고마워!").
+        /// <list type="bullet">
+        /// <item>뒤가 "돌아온 발굴자,"처럼 꾸밈말 + 부르는 말이면 '개운하게 돌아온'을 지운다 → "발굴자, 오랜만에 관리해줘서 고마워." (부르는 말이 호칭이 아니면 쉼표까지 지운다)</item>
+        /// <item>그 밖에는 "개운해,"로 바꾼다 → "개운해, 덕분에 기분이 좋네".</item>
+        /// </list>
+        /// run.py 의 fix_starter_adverb 와 같다.
+        /// </summary>
+        public static string FixStarterAdverb(string line, string callName)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return line;
+            }
+            Match m = StarterAdverb.Match(line);
+            if (!m.Success)
+            {
+                return line;
+            }
+            string next = m.Groups[2].Value;
+            string clause = line.Substring(m.Groups[2].Index);
+            Match clauseEnd = FirstClauseEnd.Match(clause);
+            if (clauseEnd.Success)
+            {
+                clause = clause.Substring(0, clauseEnd.Index);
+            }
+            foreach (Match word in HangulWord.Matches(clause))
+            {
+                foreach (string follower in AdverbFollowers)
+                {
+                    if (word.Value.StartsWith(follower, StringComparison.Ordinal))
+                    {
+                        return line;
+                    }
+                }
+            }
+            char last = next[next.Length - 1];
+            int final = (last - 0xAC00) % 28;
+            Match vocative = StarterVocative.Match(line);
+            if (vocative.Success && (final == 4 || final == 8) && last != '은' && last != '는')
+            {
+                string called = vocative.Groups[2].Value;
+                string rest = line.Substring(vocative.Length);
+                if (rest.Length > 0)
+                {
+                    return !string.IsNullOrEmpty(callName) && called == callName ? called + ", " + rest : rest;
+                }
+            }
+            return m.Groups[1].Value + "해, " + line.Substring(m.Groups[2].Index);
+        }
+
+        private static readonly Regex StarterComma = new Regex("^(덕분에|이제|훨씬|한결|역시|요즘|조금|점점|많이|어느새|자꾸|몸이|기분이|개운하게|깨끗하게|마지막|벌써|드디어|어서|살살|괜찮으면|시간 되면|조심조심|혹시|이왕이면),[ \\t]*", RegexOptions.CultureInvariant); // 가로 공백만 (줄바꿈은 검사가 거른다, CodeRabbit 리뷰)
 
         private static readonly Regex DanglingConnective = new Regex("(서|며|면서|려고|도록|다가|지만|으나|니까|면)$", RegexOptions.CultureInvariant);
         private static readonly Regex DanglingParticle = new Regex("(은|는|을|를|의)$", RegexOptions.CultureInvariant);
@@ -959,6 +1023,36 @@ namespace Jamkkaebi.Npc
         /// (공들·정성껏·정성스럽게·빚어·새겨·만들어…)과 구경하는 끝맺음(~거네·~거구나, 입음꼴 ~어졌네·~됐네)이 함께 있고, 앞에 '내'·'나의'·'우리'가 없을 때만 건다
         /// ("자개가 정성스럽게 만들어졌네." — 2026-11-18 시험 S14). "몸"·"모습"은 거의 모든 문장에 나오는 낱말이라 뺀다. run.py 의 subject_contradiction 과 같다.
         /// </summary>
+        // 남의 솜씨를 보고 하는 칭찬 ("대단하네", "멋지구나"). 자기 이야기(관리 감사·안부·지난 대화)에서 만든 솜씨 낱말과 함께 나오고 '내'가 없으면
+        // 자기 것을 남의 솜씨처럼 말한 것이다: "정말? 그렇게 공들인 거라면 대단하네." (2026-11-18 23:45 시험 S14 #3 — 자기 것의 이름이 없어 SubjectContradiction 이 놓쳤다)
+        private static readonly Regex CraftPraiseEnding = new Regex("(?:대단|훌륭|굉장|근사)(?:하네|하구나|하다|하군|해)|(?:멋지|놀랍)(?:네|구나|다|군)|멋있(?:네|구나|다|군|어)|멋져|놀라워|잘 ?만들었(?:네|구나|다)",
+                RegexOptions.CultureInvariant);
+        // 상대가 해 준 관리를 칭찬한 것("정성껏 닦아 줘서 고마워, 정말 멋져!")은 자기 솜씨 칭찬이 아니다 (CodeRabbit 리뷰)
+        private static readonly Regex CareThanks = new Regex("(?:닦|관리|챙|돌봐|돌보|씻|깨워)[가-힣 ]{0,4}(?:줘서|주어서|줬|준|주니|받아서|받으니)", RegexOptions.CultureInvariant);
+        private static readonly Regex SelfMarker = new Regex("(?<![가-힣])(?:내|나|나의|내가|나는|난|우리)(?![가-힣])", RegexOptions.CultureInvariant);
+        private static readonly string[] SelfTalkActions = { NpcActions.ThankCalm, NpcActions.ThankJoyful, NpcActions.AnswerStatus, NpcActions.RecallTalk };
+
+        /// <summary>
+        /// 자기 이야기(관리 감사·안부·지난 대화)에서 자기 솜씨를 남의 솜씨 보듯 칭찬한 문장이면 그 칭찬 말, 아니면 null. 한 문장 안에 만든 솜씨 낱말(공들·정성껏…)과
+        /// 구경하는 칭찬(대단하네·멋지구나…)이 함께 있고 '내·나·우리'가 없을 때. run.py 의 craft_praise 와 같다.
+        /// </summary>
+        public static string CraftPraise(string line, string action)
+        {
+            if (string.IsNullOrEmpty(line) || Array.IndexOf(SelfTalkActions, action) < 0)
+            {
+                return null;
+            }
+            foreach (string sentence in Regex.Split(line, "(?<=[.!?…~])\\s+"))
+            {
+                Match praise = CraftPraiseEnding.Match(sentence);
+                if (praise.Success && CraftWords.IsMatch(sentence) && !SelfMarker.IsMatch(sentence) && !CareThanks.IsMatch(sentence))
+                {
+                    return praise.Value;
+                }
+            }
+            return null;
+        }
+
         public static string SubjectContradiction(string line, IList<string> ownThings)
         {
             if (string.IsNullOrEmpty(line) || ownThings == null)
@@ -1042,9 +1136,63 @@ namespace Jamkkaebi.Npc
             }
             if (demo.Count > 0)
             {
-                line = Regex.Replace(line, "(?<![가-힣])(?:그|이|저)(\\s?)(" + string.Join("|", demo.ToArray()) + ")", m => "내" + m.Groups[1].Value + m.Groups[2].Value, RegexOptions.CultureInvariant);
+                line = Cached("(?<![가-힣])(?:그|이|저)(\\s?)(" + string.Join("|", demo.ToArray()) + ")").Replace(line, m => "내" + m.Groups[1].Value + m.Groups[2].Value);
+            }
+            // 앞에 아무것도 없이 자기 것을 말하며 솜씨를 이야기하면("기억난다, 자개 공들여 만들었다고 자랑했던 일") 자개 주인이 남처럼 들린다 (2026-11-19). 같은 마디에 만든 솜씨 낱말이 있으면 '내'를 붙인다. 주어(자개가·자개는)로 쓴 것은 붙이지 않는다 — 남의 솜씨처럼 말한 "자개가 정성스럽게 만들어졌네"는 고치지 않고 주체 검사가 거른다. run.py 의 fix_own_possessive 와 같다
+            if (demo.Count > 0)
+            {
+                var bareThings = new List<string>();
+                foreach (string thing in demo)
+                {
+                    bareThings.Add(Regex.Escape(thing));
+                }
+                Regex bare = Cached("(?<![가-힣])(?<!내 )(?<!나의 )(?<!우리 )(?<!제 )(" + string.Join("|", bareThings.ToArray()) + ")(?![이가은는](?![가-힣]))"
+                        + "(?=[^,.!?…~]*?(?:" + CraftWords + "))");
+                line = bare.Replace(line, m => "내 " + m.Groups[1].Value, 1);
             }
             return line;
+        }
+
+        // 지난 대화를 "~던 일"로 끝내면 말이 끝나지 않는다 → "~던 일이 기억나." (앞의 "기억난다,"는 겹치므로 뗀다). run.py 의 fix_recall_fragment 와 같다
+        private static readonly Regex RecallFragmentEnd = new Regex("던 일([.!…~]*)$", RegexOptions.CultureInvariant);
+        // 낱말이 끝날 때만 지운다 — "기억나는 건 함께 웃었던 일"의 '기억나'를 지우면 "는 건 …"이 남았다 (CodeRabbit 리뷰)
+        private static readonly Regex RecallLead = new Regex("^(?:기억난다|기억나|생각난다|생각나)(?=[,.!\\s]|$)[,.!]?\\s*", RegexOptions.CultureInvariant);
+        private static readonly Regex RecallSubject = new Regex("(?:기억|생각)나는 (?:건|게|것은)", RegexOptions.CultureInvariant);
+
+        public static string FixRecallFragment(string line)
+        {
+            if (string.IsNullOrEmpty(line) || !RecallFragmentEnd.IsMatch(line))
+            {
+                return line;
+            }
+            line = RecallLead.Replace(line, "");
+            // "기억나는 건 함께 웃었던 일"처럼 이미 '기억나는 건'으로 시작했으면 "…던 일이야."로 끝맺는다 ("…던 일이 기억나"를 붙이면 '기억나'가 겹친다)
+            string ending = RecallSubject.IsMatch(line) ? "던 일이야" : "던 일이 기억나";
+            return RecallFragmentEnd.Replace(line, m => ending + (m.Groups[1].Value.Length > 0 ? m.Groups[1].Value : "."));
+        }
+
+        /// <summary>자기 솜씨를 말하면서 자기 것을 '내' 없이 맨 이름으로 말하면("기억난다, 자개 공들여 만들었다고 자랑했던 일") 남의 자개처럼 들린다 → '내 자개'. 조사가 없어 주체 검사도 놓쳤다 (2026-11-19 --live-store). run.py 의 fix_bare_own_thing 과 같다. '몸'·'모습'은 상대의 것일 수 있어 고치지 않는다.</summary>
+        public static string FixBareOwnThing(string line, IList<string> ownThings)
+        {
+            if (string.IsNullOrEmpty(line) || ownThings == null || !CraftWords.IsMatch(line) || SelfMarker.IsMatch(line))
+            {
+                return line; // 이미 '내·나·우리'로 자기 것이라고 했으면 그대로
+            }
+            // 가장 앞의 자기 것 하나에만 붙인다. 주어(이·가·은·는)로 쓴 것은 붙이지 않고 주체 검사(SubjectContradiction)가 거르게 둔다. '빛·반짝임'은 속성이라 뺀다("빛이 비쳐"를 "내 빛이"로 바꾸지 않는다)
+            int first = -1;
+            foreach (string thing in ownThings)
+            {
+                if (string.IsNullOrEmpty(thing) || thing == "몸" || thing == "모습" || thing == "빛" || thing == "반짝임")
+                {
+                    continue;
+                }
+                Match m = Cached("(?<![가-힣])" + Regex.Escape(thing) + "(?=(?:을|를|도|의|과|와|랑|만|에|처럼)?(?![가-힣]))").Match(line);
+                if (m.Success && (first < 0 || m.Index < first))
+                {
+                    first = m.Index;
+                }
+            }
+            return first < 0 ? line : line.Substring(0, first) + "내 " + line.Substring(first);
         }
 
         private static readonly Regex CraftNe = new Regex("(었|았|였|했)네([.!?…~]|$)", RegexOptions.CultureInvariant);
@@ -1086,15 +1234,35 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public static string FixNoRecord(string line)
         {
+            return FixNoRecord(line, 0);
+        }
+
+        /// <summary>
+        /// "오랜만이야"·"오랜만에 보네"를 바꿔 넣는 말. variant 로 고른다 (0 = "반가워"). 늘 "반가워" 하나로 바꾸면 모델이 다르게 쓴 인사들이 같은 대사로 모여
+        /// ("어서 왔구나, 오랜만에 보네" → "어서 와, 반가워") 최근 대사와 같다고 걸리고 다시 만들었다 (2026-11-18 22:16 시험: 말발굽 탭 인사 16번 중 12번이 '오랜만',
+        /// S23 #1·#2·#4·S24 #3 반복). 출력 검사기는 최근 대사와 겹치지 않는 것을 고른다 (NpcOutputValidator, run.py 의 pick_no_record_variant).
+        /// </summary>
+        public static readonly string[] NoRecordGreetings = { "반가워", "기다렸어", "보고 싶었어", "기뻐" };
+
+        /// <summary>대사에 FixNoRecord 가 고칠 '오랜만'이 있는지 (바꿔 넣는 말을 고를 필요가 있는지).</summary>
+        public static bool HasLongAbsenceWord(string line)
+        {
+            return !string.IsNullOrEmpty(line) && Regex.IsMatch(line, "오(?:랜|래간)만", RegexOptions.CultureInvariant);
+        }
+
+        public static string FixNoRecord(string line, int variant)
+        {
             if (string.IsNullOrEmpty(line))
             {
                 return line;
             }
-            line = Regex.Replace(line, "오(?:랜|래간)만이(?:야|네|다|에요)", "반가워", RegexOptions.CultureInvariant);
+            string greeting = NoRecordGreetings[((variant % NoRecordGreetings.Length) + NoRecordGreetings.Length) % NoRecordGreetings.Length];
+            line = Regex.Replace(line, "오(?:랜|래간)만이(?:야|네|다|에요)", greeting, RegexOptions.CultureInvariant);
             // '오랜만에'는 뒤가 혼자 문장이 되는 움직임말(왔·와·찾아·오·들렀·돌아…)일 때만 지운다. "오랜만에 보네"를 지우면 목적어 없는 "보네"가 남는다(2026-11-17 21:45 시험 S23 #1 "어서 와! 보네, 도윤아").
             // 못 고치는 것은 그대로 두어 출력 검사가 기록과 어긋남으로 거른다
             // "오랜만에 보네"는 지우지 않고 뜻이 같은 말로 바꾼다 (22:07 시험: 남겨 두자 기록과 어긋남으로 거르고 다시 만들어 시도가 늘었다)
-            line = Regex.Replace(line, "오(?:랜|래간)만에 ?(?:보는구나|보네|보는걸|만났네|만났구나|마주쳤네)", "반가워", RegexOptions.CultureInvariant);
+            // "오랜만에 보자"도 같다 (22:16 시험 S22 #3: 못 고쳐 기록과 어긋남으로 걸렸다)
+            line = Regex.Replace(line, "오(?:랜|래간)만에 ?(?:보는구나|보네|보는걸|보자(?![가-힣])|만났네|만났구나|마주쳤네)", greeting, RegexOptions.CultureInvariant);
             line = Regex.Replace(line, "오(?:랜|래간)만에 ?보니", "만나니", RegexOptions.CultureInvariant);
             line = Regex.Replace(line, "오(?:랜|래간)만에 ?봐서", "만나서", RegexOptions.CultureInvariant);
             line = Regex.Replace(line, "오(?:랜|래간)만에 ?(?=(?:왔|와|오|찾아|들렀|돌아|방문|놀러|만나|만났|마주))", "", RegexOptions.CultureInvariant);
@@ -1126,6 +1294,34 @@ namespace Jamkkaebi.Npc
         // "관리해 줘서 고마워"로 줄인다. run.py 의 fix_thanks_overlap 과 같다
         private static readonly Regex ThanksOverlap = new Regex("덕분에\\s*(관리해|닦아)\\s?(줘서)", RegexOptions.CultureInvariant);
 
+        // 관리는 늘 플레이어가 한다. 도깨비가 자기를 관리한 쪽으로 말한 주어("개운하게 도깨비가 관리해줘서 고마워", "내가 닦아 줘서")는 지운다 — 주어를 빼면 받은 쪽에서 고마워하는 말이 된다 (2026-11-19). run.py 의 fix_care_giver 와 같다
+        private static readonly Regex SelfCareGiver = new Regex(
+                "(?<![가-힣])(?:도깨비(?:가|는|께서)|내가|나는|난)\\s?(?=(?:관리|닦|챙겨|챙기|돌봐|돌보|깨워|씻겨)[가-힣]*\\s?(?:줘서|주어서|줬|준|주니))", RegexOptions.CultureInvariant);
+        // 실화 이야기는 늘 도깨비가 들려주고 플레이어는 듣는다. "자개 반짝임 얘기해줘서 고마워"처럼 플레이어가 이야기한 것으로 말하면 "얘기 들어줘서"로 바꾼다 (2026-11-19). run.py 의 fix_story_teller 와 같다
+        // 고마워하는 꼴("~해 줘서·주어서·주니")만 본다 — "내가 이야기를 들려줬잖아"는 도깨비가 들려준 것을 바르게 말했다 (CodeRabbit 리뷰)
+        private static readonly Regex PlayerTold = new Regex("(얘기|이야기)\\s?(?:를\\s?)?해(\\s?)(줘서|주어서|주니)", RegexOptions.CultureInvariant);
+        private static readonly Regex PlayerToldTo = new Regex("들려(\\s?)(줘서|주어서|주니)", RegexOptions.CultureInvariant);
+        private static readonly Regex TellerIsSelf = new Regex("(?<![가-힣])(?:내가|나는|난)(?![가-힣])", RegexOptions.CultureInvariant);
+
+        public static string FixCareGiver(string line)
+        {
+            return string.IsNullOrEmpty(line) ? line : SelfCareGiver.Replace(line, "");
+        }
+
+        public static string FixStoryTeller(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return line;
+            }
+            if (TellerIsSelf.IsMatch(line))
+            {
+                return line; // 도깨비가 들려준 것을 자기 입으로 말했다
+            }
+            line = PlayerTold.Replace(line, "$1 들어$2$3");
+            return PlayerToldTo.Replace(line, "들어$1$2");
+        }
+
         public static string FixThanksOverlap(string line)
         {
             return string.IsNullOrEmpty(line) ? line : ThanksOverlap.Replace(line, "$1 $2");
@@ -1139,7 +1335,8 @@ namespace Jamkkaebi.Npc
             }
             if (visitDays.Trim() == "오늘")
             {
-                // 처음 온 친구: "오랜만이야"는 "반가워", "오랜만에 와 줘서"는 "와 줘서" (지난 만남을 지어내지 않는다)
+                // 처음 온 친구: "오랜만이야"는 "반가워", "오랜만에 와 줘서"는 "와 줘서" (지난 만남을 지어내지 않는다). "오랜만에 보니"는 "만나니" — 지우면 "보니"만 남는다
+                line = Regex.Replace(line, "오(?:랜|래간)만에 ?보니", "만나니", RegexOptions.CultureInvariant);
                 line = Regex.Replace(line, "오(?:랜|래간)만이(?:야|네|다|에요)", "반가워", RegexOptions.CultureInvariant);
                 return Regex.Replace(line, "오(?:랜|래간)만에 ?", "", RegexOptions.CultureInvariant);
             }
@@ -1157,6 +1354,8 @@ namespace Jamkkaebi.Npc
             }
             // 이미 "또 왔구나!"라고 했으면 "또 왔구나! 반가워, 또 왔네!"처럼 겹치지 않게 "반가워"로 바꾼다 (2026-11-16 시험 S25 #1)
             string again = Regex.IsMatch(line, "(?<![가-힣])또(?![가-힣])", RegexOptions.CultureInvariant) ? "반가워" : "또 왔네";
+            // "또 왔구나! 오랜만에 보니 반가워"의 '오랜만에'를 지우면 "또 왔구나! 보니 반가워"처럼 '보니'만 남는다 (2026-11-18 --live-store) → "다시 보니"
+            line = Regex.Replace(line, "오(?:랜|래간)만에 ?보니", "다시 보니", RegexOptions.CultureInvariant);
             line = Regex.Replace(line, "오(?:랜|래간)만이(?:야|네|다|에요)", again, RegexOptions.CultureInvariant);
             if (Regex.IsMatch(line, "(?<![가-힣])또(?![가-힣])", RegexOptions.CultureInvariant))
             {
@@ -1270,7 +1469,8 @@ namespace Jamkkaebi.Npc
         // 문맥에 어색한 말을 고친다 ("닦아달라고 부탁해" → "닦아 줘", "어서 왔어" → "어서 와"). run.py 의 fix_awkward 와 같다. 못 고친 것은 금칙어 awkward 묶음이 거른다
         private static readonly Regex QuotedAsk = new Regex(
                 "([가-힣]*[아어여해])\\s?달라고\\s?(?:부탁|요청|말)(?:드리고\\s?싶(?:어요|어|습니다)|하고\\s?싶(?:어요|어)|드립니다|드려요|드릴게요|드릴게|드려|해요|했어요|했어|했다|했네|합니다|할게요|할게|하다|해)?", RegexOptions.CultureInvariant);
-        private static readonly Regex Arrive = new Regex("어서\\s?왔(?:어요|어|네요|네|구나|지)", RegexOptions.CultureInvariant);
+        // "어서 왔어?"를 "어서 와"로 고치면서 물음표를 남기면 "어서 와?"가 된다 (2026-11-18 23:45 시험 S06 #4 "어서 와? 또 왔네."). 인사라 "!"로 바꾼다
+        private static readonly Regex Arrive = new Regex("어서,?\\s?(?:왔(?:어요|어|네요|네|구나|지)|와(?![가-힣]))(\\?+)?", RegexOptions.CultureInvariant);
 
         // "편하게 구경해 줘"는 손님에게 구경을 부탁하는 말이라 어색하다(2026-11-16 시험 S05 #2·#3). 권하는 말로 "구경해"라고 한다. run.py 의 OFFER_ASK_RE 와 같다
         private static readonly Regex OfferAsk = new Regex("(구경해|구경하고 가|둘러봐|쉬었다 가|놀다 가)\\s?줘" + WordEnd, RegexOptions.CultureInvariant);
@@ -1279,7 +1479,7 @@ namespace Jamkkaebi.Npc
         {
             line = QuotedAsk.Replace(line, m => m.Groups[1].Value + " 줘");
             line = OfferAsk.Replace(line, m => m.Groups[1].Value);
-            return Arrive.Replace(line, "어서 와");
+            return Arrive.Replace(line, m => m.Groups[1].Success ? "어서 와!" : "어서 와");
         }
 
         private static readonly Regex PastSeupnida = new Regex("([가-힣])습니다" + WordEnd, RegexOptions.CultureInvariant);
@@ -1345,14 +1545,18 @@ namespace Jamkkaebi.Npc
             line = WooHonorific.Replace(line, WooHonorificOf);
             foreach (string[] pair in HonorificWords)
             {
+                if (line.IndexOf(pair[0], StringComparison.Ordinal) < 0)
+                {
+                    continue; // 없는 낱말은 정규식을 쓰지 않는다 (성능)
+                }
                 if (EatHonorifics.Contains(pair[0]))
                 {
-                    line = Regex.Replace(line, "(?<![가-힣])" + Regex.Escape(pair[0]) + (pair[0].EndsWith("신") ? "(?=[\\s.!?…~,]|$)" : ""), pair[1], RegexOptions.CultureInvariant);
+                    line = Cached("(?<![가-힣])" + Regex.Escape(pair[0]) + (pair[0].EndsWith("신") ? "(?=[\\s.!?…~,]|$)" : "")).Replace(line, pair[1]);
                 }
                 else if (pair[0].EndsWith("신"))
                 {
                     // '-신'(주신·하신)은 낱말 끝일 때만 — '안녕하신가'·'주신다'의 '신'을 건드리지 않는다
-                    line = Regex.Replace(line, Regex.Escape(pair[0]) + "(?=[\\s.!?…~,]|$)", pair[1], RegexOptions.CultureInvariant);
+                    line = Cached(Regex.Escape(pair[0]) + "(?=[\\s.!?…~,]|$)").Replace(line, pair[1]);
                 }
                 else
                 {
@@ -1683,9 +1887,13 @@ namespace Jamkkaebi.Npc
             }
             string c = Regex.Escape(callName);
             // 꾸밈말 뒤("처음 온 도윤을 만나니")는 지우면 꾸밈말만 남는다 → 두고 PlayerThirdPerson 이 거른다
-            string result = Regex.Replace(line, "(?<![가-힣])" + c + "(?:을|를|이|가|은|는|한테서|한테|에게서|에게)\\s+(?=[가-힣])(?!위[해한하])",
-                    m => AfterModifier(line, m.Index) ? m.Value : "", RegexOptions.CultureInvariant);
-            result = Regex.Replace(result, "(?<![가-힣])" + c + "\\s+(?=덕분)", "", RegexOptions.CultureInvariant);
+            if (line.IndexOf(callName, StringComparison.Ordinal) < 0)
+            {
+                return line; // 호칭이 없으면 정규식을 쓰지 않는다 (성능)
+            }
+            string result = Cached("(?<![가-힣])" + c + "(?:을|를|이|가|은|는|한테서|한테|에게서|에게)\\s+(?=[가-힣])(?!위[해한하])")
+                    .Replace(line, m => AfterModifier(line, m.Index) ? m.Value : "");
+            result = Cached("(?<![가-힣])" + c + "\\s+(?=덕분)").Replace(result, "");
             return Core(result).Length >= 3 ? result : line;
         }
 
@@ -1699,8 +1907,12 @@ namespace Jamkkaebi.Npc
             {
                 return null;
             }
-            Match found = Regex.Match(line, "(?<![가-힣])" + Regex.Escape(callName)
-                    + "(?:(?:을|를|은|는|한테서|한테|에게서|에게|의)(?![가-힣])|(?:이|가)(?=\\s+[가-힣]))", RegexOptions.CultureInvariant);
+            if (line.IndexOf(callName, StringComparison.Ordinal) < 0)
+            {
+                return null;
+            }
+            Match found = Cached("(?<![가-힣])" + Regex.Escape(callName)
+                    + "(?:(?:을|를|은|는|한테서|한테|에게서|에게|의)(?![가-힣])|(?:이|가)(?=\\s+[가-힣]))").Match(line);
             return found.Success ? found.Value : null;
         }
 
@@ -1717,6 +1929,13 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public static string NormalizeSpeech(string line, string label, string name, IList<string> ownThings, string nickname, string visitDays, string addressName, bool noRecord)
         {
+            return NormalizeSpeech(line, label, name, ownThings, nickname, visitDays, addressName, noRecord, 0);
+        }
+
+        /// <summary>noRecordVariant 는 '오랜만'을 바꿔 넣는 말(NoRecordGreetings)의 번호다.</summary>
+        public static string NormalizeSpeech(string line, string label, string name, IList<string> ownThings, string nickname, string visitDays, string addressName, bool noRecord,
+                                             int noRecordVariant)
+        {
             if (string.IsNullOrEmpty(line))
             {
                 return line;
@@ -1725,7 +1944,7 @@ namespace Jamkkaebi.Npc
             line = StripNim(line, nickname);
             if (noRecord)
             {
-                line = FixNoRecord(line);
+                line = FixNoRecord(line, noRecordVariant);
             }
             line = FixLongAbsence(line, visitDays);
             line = StripAddress(GuestToFriend(FixBodyState(FixOwnPossessive(line, ownThings))), name);
@@ -1733,7 +1952,7 @@ namespace Jamkkaebi.Npc
             line = DropPlayerReference(PlayerPronounsToName(line, addressName), addressName);
             if (noRecord)
             {
-                line = FixNoRecord(line);
+                line = FixNoRecord(line, noRecordVariant);
             }
             line = FixLongAbsence(line, visitDays);
             if (line.Length == 0)
@@ -1742,7 +1961,7 @@ namespace Jamkkaebi.Npc
             }
             // 말투 어미를 고치다 새로 생긴 이름("향산이예요"→"향산이야")을 한 번 더 지운다
             // "덕분에, 관리해 줘서 고마워."처럼 첫 낱말 뒤에 쉼표를 찍으면 어색하다 (첫 낱말을 정해 준 뒤 생겼다)
-            line = DropPlayerReference(PlayerPronounsToName(UnifyPlayerCall(FixStatementQuestion(CollapseDoubleVerb(StarterComma.Replace(StripTrailingInterjection(DropRepeatedWord(DropRepeatedLead(GuestToFriend(StripAddress(FixThanksOverlap(FixTypos(ApplySpeech(line, label))), name))))), "$1 "))), addressName, nickname), addressName), addressName);
+            line = DropPlayerReference(PlayerPronounsToName(UnifyPlayerCall(FixStatementQuestion(CollapseDoubleVerb(FixStarterAdverb(StarterComma.Replace(StripTrailingInterjection(DropRepeatedWord(DropRepeatedLead(GuestToFriend(StripAddress(FixCareGiver(FixStoryTeller(FixThanksOverlap(FixTypos(ApplySpeech(line, label))))), name))))), "$1 "), addressName))), addressName, nickname), addressName), addressName);
             // 말줄임을 합치면 '?'가 어미 바로 뒤로 온다 ("기분이 좋구나...?"→"기분이 좋구나?"). 이때 평서 어미의 '?'를 한 번 더 고친다 (CodeRabbit 리뷰)
             return FixStatementQuestion(CollapsePunctuation(line));
         }
@@ -1931,10 +2150,37 @@ namespace Jamkkaebi.Npc
         {
             foreach (string[] pair in words)
             {
+                // 대사에 그 낱말이 없으면 정규식을 쓰지 않는다 — 낱말마다 정규식을 만들면 다듬기 한 번에 수십 개를 해석했다 (성능 리뷰 2026-11-19)
+                if (line.IndexOf(pair[0], StringComparison.Ordinal) < 0)
+                {
+                    continue;
+                }
                 string word = pair[1];
-                line = Regex.Replace(line, Regex.Escape(pair[0]) + WordEnd, m => word, RegexOptions.CultureInvariant);
+                line = Cached(Regex.Escape(pair[0]) + WordEnd).Replace(line, m => word);
             }
             return line;
+        }
+
+        // 그때그때 이어 붙인 패턴(호칭·자기 것·낱말 목록)의 정규식을 기억해 둔다. 정적 Regex 메서드의 기억은 15개뿐이라, 다듬기가 패턴을 수십 개 쓰면 매번 다시 해석했다.
+        // 패턴은 낱말 목록·호칭·도깨비마다 정해져 수가 많지 않다. 그래도 넘치면(1,024개) 비우고 다시 쌓는다
+        private static readonly Dictionary<string, Regex> RegexCache = new Dictionary<string, Regex>();
+
+        internal static Regex Cached(string pattern)
+        {
+            lock (RegexCache)
+            {
+                Regex rx;
+                if (!RegexCache.TryGetValue(pattern, out rx))
+                {
+                    if (RegexCache.Count >= 1024)
+                    {
+                        RegexCache.Clear();
+                    }
+                    rx = new Regex(pattern, RegexOptions.CultureInvariant);
+                    RegexCache[pattern] = rx;
+                }
+                return rx;
+            }
         }
 
         private static string BanmalPronounOf(string word)
@@ -2175,7 +2421,7 @@ namespace Jamkkaebi.Npc
             {
                 return null;
             }
-            Match found = Regex.Match(line, Regex.Escape(callName) + "(?:을|를)\\s?(?:불러|부르|불렀|부른|부를|만나러|보러|찾으러)", RegexOptions.CultureInvariant);
+            Match found = Cached(Regex.Escape(callName) + "(?:을|를)\\s?(?:불러|부르|불렀|부른|부를|만나러|보러|찾으러)").Match(line);
             return found.Success ? found.Value : null;
         }
 
