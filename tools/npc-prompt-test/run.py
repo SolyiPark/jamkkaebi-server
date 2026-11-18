@@ -173,16 +173,12 @@ def read_json(name):
         return json.load(f)
 
 
-# patterns 의 {ㄴ받침}: 받침이 ㄴ인 한글 글자 399자 (나온다·한다·간다…의 동사 현재 평서형을 가린다). C# NpcLineFilter.NieunFinal 과 같다
-NIEUN_FINAL = "".join(chr(0xAC00 + i) for i in range(11172) if i % 28 == 4)
-
-
 def compile_forbidden(data):
     """공통 금칙어 (data/forbidden.json). 대사와 낱말의 공백을 지우고 찾는다 — C# NpcLineFilter 와 같은 규칙."""
     groups = []
     for g in data["groups"]:
         words = [SPACE_RE.sub("", w) for w in g.get("words", []) if w.strip()]
-        patterns = [re.compile(p.replace("{ㄴ받침}", NIEUN_FINAL)) for p in g.get("patterns", [])]
+        patterns = [re.compile(p) for p in g.get("patterns", [])]
         groups.append((g["label"], words, patterns))
     return groups
 
@@ -1698,13 +1694,14 @@ PUNCTUATION_RUN_RE = re.compile("[.,!?~…]{2,}")
 
 def collapse_punctuation(line):
     """연달아 붙은 문장 부호를 하나만 남긴다 ("반가워.!"→"반가워.", "하늘아.~"→"하늘아."). 앞의 끝 부호를 남기고, 쉼표와 끝 부호가 붙었으면 끝 부호를 남긴다("고마워,!"→"고마워!").
-    점이 둘 이상이면 말줄임이라 '…' 하나로 바꾼다("그래..."→"그래…"). C# NpcLineChecks.CollapsePunctuation 과 같다."""
+    말줄임('…', 점 둘 이상)으로 시작하면 '…' 하나로 바꾼다("그래..."→"그래…", "고마워,..."→"고마워…"). C# NpcLineChecks.CollapsePunctuation 과 같다."""
     def one(m):
-        run = m.group(0)
-        if run.startswith(".."):
+        marks = m.group(0).replace(",", "")
+        if not marks:
+            return ","
+        if marks[0] == "…" or (marks[0] == "." and len(marks) > 1 and marks[1] in ".…"):
             return "…"
-        marks = run.replace(",", "")
-        return marks[0] if marks else ","
+        return marks[0]
     return PUNCTUATION_RUN_RE.sub(one, line or "")
 
 

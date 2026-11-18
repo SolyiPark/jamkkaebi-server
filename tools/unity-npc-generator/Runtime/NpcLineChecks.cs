@@ -1474,7 +1474,7 @@ namespace Jamkkaebi.Npc
 
         /// <summary>
         /// 연달아 붙은 문장 부호를 하나만 남긴다 ("반가워.!"→"반가워.", "하늘아.~"→"하늘아."). 앞의 끝 부호를 남기고, 쉼표와 끝 부호가 붙었으면 끝 부호를 남긴다("고마워,!"→"고마워!").
-        /// 점이 둘 이상이면 말줄임이라 '…' 하나로 바꾼다("그래..."→"그래…"). run.py 의 collapse_punctuation 과 같다.
+        /// 말줄임('…', 점 둘 이상)으로 시작하면 '…' 하나로 바꾼다("그래..."→"그래…", "고마워,..."→"고마워…"). run.py 의 collapse_punctuation 과 같다.
         /// </summary>
         public static string CollapsePunctuation(string line)
         {
@@ -1484,13 +1484,16 @@ namespace Jamkkaebi.Npc
             }
             return PunctuationRun.Replace(line, m =>
             {
-                string run = m.Value;
-                if (run.StartsWith("..", StringComparison.Ordinal))
+                string marks = m.Value.Replace(",", "");
+                if (marks.Length == 0)
+                {
+                    return ",";
+                }
+                if (marks[0] == '…' || (marks[0] == '.' && marks.Length > 1 && (marks[1] == '.' || marks[1] == '…')))
                 {
                     return "…";
                 }
-                string marks = run.Replace(",", "");
-                return marks.Length > 0 ? marks.Substring(0, 1) : ",";
+                return marks.Substring(0, 1);
             });
         }
 
