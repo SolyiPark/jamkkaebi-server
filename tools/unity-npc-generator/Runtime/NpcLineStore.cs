@@ -17,7 +17,8 @@ namespace Jamkkaebi.Npc
 
     /// <summary>
     /// 파일 하나에 남긴다. 게임은 Application.persistentDataPath 아래 경로를 준다 (예: npc_lines.txt).
-    /// 쓰다가 앱이 꺼져도 앞 파일이 깨지지 않게 임시 파일(.tmp)에 다 쓴 뒤 바꿔 넣는다. 바꿔 넣는 사이에 꺼져 원래 파일이 없으면 임시 파일을 읽는다.
+    /// 쓰다가 앱이 꺼져도 앞 파일이 깨지지 않게 임시 파일(.tmp)에 다 쓴 뒤 바꿔 넣는다. 바꿔 넣는 사이에 꺼져 원래 파일이 없으면 임시 파일을 읽고,
+    /// 다음에 쓸 때 그 임시 파일을 먼저 원래 파일로 올린 뒤 새로 쓴다 (유일한 저장본을 덮어쓰지 않는다, CodeRabbit 리뷰).
     /// </summary>
     public sealed class NpcLineFileStore : INpcLineStore
     {
@@ -54,6 +55,11 @@ namespace Jamkkaebi.Npc
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             {
                 Directory.CreateDirectory(dir);
+            }
+            // 앞에서 바꿔 넣다 꺼져 임시 파일만 남았으면 그것이 유일한 저장본이다(Read 가 그것을 읽었다). 새로 쓰다 실패해도 잃지 않게 먼저 원래 파일로 올려 둔다
+            if (!File.Exists(path) && File.Exists(temp))
+            {
+                File.Move(temp, path);
             }
             File.WriteAllText(temp, text ?? "", new UTF8Encoding(false));
             if (File.Exists(path))

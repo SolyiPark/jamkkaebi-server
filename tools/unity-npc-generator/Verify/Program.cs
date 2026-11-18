@@ -2614,6 +2614,9 @@ public static class Program
         File.Delete(fileStore.Path);
         File.WriteAllText(fileStore.Path + ".tmp", "셋", new UTF8Encoding(false));
         Check(fileStore.Read() == "셋", "원래 파일이 없으면 임시 파일을 읽음");
+        // 임시 파일이 유일한 저장본일 때 다음 쓰기는 그것을 먼저 원래 파일로 올린 뒤 쓴다 (덮어쓰다 실패해도 잃지 않게, CodeRabbit 리뷰)
+        fileStore.Write("넷");
+        Check(fileStore.Read() == "넷" && File.Exists(fileStore.Path) && !File.Exists(fileStore.Path + ".tmp"), "임시 파일만 남은 뒤에도 새로 쓰고 원래 파일로 바꿔 넣음");
         Directory.Delete(dir, true);
 
         // 5) 요청 관리자: 한 판에서 만든 대사를 남기고, 다음 판(새 관리자)이 읽어 모델 없이 바로 쓴다
@@ -2708,6 +2711,61 @@ public static class Program
         // ④ '보름달'은 정해진 날 수가 아니다
         Check(NpcLineSlots.Slotify("보름달처럼 반짝여, 고마워!", nineDays) == "보름달처럼 반짝여, 고마워!" && NpcLineSlots.Slotify("보름 만이야!", nineDays) == null,
                 "'보름달'은 보관하고 '보름 만'은 보관하지 않음");
+
+        // CodeRabbit 리뷰: 쓸 수 있는 대사만 세고, 꽉 찬 칸은 이 요청에 못 쓰는 것을 비워 새로 넣는다
+        Func<string, ReactionRequest> tapWith = nick =>
+        {
+            ReactionRequest r = Request(8, InteractionMode.Owner, NpcInputs.Tap, NpcActions.Greet);
+            r.Situation = "주인이 낮에 너를 보러 찾아왔다.";
+            r.Facts.Add(new Fact(NpcFactKeys.TimeOfDay, "낮"));
+            if (nick != null)
+            {
+                r.Nickname = nick;
+                r.Intimacy = NpcAddress.NicknameLevel;
+            }
+            return r;
+        };
+        ReactionRequest shortNick = tapWith("도윤");
+        ReactionRequest longNick = tapWith("가나다라마바사아자차카타파하가나다라마바사");
+        var usableCache = new NpcLineCache { MaxPerKey = 2 };
+        usableCache.AddTemplate(shortNick, ReactionResult.Success("u1", "greet", NpcTargets.Player, "도윤, 어서 와 줘서 고마워!", ReactionSource.Slm, null));
+        usableCache.AddTemplate(shortNick, ReactionResult.Success("u2", "greet", NpcTargets.Player, "도윤, 낮에 와서 반가워!", ReactionSource.Slm, null));
+        Check(usableCache.TemplateCount(longNick) == 2 && usableCache.UsableTemplateCount(longNick, 20) == 0 && usableCache.UsableTemplateCount(shortNick, 20) == 2,
+                "긴 닉네임을 넣으면 길이를 넘는 대사는 그 요청이 쓸 수 있는 수로 세지 않음");
+        Check(usableCache.AddTemplate(longNick, ReactionResult.Success("u3", "greet", NpcTargets.Player, "왔구나, 순찰 중이었어!", ReactionSource.Slm, null), 20)
+                && usableCache.TemplateCount(longNick) == 2 && usableCache.UsableTemplateCount(longNick, 20) == 1 && usableCache.UsableTemplateCount(shortNick, 20) == 2,
+                "꽉 찬 칸에 이 요청이 못 쓰는 가장 오래된 것을 비우고 넣음 (짧은 닉네임은 남은 것과 새것을 그대로 씀)");
+        Check(!usableCache.AddTemplate(shortNick, ReactionResult.Success("u4", "greet", NpcTargets.Player, "드디어 왔구나, 기다렸어!", ReactionSource.Slm, null), 20),
+                "쓸 수 있는 대사로 꽉 찼으면 넣지 않음");
+        var longBackend = new FakeBackend();
+        var longSlm = new SlmReactionGenerator(longBackend, assembler, validator);
+        longSlm.LoadAsync(CancellationToken.None).Wait();
+        var longManager = new NpcRequestManager(longSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), RefillAfterUse = true };
+        longManager.Cache.AddTemplate(shortNick, ReactionResult.Success("l1", "greet", NpcTargets.Player, "도윤, 어서 와 줘서 고마워!", ReactionSource.Slm, null));
+        longManager.Cache.AddTemplate(shortNick, ReactionResult.Success("l2", "greet", NpcTargets.Player, "도윤, 낮에 와서 반가워!", ReactionSource.Slm, null));
+        longBackend.Replies.Enqueue(Out("greet", "player", "왔구나, 순찰 중이었어!"));
+        longBackend.Replies.Enqueue(Out("greet", "player", "드디어 왔구나, 기다렸어!"));
+        longBackend.Replies.Enqueue(Out("greet", "player", "어서 와, 갓 끈 고쳐 맸어!"));
+        int beforeLong = longBackend.Calls;
+        NpcResponse longLive = Ask(longManager, longNick);
+        int maxLen = longSlm.MaxLineLength(NpcInputs.Tap);
+        Check(longLive.Note != NpcRequestManager.PrefetchedNote && longManager.PrefetchCompletion.Wait(5000) && longManager.Cache.UsableTemplateCount(longNick, maxLen) == 2
+                && longBackend.Calls == beforeLong + 3,
+                "긴 닉네임 요청이 빗나가면 그 요청이 쓸 수 있는 대사를 탭 목표(2개)만큼 다시 만듦 ← 쓸 수 있는 " + longManager.Cache.UsableTemplateCount(longNick, maxLen)
+                + "개, 모델 " + (longBackend.Calls - beforeLong) + "번");
+
+        // CodeRabbit 리뷰: 버리는 관리자는 저장소를 닫는다 — 닫은 뒤에는 다시 만들기·저장이 같은 파일에 쓰지 않는다
+        var closingStore = new MemoryLineStore();
+        var closing = new NpcRequestManager(refillSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), RefillAfterUse = true };
+        closing.LoadStore(closingStore, "v1");
+        closing.CloseStore(true, TimeSpan.FromSeconds(5));
+        string closedText = closingStore.Text;
+        refillBackend.Reply = Out(clearAction, "player", "몸이 개운하고 가벼워, 고마워!");
+        Ask(closing, clear2);
+        closing.PrefetchCompletion.Wait(5000);
+        Thread.Sleep(200); // 뒤에서 하는 저장(SaveSoon)이 돌 틈
+        Check(closedText != null && closing.Store == null && !closing.SaveStore() && closingStore.Text == closedText,
+                "닫을 때 한 번 쓰고 떼어, 그 뒤의 요청·다시 만들기는 같은 파일에 쓰지 않음");
     }
 
     // 메모리 안의 저장소 (파일 대신)

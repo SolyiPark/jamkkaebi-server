@@ -253,6 +253,41 @@ namespace Jamkkaebi.Npc
             }
         }
 
+        /// <summary>
+        /// 이 관리자를 버리기 전에 부른다 (화면 종료·판 다시 돌리기·앱 종료). 미리 만들기와 쓴 만큼 다시 만들기를 멈추고(최대 wait 만큼 기다린다),
+        /// save 면 지금 내용을 한 번 쓴 뒤 저장소를 뗀다. 뗀 뒤에는 뒤에서 기다리던 저장도 쓰지 않는다 — 버린 관리자가 늦게 쓴 저장이 다음 관리자(같은 파일)의 내용을
+        /// 덮어쓰지 않게 한다 (CodeRabbit 리뷰). 쓰기 잠금이 관리자마다라서 관리자끼리는 서로 막지 못한다.
+        /// </summary>
+        public void CloseStore(bool save, TimeSpan wait)
+        {
+            CancelPrefetch();
+            try
+            {
+                PrefetchCompletion.Wait(wait);
+            }
+            catch (AggregateException)
+            {
+                // 미리 만들기의 오류는 덤이다
+            }
+            lock (storeWriteGate)
+            {
+                if (save)
+                {
+                    SaveStore();
+                }
+                lock (gate)
+                {
+                    store = null;
+                }
+            }
+        }
+
+        private int MaxLineLength(ReactionRequest request)
+        {
+            SlmReactionGenerator generator = slm as SlmReactionGenerator;
+            return generator != null ? generator.MaxLineLength(request.Input) : int.MaxValue;
+        }
+
         // 바뀐 것을 뒤에서 쓴다. 이미 쓰려고 기다리는 것이 있으면 그것이 이번 변경까지 쓴다
         private void SaveSoon()
         {
@@ -635,7 +670,8 @@ namespace Jamkkaebi.Npc
         // 한 상황의 대사를 목표 수만큼 만든다. 요청 때문에 취소되면 false(나중에 이어 만든다), 다 만들었거나 포기했으면 true
         private async Task<bool> RunPrefetchJob(PrefetchJob job)
         {
-            while ((job.IsTemplate ? Cache.TemplateCount(job.Template) : Cache.Count(job.Template)) < job.Count && job.Failures < 3)
+            // 칸 있는 대사는 이 요청이 쓸 수 있는 것만 센다 (긴 닉네임을 넣으면 길이를 넘는 대사는 세지 않는다)
+            while ((job.IsTemplate ? Cache.UsableTemplateCount(job.Template, MaxLineLength(job.Template)) : Cache.Count(job.Template)) < job.Count && job.Failures < 3)
             {
                 if (!IsQueued(job))
                 {
@@ -684,7 +720,7 @@ namespace Jamkkaebi.Npc
                         job.Failures++;
                         continue;
                     }
-                    if (!result.IsSuccess || !(job.IsTemplate ? Cache.AddTemplate(job.Template, result) : Cache.Add(job.Template, result)))
+                    if (!result.IsSuccess || !(job.IsTemplate ? Cache.AddTemplate(job.Template, result, MaxLineLength(job.Template)) : Cache.Add(job.Template, result)))
                     {
                         // 검사에 걸렸거나 보관한 대사·최근 대사와 90% 이상 겹침 → 다음 곁들일 거리·첫 낱말로 다시
                         job.Failures++;

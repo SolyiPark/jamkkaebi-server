@@ -194,6 +194,15 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public bool AddTemplate(ReactionRequest request, ReactionResult result)
         {
+            return AddTemplate(request, result, int.MaxValue);
+        }
+
+        /// <summary>
+        /// maxLength 는 출력 검사의 길이 제한(여유 포함). 칸이 꽉 찼으면 <b>이 요청에 못 쓰는</b> 가장 오래된 대사(긴 닉네임을 넣으면 길이를 넘는 것 등)를 비우고 넣는다 —
+        /// 그대로 두면 다시 만들기가 꽉 찬 칸을 보고 아무것도 만들지 않아, 같은 요청이 계속 빗나갔다 (CodeRabbit 리뷰). 쓸 수 있는 대사로 꽉 찼으면 넣지 않는다.
+        /// </summary>
+        public bool AddTemplate(ReactionRequest request, ReactionResult result, int maxLength)
+        {
             if (request == null || result == null || !result.IsSuccess || string.IsNullOrEmpty(result.Line))
             {
                 return false;
@@ -207,16 +216,22 @@ namespace Jamkkaebi.Npc
             lock (gate)
             {
                 List<Entry> live = LiveForWrite(key);
-                if (live.Count >= MaxPerKey)
-                {
-                    return false;
-                }
                 foreach (Entry entry in live)
                 {
                     if (NpcLineChecks.Similar(slotted, entry.Result.Line) != null)
                     {
                         return false;
                     }
+                }
+                if (live.Count >= MaxPerKey)
+                {
+                    SlotValues actual = SlotValues.FromRequest(request);
+                    int unusable = live.FindIndex(entry => FilledIfUsable(entry.Result, request, actual, maxLength) == null);
+                    if (unusable < 0)
+                    {
+                        return false;
+                    }
+                    live.RemoveAt(unusable); // 가장 오래된 것부터 (넣은 차례대로 들어 있다)
                 }
                 live.Add(new Entry
                 {
@@ -254,12 +269,8 @@ namespace Jamkkaebi.Npc
                 for (int i = 0; i < live.Count; i++)
                 {
                     ReactionResult stored = live[i].Result;
-                    string filled = NpcLineSlots.Fill(stored.Line, actual);
-                    if (filled == null
-                            || filled.Length > maxLength
-                            || NpcLineChecks.TimeContradiction(filled, actual.TimeWord) != null
-                            || NpcLineChecks.AddressContradiction(filled, request.Nickname, request.Familiar) != null
-                            || NpcOutputValidator.RecordConflict(filled, request) != null)
+                    string filled = FilledIfUsable(stored, request, actual, maxLength);
+                    if (filled == null)
                     {
                         continue; // 이 요청에는 못 쓰는 대사 — 다른 요청을 위해 둔다
                     }
@@ -289,6 +300,43 @@ namespace Jamkkaebi.Npc
                 }
                 return null;
             }
+        }
+
+        /// <summary>
+        /// 그 상황의 칸 있는 대사 중 <b>이 요청이 쓸 수 있는</b> 수 (칸을 채운 뒤 길이·시간대·호칭·방문 기록이 맞는 것). 쓴 만큼 다시 만들기가 이것으로 모자란 수를 센다 —
+        /// 긴 닉네임을 넣으면 길이를 넘는 대사만 남았을 때 "보관함이 찼다"고 보고 만들지 않던 것을 막는다 (CodeRabbit 리뷰).
+        /// </summary>
+        public int UsableTemplateCount(ReactionRequest request, int maxLength)
+        {
+            if (request == null)
+            {
+                return 0;
+            }
+            SlotValues actual = SlotValues.FromRequest(request);
+            lock (gate)
+            {
+                int usable = 0;
+                foreach (Entry entry in Live(TemplateKeyOf(request)))
+                {
+                    usable += FilledIfUsable(entry.Result, request, actual, maxLength) != null ? 1 : 0;
+                }
+                return usable;
+            }
+        }
+
+        // 칸을 채운 대사. 이 요청에 못 쓰면 null (넣을 값이 없음·길이 넘음·시간대·호칭·방문 기록과 어긋남)
+        private static string FilledIfUsable(ReactionResult stored, ReactionRequest request, SlotValues actual, int maxLength)
+        {
+            string filled = NpcLineSlots.Fill(stored.Line, actual);
+            if (filled == null
+                    || filled.Length > maxLength
+                    || NpcLineChecks.TimeContradiction(filled, actual.TimeWord) != null
+                    || NpcLineChecks.AddressContradiction(filled, request.Nickname, request.Familiar) != null
+                    || NpcOutputValidator.RecordConflict(filled, request) != null)
+            {
+                return null;
+            }
+            return filled;
         }
 
         /// <summary>그 상황으로 보관된 대사 수 (오래된 것은 먼저 버린다).</summary>

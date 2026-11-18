@@ -180,7 +180,9 @@ NpcResponse response = await manager.RequestAsync(builder.Build(input).Request, 
       manager.PrefetchTemplate(template, 1);
   }
   // 그 뒤로는 요청만 한다. 띄운 뒤 그 상황의 대사를 쓴 만큼(RefillTarget: 탭 인사 2, 나머지 1) 뒤에서 다시 만들고, 바뀔 때마다 뒤에서 파일을 고쳐 쓴다
-  // 앱을 내릴 때(OnApplicationPause·OnApplicationQuit) manager.SaveStore() 를 한 번 더 부른다
+  // 앱을 내릴 때(OnApplicationPause) manager.SaveStore() 를 한 번 더 부른다.
+  // 관리자를 버릴 때(화면 종료·OnApplicationQuit·새 관리자로 바꿀 때)는 manager.CloseStore(true, TimeSpan.FromSeconds(3)) —
+  // 다시 만들기를 멈추고 한 번 쓴 뒤 저장소를 떼어, 버린 관리자가 늦게 쓴 저장이 새 관리자의 파일을 덮어쓰지 않게 한다
   ```
   - **파일**: `npc_lines.txt` 한 개. 칸 있는 대사(`T` 줄)와 시나리오별 최근 띄운 대사(`R` 줄, 앱을 다시 켜도 같은 말을 거듭하지 않게)를 남긴다. 임시 파일에 다 쓴 뒤 바꿔 넣어, 쓰다가 꺼져도 앞 파일이 깨지지 않는다.
   - **오래 둔다**: 칸 있는 대사는 30일(`Cache.TemplateMaxAge`) 둔다. 서버 값에 달린 기존 보관함(`Prefetch`, 30분)은 파일에 남기지 않는다.

@@ -124,6 +124,8 @@ namespace Jamkkaebi.Npc
             bool released = manager != null || model != null;
             if (manager != null)
             {
+                // 앞 판의 다시 만들기·뒤에서 하는 저장을 멈추고 저장소를 뗀다 — 늦게 쓴 저장이 다음 판의 npc_lines.txt 를 덮어쓰지 않게 (CodeRabbit 리뷰)
+                manager.CloseStore(true, TimeSpan.FromSeconds(3));
                 manager.CancelAll();
                 manager = null;
             }
