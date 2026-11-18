@@ -1024,7 +1024,7 @@ namespace Jamkkaebi.Npc
         /// </summary>
         // 남의 솜씨를 보고 하는 칭찬 ("대단하네", "멋지구나"). 자기 이야기(관리 감사·안부·지난 대화)에서 만든 솜씨 낱말과 함께 나오고 '내'가 없으면
         // 자기 것을 남의 솜씨처럼 말한 것이다: "정말? 그렇게 공들인 거라면 대단하네." (2026-11-18 23:45 시험 S14 #3 — 자기 것의 이름이 없어 SubjectContradiction 이 놓쳤다)
-        private static readonly Regex CraftPraiseEnding = new Regex("(?:대단|훌륭|굉장|근사|놀랍|놀라우|멋지|멋있|멋진|훌륭)(?:하네|하구나|하다|하군|네|구나|다|군|어|아)|잘 ?만들었(?:네|구나|다)",
+        private static readonly Regex CraftPraiseEnding = new Regex("(?:대단|훌륭|굉장|근사)(?:하네|하구나|하다|하군|해)|(?:멋지|놀랍)(?:네|구나|다|군)|멋있(?:네|구나|다|군|어)|멋져|놀라워|잘 ?만들었(?:네|구나|다)",
                 RegexOptions.CultureInvariant);
         private static readonly Regex SelfMarker = new Regex("(?<![가-힣])(?:내|나|나의|내가|나는|난|우리)(?![가-힣])", RegexOptions.CultureInvariant);
         private static readonly string[] SelfTalkActions = { NpcActions.ThankCalm, NpcActions.ThankJoyful, NpcActions.AnswerStatus, NpcActions.RecallTalk };

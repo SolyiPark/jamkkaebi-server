@@ -1651,7 +1651,9 @@ public static class Program
                 && NpcLineChecks.CraftPraise("내 자개는 공들여 만든 거라 대단하지!", NpcActions.RecallTalk) == null
                 && NpcLineChecks.CraftPraise("나 공들여 만든 거 멋지지?", NpcActions.RecallTalk) == null
                 && NpcLineChecks.CraftPraise("공들여 꾸민 전시관이 멋지네!", NpcActions.WanderGreet) == null
-                && NpcLineChecks.CraftPraise("개운하게 관리해줘서 고마워, 정말 멋지다!", NpcActions.ThankCalm) == null,
+                && NpcLineChecks.CraftPraise("개운하게 관리해줘서 고마워, 정말 멋지다!", NpcActions.ThankCalm) == null
+                && NpcLineChecks.CraftPraise("그렇게 공들였다니 대단해.", NpcActions.RecallTalk) == "대단해"
+                && NpcLineChecks.CraftPraise("멋진 걸 공들여 만들었지.", NpcActions.RecallTalk) == null,
                 "솜씨 칭찬: 자기 이야기에서 솜씨 낱말 + 칭찬이고 '내·나·우리'가 없을 때만 (손님 관람·솜씨 낱말 없는 칭찬은 통과)");
         // 2026-11-18 23:45 시험 S06 #4: "어서 왔어?"를 "어서 와"로 고치며 물음표가 남아 "어서 와? 또 왔네."
         Check(NpcLineChecks.NormalizeSpeech("어서 왔어? 오랜만이야.", "반말", "향산이", null, null, "오늘, 3일 전", "발굴자") == "어서 와! 또 왔네."
