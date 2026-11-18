@@ -1249,7 +1249,7 @@ HONORIFIC_WORDS = [
 # 고칠 수 있는 것은 고치고(아래), 못 고친 것은 공통 금칙어 awkward 묶음이 거른다. C# NpcLineChecks.FixAwkward 와 같다
 QUOTED_ASK_RE = re.compile(r"([가-힣]*[아어여해])\s?달라고\s?(?:부탁|요청|말)(?:드리고\s?싶(?:어요|어|습니다)|하고\s?싶(?:어요|어)|드립니다|드려요|드릴게요|드릴게|드려|해요|했어요|했어|했다|했네|합니다|할게요|할게|하다|해)?")
 # "어서 왔어?"를 "어서 와"로 고치면서 물음표를 남기면 "어서 와?"가 된다 (2026-11-18 23:45 시험 S06 #4 "어서 와? 또 왔네."). 인사라 "!"로 바꾼다
-ARRIVE_RE = re.compile(r"어서\s?(?:왔(?:어요|어|네요|네|구나|지)|와(?![가-힣]))(\?+)?")
+ARRIVE_RE = re.compile(r"어서,?\s?(?:왔(?:어요|어|네요|네|구나|지)|와(?![가-힣]))(\?+)?")
 
 
 # "편하게 구경해 줘"는 손님에게 구경을 부탁하는 말이라 어색하다(2026-11-16 시험 S05 #2·#3). 권하는 말로 "구경해"라고 한다
@@ -1520,7 +1520,7 @@ def fix_no_record(line, variant=0):
     # 못 고치는 것은 그대로 두어 출력 검사가 기록과 어긋남으로 거른다
     # "오랜만에 보네"는 지우지 않고 뜻이 같은 말로 바꾼다 (22:07 시험: 남겨 두자 기록과 어긋남으로 거르고 다시 만들어 시도가 늘었다)
     # "오랜만에 보자"도 같다 (22:16 시험 S22 #3: 못 고쳐 기록과 어긋남으로 걸렸다)
-    line = re.sub("오(?:랜|래간)만에 ?(?:보는구나|보네|보는걸|보자|만났네|만났구나|마주쳤네)", greeting, line)
+    line = re.sub("오(?:랜|래간)만에 ?(?:보는구나|보네|보는걸|보자(?![가-힣])|만났네|만났구나|마주쳤네)", greeting, line)
     line = re.sub("오(?:랜|래간)만에 ?보니", "만나니", line)
     line = re.sub("오(?:랜|래간)만에 ?봐서", "만나서", line)
     line = re.sub("오(?:랜|래간)만에 ?(?=(?:왔|와|오|찾아|들렀|돌아|방문|놀러|만나|만났|마주))", "", line)
@@ -1759,6 +1759,24 @@ def player_third_person(line, call_name):
 THANKS_OVERLAP_RE = re.compile(r"덕분에\s*(관리해|닦아)\s?(줘서)")
 
 
+# 관리는 늘 플레이어가 한다. 도깨비가 자기를 관리한 쪽으로 말한 주어("개운하게 도깨비가 관리해줘서 고마워", "내가 닦아 줘서")는 지운다 — 주어를 빼면 받은 쪽에서 고마워하는 말이 된다 (2026-11-19). C# NpcLineChecks.FixCareGiver 와 같다
+SELF_CARE_GIVER_RE = re.compile(r"(?<![가-힣])(?:도깨비(?:가|는|께서)|내가|나는|난)\s?(?=(?:관리|닦|챙겨|챙기|돌봐|돌보|깨워|씻겨)[가-힣]*\s?(?:줘서|주어서|줬|준|주니))")
+# 실화 이야기는 늘 도깨비가 들려주고 플레이어는 듣는다. "자개 반짝임 얘기해줘서 고마워"처럼 플레이어가 이야기한 것으로 말하면 "얘기 들어줘서"로 바꾼다 (2026-11-19). C# NpcLineChecks.FixStoryTeller 와 같다
+PLAYER_TOLD_RE = re.compile(r"(얘기|이야기)\s?(?:를\s?)?해(\s?)(줘서|주어서|줬|준|주니)")
+PLAYER_TOLD_TO_RE = re.compile(r"들려(\s?)(줘서|주어서|줬|준|주니)")
+
+
+def fix_care_giver(line):
+    return SELF_CARE_GIVER_RE.sub("", line) if line else line
+
+
+def fix_story_teller(line):
+    if not line:
+        return line
+    line = PLAYER_TOLD_RE.sub(r"\1 들어\2\3", line)
+    return PLAYER_TOLD_TO_RE.sub(r"들어\1\2", line)
+
+
 def fix_thanks_overlap(line):
     return THANKS_OVERLAP_RE.sub(lambda m: m.group(1) + " " + m.group(2), line or "")
 
@@ -1824,7 +1842,7 @@ def normalize_speech(line, label, name=None, own_things=None, nickname=None, vis
     if not line:
         return line
     # "덕분에, 관리해 줘서 고마워."처럼 첫 낱말 뒤에 쉼표를 찍으면 어색하다 (첫 낱말을 정해 준 뒤 생겼다)
-    line = collapse_double_verb(fix_starter_adverb(STARTER_COMMA_RE.sub(r"\1 ", strip_trailing_interjection(drop_repeated_word(drop_repeated_lead(guest_to_friend(strip_address(fix_thanks_overlap(fix_typos(_apply_speech(line, label))), name)))))), call_name))
+    line = collapse_double_verb(fix_starter_adverb(STARTER_COMMA_RE.sub(r"\1 ", strip_trailing_interjection(drop_repeated_word(drop_repeated_lead(guest_to_friend(strip_address(fix_care_giver(fix_story_teller(fix_thanks_overlap(fix_typos(_apply_speech(line, label))))), name)))))), call_name))
     line = drop_player_reference(player_pronouns_to_name(unify_player_call(fix_statement_question(line), call_name, nickname), call_name), call_name)
     # 말줄임을 합치면 '?'가 어미 바로 뒤로 온다 ("기분이 좋구나...?"→"기분이 좋구나?"). 이때 평서 어미의 '?'를 한 번 더 고친다 (CodeRabbit 리뷰)
     return fix_statement_question(collapse_punctuation(line))
@@ -2167,6 +2185,8 @@ def _own_predicate(rest):
 # 남의 솜씨를 보고 하는 칭찬 ("대단하네", "멋지구나"). 자기 이야기에서 만든 솜씨 낱말과 함께 나오고 '내'가 없으면 자기 것을 남의 솜씨처럼 말한 것이다:
 # "정말? 그렇게 공들인 거라면 대단하네." (2026-11-18 23:45 시험 S14 #3 — 자기 것의 이름이 없어 subject_contradiction 이 놓쳤다). C# NpcLineChecks.CraftPraise 와 같다
 CRAFT_PRAISE_RE = re.compile("(?:대단|훌륭|굉장|근사)(?:하네|하구나|하다|하군|해)|(?:멋지|놀랍)(?:네|구나|다|군)|멋있(?:네|구나|다|군|어)|멋져|놀라워|잘 ?만들었(?:네|구나|다)")
+# 상대가 해 준 관리를 칭찬한 것("정성껏 닦아 줘서 고마워, 정말 멋져!")은 자기 솜씨 칭찬이 아니다 (CodeRabbit 리뷰)
+CARE_THANKS_RE = re.compile("(?:닦|관리|챙|돌봐|돌보|씻|깨워)[가-힣 ]{0,4}(?:줘서|주어서|줬|준|주니|받아서|받으니)")
 SELF_MARKER_RE = re.compile("(?<![가-힣])(?:내|나|나의|내가|나는|난|우리)(?![가-힣])")
 
 
@@ -2176,7 +2196,7 @@ def craft_praise(line, action):
         return None
     for sentence in re.split(r"(?<=[.!?…~])\s+", line):
         praise = CRAFT_PRAISE_RE.search(sentence)
-        if praise and CRAFT_RE.search(sentence) and not SELF_MARKER_RE.search(sentence):
+        if praise and CRAFT_RE.search(sentence) and not SELF_MARKER_RE.search(sentence) and not CARE_THANKS_RE.search(sentence):
             return praise.group(0)
     return None
 
@@ -2209,6 +2229,31 @@ def subject_contradiction(line, own_things):
 CRAFT_NE_RE = re.compile("(었|았|였|했)네([.!?…~]|$)")
 
 
+# 지난 대화를 "~던 일"로 끝내면 말이 끝나지 않는다 → "~던 일이 기억나." (앞의 "기억난다,"는 겹치므로 뗀다). C# NpcLineChecks.FixRecallFragment 와 같다
+RECALL_FRAGMENT_END_RE = re.compile("던 일([.!…~]*)$")
+RECALL_LEAD_RE = re.compile(r"^(?:기억난다|기억나|생각난다|생각나)[,.!]?\s*")
+
+
+def fix_recall_fragment(line):
+    if not line or not RECALL_FRAGMENT_END_RE.search(line):
+        return line
+    line = RECALL_LEAD_RE.sub("", line)
+    return RECALL_FRAGMENT_END_RE.sub(lambda m: "던 일이 기억나" + (m.group(1) or "."), line)
+
+
+def fix_bare_own_thing(line, own_things):
+    """자기 솜씨를 말하면서 자기 것을 '내' 없이 맨 이름으로 말하면("기억난다, 자개 공들여 만들었다고 자랑했던 일") 남의 자개처럼 들린다 → '내 자개'. 조사가 없어 주체 검사도 놓쳤다 (2026-11-19 --live-store). C# NpcLineChecks.FixBareOwnThing 과 같다. '몸'·'모습'은 상대의 것일 수 있어 고치지 않는다."""
+    if not line or not own_things or not CRAFT_RE.search(line) or SELF_MARKER_RE.search(line):
+        return line  # 이미 '내·나·우리'로 자기 것이라고 했으면 그대로
+    # 가장 앞의 자기 것 하나에만 붙인다. 주어(이·가·은·는)로 쓴 것은 붙이지 않고 주체 검사(SubjectContradiction)가 거르게 둔다. '빛·반짝임'은 속성이라 뺀다("빛이 비쳐"를 "내 빛이"로 바꾸지 않는다)
+    things = [t for t in own_things if t and t not in ("몸", "모습", "빛", "반짝임")]
+    found = [m for t in things for m in [re.search("(?<![가-힣])" + re.escape(t) + "(?=(?:을|를|도|의|과|와|랑|만|에|처럼)?(?![가-힣]))", line)] if m]
+    if not found:
+        return line
+    first = min(found, key=lambda m: m.start())
+    return line[:first.start()] + "내 " + line[first.start():]
+
+
 def fix_craft_spectator(line):
     """자기 솜씨를 말하는 문장이 구경하듯 '~었네'로 끝나면 '~었어'로 고친다 ("내 자개 공들여 만들었네" → "…만들었어"). 자기 이야기에는 알아챈 어미를 쓰지 않는다.
     C# NpcLineChecks.FixCraftSpectator 와 같다."""
@@ -2232,6 +2277,10 @@ def fix_own_possessive(line, own_things):
     demo = [t for t in things if t not in ("몸", "모습")]
     if demo:
         line = re.sub("(?<![가-힣])(?:그|이|저)(\\s?)(" + "|".join(re.escape(t) for t in demo) + ")", lambda m: "내" + m.group(1) + m.group(2), line)
+        # 앞에 아무것도 없이 자기 것을 말하며 솜씨를 이야기하면("기억난다, 자개 공들여 만들었다고 자랑했던 일") 자개 주인이 남처럼 들린다 (2026-11-19). 같은 마디에 만든 솜씨 낱말이 있으면 '내'를 붙인다. 주어(자개가·자개는)로 쓴 것은 붙이지 않는다 — 남의 솜씨처럼 말한 "자개가 정성스럽게 만들어졌네"는 고치지 않고 주체 검사가 거른다
+        bare = re.compile("(?<![가-힣])(?<!내 )(?<!나의 )(?<!우리 )(?<!제 )(" + "|".join(re.escape(t) for t in demo) + ")(?![이가은는](?![가-힣]))"
+                          "(?=[^,.!?…~]*?(?:" + CRAFT_RE.pattern + "))")
+        line = bare.sub(lambda m: "내 " + m.group(1), line, count=1)
     return line
 
 
@@ -2348,8 +2397,9 @@ def needs_ask(scene):
 
 # 첫 낱말 '개운하게·깨끗하게'(정화 대사, STARTERS clear)는 뒤의 움직임말을 꾸민다 ("개운하게 관리해 줘서 고마워"). 모델이 뒤를 다른 말로 이으면
 # "개운하게 덕분에 기분이 좋네"·"개운하게 돌아온 발굴자, 오랜만에 관리해줘서 고마워"처럼 어색하다 (2026-11-18 --live-store 미리 만든 정화 대사). C# NpcLineChecks.FixStarterAdverb 와 같다
-STARTER_ADVERB_RE = re.compile(r"^(개운|깨끗)하게\s+([가-힣]+)(\s*)")
-STARTER_VOCATIVE_RE = re.compile(r"^(개운|깨끗)하게\s+[가-힣]+\s+([가-힣]+)\s*,\s*")
+# 가로 공백만 본다 — 줄바꿈("개운하게\n덕분에…")은 그대로 두어 줄바꿈 검사가 거르게 한다 (CodeRabbit 리뷰)
+STARTER_ADVERB_RE = re.compile(r"^(개운|깨끗)하게[ \t]+([가-힣]+)([ \t]*)")
+STARTER_VOCATIVE_RE = re.compile(r"^(개운|깨끗)하게[ \t]+[가-힣]+[ \t]+([가-힣]+)[ \t]*,[ \t]*")
 # '~하게'가 꾸밀 수 있는 움직임말. 첫 마디(쉼표·문장 끝 앞) 안에 하나라도 있으면 자연스럽다 ("개운하게 오랜만에 나를 관리해줘서")
 ADVERB_FOLLOWERS = ("관리해", "관리받", "닦", "씻", "해", "돌봐", "돌보", "챙겨", "챙기", "만들", "다듬", "정리", "손질", "가꿔", "가꾸", "보살", "치워", "털어",
                     "빛나", "빛날", "반짝", "맑아", "느껴", "깨어", "깨워", "일어", "되", "됐", "돼", "지내", "쉬")
@@ -2595,18 +2645,28 @@ def speech_fixed(said, action, scene, persona, no_record_variant=0):
         if action in GREETING_ACTIONS:
             line = fix_greeting_tail(line)
     if action in SELF_TALK_ACTIONS:
-        line = fix_craft_spectator(line)
+        line = fix_bare_own_thing(fix_craft_spectator(line), persona.get("ownThings"))
+    if action == "recall_talk":
+        line = fix_recall_fragment(line)
     return line
 
 
-def pick_no_record_variant(said, action, scene, persona, recent):
-    """기록 없는 '오랜만'을 바꿔 넣은 말 때문에 최근 대사와 같아지면 다른 말(NO_RECORD_GREETINGS)을 고른다. 고칠 '오랜만'이 없거나 다 겹치면 0. C# NpcOutputValidator 와 같다."""
+def pick_no_record_variant(said, action, scene, persona, recent, limit=None, truncated=False):
+    """기록 없는 '오랜만'을 바꿔 넣은 말 때문에 최근 대사와 같아지면 다른 말(NO_RECORD_GREETINGS)을 고른다. 고칠 '오랜만'이 없거나 다 겹치면 0. C# NpcOutputValidator 와 같다.
+    견주는 것은 길이에 맞춰 줄인 뒤의 대사(마지막 반복 검사와 같은 글)이고, 인사에 지어낸 사정이 남는 말은 건너뛴다 (CodeRabbit 리뷰)."""
     if not recent or not no_record_applies(scene) or not LONG_ABSENCE_RE.search(said or ""):
         return 0
-    if find_similar(speech_fixed(said, action, scene, persona, 0), recent) is None:
+
+    def comparable(variant):
+        line = speech_fixed(said, action, scene, persona, variant)
+        fitted = fit_sentences(line, limit + LENGTH_TOLERANCE, truncated) if limit is not None and line else None
+        return fitted if fitted is not None else line
+
+    if find_similar(comparable(0), recent) is None:
         return 0
     for variant in range(1, len(NO_RECORD_GREETINGS)):
-        if find_similar(speech_fixed(said, action, scene, persona, variant), recent) is None:
+        line = comparable(variant)
+        if greeting_probe(line, action) is None and find_similar(line, recent) is None:
             return variant
     return 0
 
@@ -2626,7 +2686,7 @@ def evaluate(obj, scene, persona, limit, forbidden_groups, truncated=False, norm
             target = only_targets[0]
     said = clean_line(obj.get("line", ""))
     # 게임처럼 검사 전에 흔한 어미를 그 도깨비 말투로 고친다 (--no-normalize 면 고치지 않는다)
-    full_line = speech_fixed(said, action, scene, persona, pick_no_record_variant(said, action, scene, persona, recent)) if normalize else said
+    full_line = speech_fixed(said, action, scene, persona, pick_no_record_variant(said, action, scene, persona, recent, limit, truncated)) if normalize else said
     prefix = ask_prefix(scene, variation)
     ask_filled = False
     if prefix and full_line:

@@ -120,7 +120,8 @@ namespace Jamkkaebi.Npc
             Cache = new NpcLineCache();
             UsePrefetched = true;
             PrefetchTimeout = TimeSpan.FromSeconds(30);
-            RefillTarget = request => request.Input == NpcInputs.Tap ? 2 : 1;
+            RefillTarget = request => request.Input == NpcInputs.Tap || request.Input == NpcInputs.Visit ? 2 : 1;
+            SaveDelay = TimeSpan.FromSeconds(1);
             // 꺼낼 때 지금 규칙의 출력 검사를 한 번 더 한다 (파일에 남겨 둔 대사는 그 뒤에 바뀐 규칙을 모르고 만들어졌을 수 있다)
             SlmReactionGenerator generator = slm as SlmReactionGenerator;
             if (generator != null)
@@ -137,7 +138,7 @@ namespace Jamkkaebi.Npc
         public bool RefillAfterUse { get; set; }
 
         /// <summary>
-        /// 쓴 뒤 그 상황에 채워 둘 칸 있는 대사 수. 기본: 탭 인사 2(자주 해서 다시 만들기가 끝나기 전에 또 올 수 있다), 나머지 1(쓴 만큼 하나).
+        /// 쓴 뒤 그 상황에 채워 둘 칸 있는 대사 수. 기본: 탭 인사·손님 관람 2(자주 하거나 여러 친구가 잇달아 와 다시 만들기가 끝나기 전에 또 올 수 있다), 나머지 1(쓴 만큼 하나).
         /// 정화는 상태(선명·흐려짐·재봉인)마다 열쇠가 따로라, 쓴 상태의 대사 하나만 다시 만든다.
         /// </summary>
         public Func<ReactionRequest, int> RefillTarget { get; set; }
@@ -227,6 +228,9 @@ namespace Jamkkaebi.Npc
                 INpcLineStore target;
                 string version;
                 var recent = new Dictionary<string, List<string>>();
+                // 최근 대사와 칸 있는 대사를 한 잠금(gate) 안에서 함께 찍는다 — 따로 찍으면 꺼낸 대사 A 를 기억하기 전의 최근 대사와 A 대신 다시 만든 B 가 섞여
+                // 저장될 수 있다 (CodeRabbit 리뷰). 다시 만들기는 Remember 뒤에 줄에 들어가므로 B 가 보이면 A 의 기억도 보인다
+                List<NpcLineCache.StoredTemplate> templates;
                 lock (gate)
                 {
                     target = store;
@@ -235,12 +239,13 @@ namespace Jamkkaebi.Npc
                     {
                         recent[pair.Key] = new List<string>(pair.Value);
                     }
+                    templates = target != null ? Cache.ExportTemplates() : null;
                 }
                 if (target == null)
                 {
                     return false;
                 }
-                string text = NpcLineStoreFormat.Write(version, Cache.ExportTemplates(), recent);
+                string text = NpcLineStoreFormat.Write(version, templates, recent);
                 try
                 {
                     target.Write(text);
@@ -295,12 +300,23 @@ namespace Jamkkaebi.Npc
             {
                 return;
             }
-            Task.Run(() =>
+            TimeSpan delay = SaveDelay;
+            Task.Run(async () =>
             {
+                // 꺼내기·기억·다시 만들기가 잇달아 일어나면 파일을 여러 번 쓰던 것을 SaveDelay 동안 모아 한 번 쓴다 (성능 리뷰 2026-11-19)
+                if (delay > TimeSpan.Zero)
+                {
+                    await Task.Delay(delay).ConfigureAwait(false);
+                }
                 Interlocked.Exchange(ref savePending, 0);
                 SaveStore();
             });
         }
+
+        /// <summary>
+        /// 바뀐 것을 파일에 쓰기 전에 모으는 시간. 기본 1초 — 그 사이의 변경은 한 번에 쓴다. 앱을 내릴 때는 SaveStore(또는 CloseStore)로 바로 쓴다.
+        /// </summary>
+        public TimeSpan SaveDelay { get; set; }
 
         // 쓴 만큼 다시 만든다 (RefillAfterUse). 이 요청을 견본으로 칸 있는 대사를 RefillTarget 개까지 채운다 — 요청의 서버 값은 칸으로 남는다
         private void Refill(ReactionRequest request)
@@ -310,7 +326,15 @@ namespace Jamkkaebi.Npc
             {
                 return;
             }
-            int target = RefillTarget != null ? RefillTarget(request) : 1;
+            int target;
+            try
+            {
+                target = RefillTarget != null ? RefillTarget(request) : 1;
+            }
+            catch (Exception)
+            {
+                return; // 채울 수를 정하지 못하면 다시 만들지 않는다 — 이미 띄울 대사가 있는 응답을 실패로 만들지 않는다 (CodeRabbit 리뷰)
+            }
             if (target <= 0)
             {
                 return;
@@ -407,9 +431,10 @@ namespace Jamkkaebi.Npc
                 request.InteractionId = NewId();
             }
 
-            // 진행 중인 요청이 있는 동안에는 미리 만들기를 멈춘다 (모델은 하나라 요청이 먼저다). 만들던 것은 취소하고 요청이 끝나면 이어 만든다
+            // 진행 중인 요청이 있는 동안에는 미리 만들기의 다음 생성을 시작하지 않는다 (모델은 하나라 요청이 먼저다). 만들던 것은 <b>이 요청이 모델을 쓸 때만</b>
+            // 취소한다(RunSlm 앞). 미리 만든 대사로 바로 답하는 요청·정해진 대사·기본 대사는 모델을 쓰지 않으므로 만들던 것을 버리지 않는다 — 예전에는 탭할 때마다
+            // 취소해, 기기(대사 하나에 수십 초)에서 자주 누르면 쓴 만큼 다시 만들기가 끝나지 못했다 (성능 리뷰 2026-11-19)
             Interlocked.Increment(ref activeRequests);
-            CancelCurrentPrefetch();
             Session session = Begin(request.RelicId, ct);
             try
             {
@@ -436,6 +461,7 @@ namespace Jamkkaebi.Npc
                                 ready.Note);
                         Remember(request, served.Line);
                         Refill(request);
+                        SaveSoon(); // 꺼낸 대사가 파일에서 빠지게 한다 (RecentLineCount 가 0 이면 Remember 가 저장하지 않는다, CodeRabbit 리뷰)
                         return NpcResponse.Show(served, null, PrefetchedNote);
                     }
                 }
@@ -461,6 +487,7 @@ namespace Jamkkaebi.Npc
                 }
                 else
                 {
+                    CancelCurrentPrefetch(); // 이 요청이 모델을 쓴다 — 만들던 미리 만들기는 멈추고 요청이 끝나면 이어 만든다
                     slmAttempt = await RunSlm(request, session).ConfigureAwait(false);
                     if (session.Token.IsCancellationRequested)
                     {

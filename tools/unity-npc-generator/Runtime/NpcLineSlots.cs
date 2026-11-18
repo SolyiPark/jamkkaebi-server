@@ -102,10 +102,13 @@ namespace Jamkkaebi.Npc
                 return null;
             }
             string text = line;
-            // 0) 마지막 관리 날 수: 견본과 같은 숫자 + '일'만 칸으로 ("9일 만이야"·"마지막 관리가 9일 전이었어"). 다른 숫자의 '며칠'은 지어낸 말일 수 있다
+            // 0) 마지막 관리 날 수: 마지막 관리를 말하는 꼴에서만 견본 숫자를 칸으로 — 코드가 붙인 앞 문장("마지막 관리가 9일 전이었어"·"관리받은 지 9일이 지났어")과
+            //    돌아온 날 수("9일 만이야"·"9일 만에"). "9일 전에도 왔지?"처럼 방문을 말한 날 수는 숫자가 같아도 칸으로 만들지 않는다 — 다른 날 수로 채우면
+            //    없던 방문이 되는데 마지막 관리 사실과 같은 숫자라 기록 검사(RecordConflict)도 통과한다 (CodeRabbit 리뷰). 칸이 아닌 숫자는 아래 AnyDays 가 거른다
             if (sample.CareDays.HasValue)
             {
-                text = Regex.Replace(text, "(?<![0-9])" + sample.CareDays.Value + "(?= ?일)", DaysSlot, RegexOptions.CultureInvariant);
+                string n = sample.CareDays.Value.ToString();
+                text = NpcLineChecks.Cached("(?<=마지막 관리가 )" + n + "(?=일 전)|(?<=관리받은 지 )" + n + "(?=일이 지났)|(?<![0-9])" + n + "(?= ?일 ?만)").Replace(text, DaysSlot);
             }
             if (DayRef.IsMatch(text) || KoreanCount.IsMatch(text) || AnyDays.IsMatch(text) || FixedSpan.IsMatch(text))
             {
@@ -174,7 +177,7 @@ namespace Jamkkaebi.Npc
             }
             if (sample.VisitCount.HasValue)
             {
-                text = Regex.Replace(text, "(?<![0-9])" + sample.VisitCount.Value + "(?= ?번)", CountSlot, RegexOptions.CultureInvariant);
+                text = NpcLineChecks.Cached("(?<![0-9])" + sample.VisitCount.Value + "(?= ?번)").Replace(text, CountSlot);
             }
             return text;
         }

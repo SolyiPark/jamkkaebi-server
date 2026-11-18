@@ -125,6 +125,7 @@ CALL_SAMPLES = [
 NO_RECORD_SAMPLES = [
     "왔구나, 오랜만이야!", "오랜만에 왔구나, 반가워!", "또 왔구나! 오랜만이야.", "다시 왔네, 기다렸어.", "덕분에 관리해 줘서 고마워.", "덕분에 닦아 주셔서 개운해요.",
     "왔구나, 오랜만에 보자! 반갑다.",  # 2026-11-18 22:16 시험 S22 #3
+    "오랜만에 보자고 했지.",  # CodeRabbit 리뷰: '보자'는 온전한 꼴만 ("반가워고 했지"가 되지 않게)
 ]
 for line in NO_RECORD_SAMPLES:
     expected["_speechSamples"].append({"label": "반말", "line": line, "noRecord": True, "want": run.normalize_speech(line, "반말", None, None, None, None, "발굴자", True)})
@@ -140,6 +141,11 @@ for line, flag in ONE_SAMPLES:
     expected["_speechSamples"].append({"label": "반말", "line": line, "oneSentence": True, "needsAsk": flag, "want": run.keep_one_sentence(line, flag)})
 # 2026-11-18 23:45 시험 S06 #4: "어서 왔어?"·"어서 와?" → "어서 와!"
 CALL_SAMPLES += [("발굴자", "어서 왔어? 반가워."), ("발굴자", "어서 와? 또 왔네."), ("발굴자", "어서 와서 쉬어.")]
+# 2026-11-19: 관리한 쪽은 플레이어, 실화를 들려준 쪽은 도깨비
+CALL_SAMPLES += [("발굴자", "개운하게 도깨비가 관리해줘서 고마워"), ("발굴자", "자개 반짝임 얘기해줘서 고마워"), ("발굴자", "내가 닦아 줘서 고마워!"),
+                 ("발굴자", "옛날 이야기를 들려줘서 고마워"), ("발굴자", "내 몸을 닦아줘서 고마워"), ("발굴자", "도깨비가 사는 곳이야")]
+# CodeRabbit 리뷰: "어서, 와?"도 고치고, 첫 낱말 뒤의 줄바꿈은 검사까지 남긴다
+CALL_SAMPLES += [("발굴자", "어서, 와? 반가워."), ("발굴자", "개운하게\n덕분에 기분이 좋네!")]
 # 2026-11-18: 첫 낱말 '개운하게·깨끗하게'가 꾸밀 움직임말 없이 이어진 정화 대사 (fix_starter_adverb)
 CALL_SAMPLES += [
     ("발굴자", "개운하게 덕분에 기분이 좋네"), ("발굴자", "개운하게 돌아온 발굴자, 오랜만에 관리해줘서 고마워."), ("발굴자", "개운하게 돌아온 관리님, 오랜만에 관리해줘서 고마워."),
@@ -160,6 +166,7 @@ FN_SAMPLES = [
     ("dropPlayer", "도윤아 안녕, 반가워.", "도윤"), ("dropPlayer", "고마워, 도윤!", "도윤"), ("dropPlayer", "도윤 덕분에 기뻐.", "도윤"), ("dropPlayer", "도윤을!", "도윤"),
     ("craft", "그 자개 공들여 만들었네", ""), ("craft", "이 자개는 사흘 전 자랑했어", ""), ("craft", "그 모습이 보기 좋아", ""), ("craft", "오늘은 기분이 좋네.", ""),
     ("craft", "옻칠을 정성껏 칠했네. 그 옻칠 반짝여.", ""),
+    ("craft", "기억난다, 자개 공들여 만들었다고 자랑했던 일", ""), ("craft", "오, 자개가 정말 정성스럽게 만들어졌네.", ""), ("craft", "자개 반짝여서 좋아", ""),
     ("incomplete", "어서 와, 다은.", "다은"), ("incomplete", "어서 와, 다은.", ""), ("incomplete", "내 꼬리를", "다은"), ("incomplete", "관리해 줘서", "다은"),
     ("thirdPerson", "정말 고마워, 도윤을!", "도윤"), ("thirdPerson", "도윤한테 고마워", "도윤"), ("thirdPerson", "도윤아, 고마워!", "도윤"), ("thirdPerson", "발굴자의 손길", "발굴자"),
     ("reversed", "드디어 도윤을 만나러 왔다니 정말 반갑다!", "도윤"), ("reversed", "발굴자를 불러서 반가워", "발굴자"), ("reversed", "도윤이 만나러 왔구나.", "도윤"),
@@ -175,6 +182,13 @@ FN_SAMPLES = [
     ("subject", "자개가 반짝이고, 그림은 정성스럽게 완성됐어.", ""), ("subject", "자개가 반짝이고 그림은 정성스럽게 완성됐어.", ""),
     ("subject", "자개가 정성껏 빚은 거네.", ""), ("subject", "자개가 많이 정성스럽게 만들어졌네.", ""),
     ("narrationKept", "발굴자가그림을그리고있다.", "그림을그리고있다."), ("narrationKept", "발굴자가그림을그리고있다.", "와,반가워!"),
+    # CodeRabbit 리뷰: 상대가 해 준 관리를 칭찬한 것은 자기 솜씨 칭찬이 아니다
+    ("craftPraise", "정성껏 닦아 줘서 고마워, 정말 멋져!", "thank_calm"), ("craftPraise", "그렇게 공들인 거라면 대단하네.", "recall_talk"),
+    ("craftPraise", "공들여 관리해 줘서 대단해.", "thank_joyful"), ("craftPraise", "정성껏 만든 거라 멋져!", "recall_talk"),
+    # 2026-11-19: 지난 대화의 '내' 없는 자기 것, '~던 일'로 끝난 말
+    ("bareOwn", "기억난다, 자개 공들여 만들었다고 자랑했던 일", ""), ("bareOwn", "빛나는 자개를 공들여 만들었지", ""), ("bareOwn", "빛이 공들여 다듬은 무늬에 비쳐", ""),
+    ("bareOwn", "내 자개는 공들였어. 무늬도 정성껏 새겼지.", ""), ("bareOwn", "자개 반짝이는 거 좋아했지?", ""),
+    ("recallFragment", "기억난다, 내 자개 공들여 만들었다고 자랑했던 일", ""), ("recallFragment", "기억나, 그때 자개 자랑했던 일!", ""), ("recallFragment", "그때 일 기억나?", ""),
     ("probe", "안녕, 오늘은 좀 일찍 왔구나.", "greet"), ("probe", "어서 와, 반가워!", "greet"), ("probe", "무슨 일이야?", "thank_calm"), ("probe", "뭘 찾으러 왔어?", "wander_greet"),
 ]
 
@@ -198,6 +212,12 @@ def run_fn(kind, line, arg):
         return run.greeting_probe(line, arg) or ""
     if kind == "subject":
         return run.subject_contradiction(line, OWN_THINGS) or ""
+    if kind == "bareOwn":
+        return run.fix_bare_own_thing(line, ["자개", "옻칠", "몸", "무늬", "반짝임", "빛", "모습"])
+    if kind == "recallFragment":
+        return run.fix_recall_fragment(line)
+    if kind == "craftPraise":
+        return run.craft_praise(line, arg) or ""
     if kind == "narrationKept":
         return "true" if run.narration_kept(line, arg) else "false"
     if kind == "pronouns":

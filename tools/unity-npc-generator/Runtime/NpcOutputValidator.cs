@@ -213,6 +213,13 @@ namespace Jamkkaebi.Npc
             return check;
         }
 
+        // 반복 검사에 넣을 글: 길이에 맞춰 줄인 대사 (줄이지 못하면 그대로)
+        private static string Comparable(string line, int limit, bool truncated)
+        {
+            string fitted = string.IsNullOrEmpty(line) ? null : FitSentences(line, limit, truncated);
+            return fitted ?? line;
+        }
+
         // 말투 다듬기 → 한 문장 줄이기 → 인사 끝·'오늘도'·자기 솜씨 고치기 (run.py 의 evaluate 앞부분과 같다)
         private static string SpeechFixed(string line, string action, ReactionRequest request, Persona persona, bool noRecord, int noRecordVariant)
         {
@@ -233,7 +240,11 @@ namespace Jamkkaebi.Npc
             }
             if (action == NpcActions.ThankCalm || action == NpcActions.ThankJoyful || action == NpcActions.AnswerStatus || action == NpcActions.RecallTalk)
             {
-                fixedLine = NpcLineChecks.FixCraftSpectator(fixedLine);
+                fixedLine = NpcLineChecks.FixBareOwnThing(NpcLineChecks.FixCraftSpectator(fixedLine), persona.ownThings);
+            }
+            if (action == NpcActions.RecallTalk)
+            {
+                fixedLine = NpcLineChecks.FixRecallFragment(fixedLine);
             }
             return fixedLine;
         }
@@ -294,13 +305,16 @@ namespace Jamkkaebi.Npc
                 bool noRecord = NpcLineChecks.NoRecordApplies(request.Input == NpcInputs.Visit, hasRecord, request.Situation);
                 string fixedLine = SpeechFixed(line, action, request, persona, noRecord, 0);
                 // 기록 없는 '오랜만'을 바꿔 넣은 말 때문에 최근 대사와 같아졌으면 다른 말을 넣는다 (늘 "반가워"면 다른 인사들이 같은 대사로 모인다, 2026-11-18 22:16 시험)
+                // 견주는 것은 길이에 맞춰 줄인 뒤의 대사(마지막 반복 검사와 같은 글)이고, 인사에 지어낸 사정이 남는 말은 건너뛴다 (CodeRabbit 리뷰)
+                int fitLimit = LimitFor(request.Input) + LengthTolerance;
                 if (noRecord && NpcLineChecks.HasLongAbsenceWord(line) && request.RecentLines != null && request.RecentLines.Count > 0
-                        && NpcLineChecks.FindSimilar(fixedLine, request.RecentLines).HasValue)
+                        && NpcLineChecks.FindSimilar(Comparable(fixedLine, fitLimit, truncated), request.RecentLines).HasValue)
                 {
                     for (int variant = 1; variant < NpcLineChecks.NoRecordGreetings.Length; variant++)
                     {
                         string other = SpeechFixed(line, action, request, persona, true, variant);
-                        if (!NpcLineChecks.FindSimilar(other, request.RecentLines).HasValue)
+                        string otherFitted = Comparable(other, fitLimit, truncated);
+                        if (NpcLineChecks.GreetingProbe(otherFitted, action) == null && !NpcLineChecks.FindSimilar(otherFitted, request.RecentLines).HasValue)
                         {
                             fixedLine = other;
                             break;

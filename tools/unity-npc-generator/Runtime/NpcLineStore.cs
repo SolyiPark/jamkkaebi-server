@@ -62,11 +62,22 @@ namespace Jamkkaebi.Npc
                 File.Move(temp, path);
             }
             File.WriteAllText(temp, text ?? "", new UTF8Encoding(false));
-            if (File.Exists(path))
+            if (!File.Exists(path))
+            {
+                File.Move(temp, path); // 처음 쓸 때
+                return;
+            }
+            // 원래 파일을 먼저 지우면 그 사이에 읽는 쪽이 원래 파일도 임시 파일도 못 찾는다 — 같은 폴더 안에서 한 번에 바꿔 넣는다 (CodeRabbit 리뷰).
+            // File.Replace 를 못 쓰는 런타임이면 예전처럼 지우고 옮긴다 (읽는 쪽은 원래 파일이 없으면 임시 파일을 읽는다)
+            try
+            {
+                File.Replace(temp, path, null);
+            }
+            catch (PlatformNotSupportedException)
             {
                 File.Delete(path);
+                File.Move(temp, path);
             }
-            File.Move(temp, path);
         }
     }
 
@@ -87,12 +98,14 @@ namespace Jamkkaebi.Npc
         /// <summary>버전 글을 만든다. 콘텐츠 버전(페르소나·행동·기본 대사·금칙어)과 모델 이름 따위를 넘긴다. 하나라도 바뀌면 다른 버전이다.</summary>
         public static string VersionOf(params string[] parts)
         {
-            var list = new List<string>();
+            // 칸마다 길이를 앞에 적는다 — "+"로만 이으면 ("a+b","c")와 ("a","b+c")가 같은 글이 된다 (CodeRabbit 리뷰)
+            var builder = new StringBuilder();
             foreach (string part in parts ?? new string[0])
             {
-                list.Add(part ?? "");
+                string value = part ?? "";
+                builder.Append(value.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(value).Append(';');
             }
-            return string.Join("+", list.ToArray());
+            return builder.ToString();
         }
 
         public static string Write(string version, IEnumerable<NpcLineCache.StoredTemplate> templates, IDictionary<string, List<string>> recent)

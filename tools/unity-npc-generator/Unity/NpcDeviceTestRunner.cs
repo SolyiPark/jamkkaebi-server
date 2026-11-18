@@ -379,7 +379,8 @@ namespace Jamkkaebi.Npc
             {
                 Say("첫 응답 시간: 중앙값 " + Percentile(firstTokens, 0.5) + "ms, 90% " + Percentile(firstTokens, 0.9) + "ms");
             }
-            if (prefetchFirst)
+            // 시작 때 미리 만들지 않아도 파일에서 읽은 대사·다시 만든 대사로 적중할 수 있다 (CodeRabbit 리뷰)
+            if (prefetchFirst || useLineStore || refillAfterUse || prefetchHits > 0)
             {
                 int asked = total - fixedCount;
                 Say("미리 만든 대사 적중 " + prefetchHits + "/" + asked + " (적중하면 모델을 부르지 않고 칸에 서버 값을 넣어 바로 완성 — 전체 시간 0ms 안팎)");

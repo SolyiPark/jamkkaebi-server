@@ -20,6 +20,15 @@ namespace Jamkkaebi.Npc
         {
             public ReactionResult Result;
             public DateTime At;
+            public bool FromStore;   // 파일에서 읽어 넣은 대사 (ImportTemplates)
+        }
+
+        private int takenFromStore;
+
+        /// <summary>파일에서 읽어 넣은 대사(ImportTemplates)를 꺼내 쓴 수. 시험에서 "다시 켠 뒤 파일의 대사로 적중한 수"를 새로 만든 대사와 나눠 센다.</summary>
+        public int TakenFromStore
+        {
+            get { return System.Threading.Volatile.Read(ref takenFromStore); }
         }
 
         private const string TemplatePrefix = "T|";
@@ -294,6 +303,17 @@ namespace Jamkkaebi.Npc
                             continue;
                         }
                         taken = ReactionResult.Success(stored.RequestId, rechecked.ActionId, rechecked.TargetId, rechecked.Line, stored.Source, taken.Note);
+                        // 다시 검사가 대사를 바꿨으면(다듬기·앞 문장) 바뀐 최종 대사로 최근 대사와 한 번 더 견준다 (CodeRabbit 리뷰)
+                        if (taken.Line != filled && NpcLineChecks.FindSimilar(taken.Line, recent).HasValue)
+                        {
+                            live.RemoveAt(i);
+                            i--;
+                            continue;
+                        }
+                    }
+                    if (live[i].FromStore)
+                    {
+                        System.Threading.Interlocked.Increment(ref takenFromStore);
                     }
                     live.RemoveAt(i);
                     return taken;
@@ -498,7 +518,10 @@ namespace Jamkkaebi.Npc
                         continue;
                     }
                     List<Entry> list;
-                    entries.TryGetValue(item.Key, out list);
+                    if (entries.TryGetValue(item.Key, out list))
+                    {
+                        list.RemoveAll(entry => entry.At < limit); // 지난 것이 칸을 차지해 새것을 막지 않게 먼저 쓸어 낸다 (CodeRabbit 리뷰)
+                    }
                     string line = item.Result.Line;
                     if (list != null && (list.Count >= MaxPerKey || list.Exists(entry => NpcLineChecks.Similar(line, entry.Result.Line) != null)))
                     {
@@ -509,7 +532,7 @@ namespace Jamkkaebi.Npc
                         list = new List<Entry>(); // 넣을 때만 칸을 만든다 (넣지 않는 줄이 빈 칸을 남기지 않게)
                         entries[item.Key] = list;
                     }
-                    list.Add(new Entry { Result = item.Result, At = item.At });
+                    list.Add(new Entry { Result = item.Result, At = item.At, FromStore = true });
                     added++;
                 }
             }
