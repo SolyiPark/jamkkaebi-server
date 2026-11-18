@@ -10,6 +10,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Locale;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
@@ -56,5 +57,24 @@ class ExhibitionServiceValidateTest {
 
         assertThat(errors).extracting(FieldError::getField).containsExactly("items[0].x");
         assertThat(errors.get(0).getReason()).isEqualTo("0 이상 6 미만이어야 합니다.");
+    }
+
+    @Test
+    @DisplayName("필드 경로와 사유의 숫자는 JVM 로캘과 상관없이 아라비아 숫자로 적는다")
+    void 로캘과_상관없는_숫자() {
+        Locale saved = Locale.getDefault();
+        try {
+            // 타이 숫자를 쓰는 로캘: String.formatted 를 쓰면 'items[๐]', '๗×๑' 로 적힌다
+            Locale.setDefault(Locale.forLanguageTag("th-TH-u-nu-thai"));
+            List<FieldError> tooSmall = errorsOf(service(7, 1), new ExhibitionLayoutRequest.Item(ExhibitItemType.BUILDING, 1, 0, 0));
+            List<FieldError> outside = errorsOf(service(7, 7), new ExhibitionLayoutRequest.Item(ExhibitItemType.BUILDING, 1, 6, 0));
+
+            assertThat(tooSmall).extracting(FieldError::getField).containsExactly("items[0]");
+            assertThat(tooSmall.get(0).getReason()).isEqualTo("7×1 그리드에는 2×2 칸을 차지하는 항목을 놓을 수 없습니다.");
+            assertThat(outside).extracting(FieldError::getField).containsExactly("items[0].x");
+            assertThat(outside.get(0).getReason()).isEqualTo("0 이상 6 미만이어야 합니다.");
+        } finally {
+            Locale.setDefault(saved);
+        }
     }
 }

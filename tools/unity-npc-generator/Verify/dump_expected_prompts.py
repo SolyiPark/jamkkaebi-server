@@ -94,6 +94,13 @@ SPEECH_SAMPLES = [
     ("반말", "그래... 고마워,!"),
     ("반말", "고마워,... 그래.… 와...! 좋아"),
     ("반말", "별일 없었어...? 음…~ 그래..."),
+    # 말줄임을 합친 뒤 드러난 평서 어미의 '?'도 고친다 ("기분이 좋구나...?"→"기분이 좋구나.")
+    ("반말", "기분이 좋구나...? 오늘도 반갑구나…? 별일 없었어...?"),
+    # 한 문장 안에서 두 글자 이상 같은 낱말은 하나만 남긴다 (drop_repeated_word)
+    ("반말", "또 왔네, 다시 왔네!"),
+    ("반말", "향로를 닦아줘서 고마워, 정말 고마워! 고마워 정말 고마워."),
+    ("반말", "반가워, 또 왔네, 다시 왔네, 반가워! 나는 좋아, 나는 행복해."),
+    ("해요체", "또 오셨네요, 다시 오셨네요."),
 ]
 expected["_speechSamples"] = [
     {"label": label, "line": line, "want": run.normalize_speech(line, label)} for label, line in SPEECH_SAMPLES
@@ -144,6 +151,12 @@ FN_SAMPLES = [
     ("incomplete", "어서 와, 다은.", "다은"), ("incomplete", "어서 와, 다은.", ""), ("incomplete", "내 꼬리를", "다은"), ("incomplete", "관리해 줘서", "다은"),
     ("thirdPerson", "정말 고마워, 도윤을!", "도윤"), ("thirdPerson", "도윤한테 고마워", "도윤"), ("thirdPerson", "도윤아, 고마워!", "도윤"), ("thirdPerson", "발굴자의 손길", "발굴자"),
     ("reversed", "드디어 도윤을 만나러 왔다니 정말 반갑다!", "도윤"), ("reversed", "발굴자를 불러서 반가워", "발굴자"), ("reversed", "도윤이 만나러 왔구나.", "도윤"),
+    # 2026-11-18 20:22 시험: 자기 것을 남이 만든 것처럼 입음꼴로 말함(S14 #1), 꾸밈말 뒤 '너를'을 지워 꾸밈말만 남음(S05 #1)
+    ("subject", "오, 자개가 정말 정성스럽게 만들어졌네.", ""), ("subject", "자개가 공들여 새겨져 있네!", ""), ("subject", "옻칠이 정성스럽게 칠해졌구나.", ""),
+    ("subject", "내 자개가 정성스럽게 만들어졌어.", ""), ("subject", "옻칠이 벗겨졌어.", ""), ("subject", "자개가 정성 덕분에 빛나네.", ""),
+    ("pronouns", "와, 처음 온 너를 만나니 기쁘다!", "발굴자"), ("pronouns", "다시 만난 도윤을 보니 좋아.", "도윤"), ("pronouns", "보고 싶던 너를 만나 기뻐!", "도윤"),
+    ("pronouns", "그건 너를 위한 거야.", "도윤"), ("pronouns", "도윤을 위해 준비했어.", "도윤"), ("pronouns", "오늘 너를 만나서 기뻐!", "도윤"),
+    ("pronouns", "난 너를 기다렸어.", "도윤"), ("pronouns", "정말 너를 기다렸어.", "도윤"), ("pronouns", "오랜만에 너를 찾아줘서 고마워!", "도윤"),
     ("probe", "안녕, 오늘은 좀 일찍 왔구나.", "greet"), ("probe", "어서 와, 반가워!", "greet"), ("probe", "무슨 일이야?", "thank_calm"), ("probe", "뭘 찾으러 왔어?", "wander_greet"),
 ]
 
@@ -165,6 +178,10 @@ def run_fn(kind, line, arg):
         return run.reversed_call(line, arg) or ""
     if kind == "probe":
         return run.greeting_probe(line, arg) or ""
+    if kind == "subject":
+        return run.subject_contradiction(line, OWN_THINGS) or ""
+    if kind == "pronouns":
+        return run.drop_player_reference(run.player_pronouns_to_name(line, arg), arg)
     raise ValueError(kind)
 
 

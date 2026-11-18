@@ -1391,6 +1391,56 @@ def drop_repeated_lead(line):
     return result[:-1] + "." if result.endswith(",") else result
 
 
+# 한 문장: 문장 끝 부호(.!?…~)까지. 쉼표는 문장을 끊지 않고 마디(clause)를 가른다
+SENTENCE_RUN_RE = re.compile(r"[^.!?…~]+[.!?…~]*\s*")
+SENTENCE_TAIL_RE = re.compile(r"[.!?…~]*\s*$")
+CLAUSE_RUN_RE = re.compile(r"[^,]+,*\s*")
+
+
+def drop_repeated_word(line):
+    """한 문장 안에서 두 글자 이상 같은 낱말이 되풀이되면 하나만 남긴다 ("또 왔네, 다시 왔네" → "다시 왔네"). 거르면 다시 만드는 데 1.5~2초가 들어 고쳐 쓴다.
+    쉼표로 가른 서로 다른 마디에 있으면 짧은 마디를 통째로 지운다(길이가 같으면 뒤 마디). 낱말만 지우면 "또, 다시 왔네"처럼 마디가 망가진다.
+    뒤 마디를 지우면 그 마디의 문장 끝 부호를 남긴다 ("닦아줘서 고마워, 정말 고마워!" → "닦아줘서 고마워!"). 한 마디 안에 있으면 앞의 낱말만 지운다
+    ("고마워 정말 고마워." → "정말 고마워."). 문장이 다르면 건드리지 않고(inner_repeat 가 본다), REPEAT_EXEMPT 낱말과 한 글자 낱말은 되풀이로 보지 않는다.
+    C# NpcLineChecks.DropRepeatedWord 와 같다."""
+    if not line:
+        return line
+    return SENTENCE_RUN_RE.sub(lambda m: _drop_repeated_word_in_sentence(m.group(0)), line)
+
+
+def _drop_repeated_word_in_sentence(sentence):
+    for _ in range(16):  # 한 번에 되풀이 하나를 지운다. 되풀이가 여럿이면 다시 본다
+        tail = SENTENCE_TAIL_RE.search(sentence).group(0)
+        body = sentence[:len(sentence) - len(tail)]
+        first = second = None
+        seen = {}
+        for word in re.finditer("[가-힣]+", body):
+            if len(word.group(0)) < 2 or word.group(0) in REPEAT_EXEMPT:
+                continue
+            if word.group(0) in seen:
+                first, second = seen[word.group(0)], word
+                break
+            seen[word.group(0)] = word.start()
+        if second is None:
+            return sentence
+        clauses = list(CLAUSE_RUN_RE.finditer(body))
+        first_clause = next(i for i, c in enumerate(clauses) if c.start() <= first < c.end())
+        second_clause = next(i for i, c in enumerate(clauses) if c.start() <= second.start() < c.end())
+        if first_clause == second_clause:
+            end = first + len(second.group(0))
+            while end < len(body) and body[end].isspace():
+                end += 1
+            body = body[:first] + body[end:]
+        else:
+            drop = first_clause if len(PUNCT_RE.sub("", clauses[first_clause].group(0))) < len(PUNCT_RE.sub("", clauses[second_clause].group(0))) else second_clause
+            body = body[:clauses[drop].start()] + body[clauses[drop].end():]
+            if drop == len(clauses) - 1:
+                # 마지막 마디를 지우면 앞 마디의 쉼표가 문장 끝에 남는다 → 지우고 지운 마디의 끝 부호를 붙인다
+                body = body.rstrip().rstrip(",").rstrip()
+        sentence = body + tail
+    return sentence
+
+
 def inner_repeat(line):
     """한 대사 안에서 두 번 나온 낱말(세 글자 이상은 앞 두 글자가 같으면 같은 말로 본다). 없으면 None."""
     seen = set()
@@ -1545,6 +1595,27 @@ POSSESSED_WORDS = ("덕분", "손길", "생각", "마음", "말", "도움", "관
 # 줄일 수 없는 꼴(너랑·너처럼·너도…)과 부르는 말("고마워, 너!")은 예전처럼 이름으로 바꾼다. "네 덕분에"는 "덕분에"로. C# NpcLineChecks.PlayerPronounsToName 과 같다
 PLAYER_DROP_PARTICLES = ("가", "이", "는", "은", "를", "을", "한테서", "한테", "에게서", "에게", "의")
 
+# 꾸밈말(관형형) 뒤의 플레이어 말은 지우지 않는다. "처음 온 너를 만나니 기쁘다"에서 '너를'을 지우면 꾸밈말만 남아 "처음 온 만나니 기쁘다"가 됐다
+# (2026-11-18 20:22 시험 S05 #1). 지우지 않은 말은 이름으로 바뀌어("처음 온 발굴자를") 출력 검사 player_third_person 이 거르고 다시 만든다.
+# 꾸밈말: 받침 ㄴ·ㄹ로 끝나는 앞 낱말("온"·"만난"·"반가운"·"보고 싶던"·"올"). 조사('나는'·'에선'…)와 줄인 말('난'·'널'·'그건'), ㄴ·ㄹ로 끝나는 부사·때 낱말은 뺀다 ('만난'의 '난'은 꾸밈말).
+# C# NpcLineChecks.AfterModifier 와 같다
+NON_MODIFIER_LAST = set("은는을를엔선만란론")
+NON_MODIFIER_WORDS = {"오늘", "내일", "정말", "참말", "늘", "얼른", "한번", "이번", "우선", "일단", "잘", "그만",
+                      "난", "넌", "날", "널", "건", "걸", "그건", "이건", "저건", "그걸", "이걸", "땐", "그땐", "이젠"}
+TRAILING_HANGUL_WORD_RE = re.compile(r"([가-힣]+)\s+$")
+# "너를 위한 거야"·"도윤을 위해 준비했어"도 지우면 "위한 거야"만 남는다
+FOR_WHOM_RE = re.compile(r"\s+위[해한하]")
+
+
+def _after_modifier(line, index):
+    """line 의 index 자리 바로 앞 낱말이 꾸밈말(관형형)인지 ("처음 온 너를"의 '너를' 자리 → True, "오늘 너를" → False)."""
+    m = TRAILING_HANGUL_WORD_RE.search(line[:index]) if line and index > 0 else None
+    if not m:
+        return False
+    word = m.group(1)
+    final = (ord(word[-1]) - 0xAC00) % 28
+    return final in (4, 8) and word[-1] not in NON_MODIFIER_LAST and word not in NON_MODIFIER_WORDS
+
 
 def player_pronouns_to_name(line, call_name):
     if not line or not call_name:
@@ -1557,7 +1628,9 @@ def player_pronouns_to_name(line, call_name):
         return pair[1 if batchim else 0] if pair else p
 
     def can_drop(m):
-        return re.match(r"\s+[가-힣]", line[m.end():]) is not None  # 뒤에 이어지는 말이 있어야 지워도 문장이 남는다
+        # 뒤에 이어지는 말이 있어야 지워도 문장이 남는다. 꾸밈말 뒤("처음 온 너를")는 지우면 꾸밈말만 남는다
+        following = line[m.end():]
+        return re.match(r"\s+[가-힣]", following) is not None and not FOR_WHOM_RE.match(following) and not _after_modifier(line, m.start())
 
     def sub(m):
         if m.group("ge"):
@@ -1597,11 +1670,14 @@ def player_pronouns_to_name(line, call_name):
 
 def drop_player_reference(line, call_name):
     """대사에 플레이어 이름이 주어·목적어·여격으로 들어가 남 얘기처럼 들리면 그 말을 지운다 ("오랜만에 도윤을 찾아줘서"→"오랜만에 찾아줘서", "발굴자가 날 관리해줘서"→"날 관리해줘서").
-    부르는 말("도윤아"·"도윤이,"·"고마워 도윤!")은 두고, 이어지는 말이 있는 경우만 지운다. 지우면 3글자도 안 남으면 그대로 둔다(검사가 거른다). C# NpcLineChecks.DropPlayerReference 와 같다."""
+    부르는 말("도윤아"·"도윤이,"·"고마워 도윤!")은 두고, 이어지는 말이 있는 경우만 지운다. 꾸밈말 뒤("처음 온 도윤을")는 지우지 않는다(_after_modifier).
+    지우면 3글자도 안 남으면 그대로 둔다(검사가 거른다). C# NpcLineChecks.DropPlayerReference 와 같다."""
     if not line or not call_name:
         return line
     c = re.escape(call_name)
-    out = re.sub("(?<![가-힣])" + c + "(?:을|를|이|가|은|는|한테서|한테|에게서|에게)\\s+(?=[가-힣])", "", line)
+    # 꾸밈말 뒤("처음 온 도윤을 만나니")는 지우면 꾸밈말만 남는다 → 두고 player_third_person 이 거른다
+    out = re.sub("(?<![가-힣])" + c + "(?:을|를|이|가|은|는|한테서|한테|에게서|에게)\\s+(?=[가-힣])(?!위[해한하])",
+                 lambda m: m.group(0) if _after_modifier(line, m.start()) else "", line)
     out = re.sub("(?<![가-힣])" + c + "\\s+(?=덕분)", "", out)
     return out if len(PUNCT_RE.sub("", out)) >= 3 else line
 
@@ -1687,9 +1763,10 @@ def normalize_speech(line, label, name=None, own_things=None, nickname=None, vis
     if not line:
         return line
     # "덕분에, 관리해 줘서 고마워."처럼 첫 낱말 뒤에 쉼표를 찍으면 어색하다 (첫 낱말을 정해 준 뒤 생겼다)
-    line = collapse_double_verb(STARTER_COMMA_RE.sub(r"\1 ", strip_trailing_interjection(drop_repeated_lead(guest_to_friend(strip_address(fix_thanks_overlap(fix_typos(_apply_speech(line, label))), name))))))
+    line = collapse_double_verb(STARTER_COMMA_RE.sub(r"\1 ", strip_trailing_interjection(drop_repeated_word(drop_repeated_lead(guest_to_friend(strip_address(fix_thanks_overlap(fix_typos(_apply_speech(line, label))), name)))))))
     line = drop_player_reference(player_pronouns_to_name(unify_player_call(fix_statement_question(line), call_name, nickname), call_name), call_name)
-    return collapse_punctuation(line)
+    # 말줄임을 합치면 '?'가 어미 바로 뒤로 온다 ("기분이 좋구나...?"→"기분이 좋구나?"). 이때 평서 어미의 '?'를 한 번 더 고친다 (CodeRabbit 리뷰)
+    return fix_statement_question(collapse_punctuation(line))
 
 
 # 연달아 붙은 문장 부호. 호칭·자기 이름을 지운 자리("반가워. 주인님!"→"반가워.!")나 '?'를 '.'로 고친 자리("왔구나?!"→"왔구나.!")에 생긴다 (2026-11-18 시험)
@@ -1989,15 +2066,17 @@ def persona_copy(line, persona):
     return None
 
 
-CRAFT_RE = re.compile("공들|정성껏|빚[어은]|새[긴겨]|칠한|세공|깎[은아]|만든")
-SPECTATOR_RE = re.compile("거네|거구나|거로구나|것이네|것이로구나")
+# 2026-11-18 20:22 시험 S14 #1: "오, 자개가 정말 정성스럽게 만들어졌네."가 통과했다 — '정성스럽게'·'만들어'와 입음꼴 끝맺음('~어졌네')을 몰랐다
+CRAFT_RE = re.compile("공들|정성껏|정성스럽|정성 ?들|빚[어은]|새[긴겨]|칠한|세공|깎[은아]|만든|만들어|다듬[어은]|꾸[며민]")
+# 구경하는 끝맺음: '~거네'·'~거구나', 남이 만든 것처럼 말하는 입음꼴('만들어졌네'·'새겨져 있네'·'다듬어졌어'·'완성됐네')
+SPECTATOR_RE = re.compile("거네|거구나|거로구나|것이네|것이로구나|졌|져 ?있|되었|됐|되어 ?있|돼 ?있")
 
 
 def subject_contradiction(line, own_things):
     """주체가 어긋난 대사의 그 낱말, 아니면 None. 도깨비가 자기 것(ownThings: 자개·옻칠…)을 '내 ~' 없이 남의 솜씨를 구경하듯 말하는 것을 잡는다
     ("오, 자개가 정말 공들여 만든 거네 덕분에 빛나네." — 2026-11-16 시험 S14). 자기 것이 주어(이·가·은·는)이고, 같은 문장에 만든 솜씨 낱말
-    (공들·정성껏·빚어·새겨·칠한…)과 구경하는 끝맺음(~거네·~거구나)이 함께 있고, 앞에 '내'·'나의'·'우리'가 없을 때만 건다.
-    '몸'·'모습'은 거의 모든 문장에 나오는 낱말이라 뺀다. C# NpcLineChecks.SubjectContradiction 과 같다."""
+    (공들·정성껏·정성스럽게·빚어·새겨·만들어…)과 구경하는 끝맺음(~거네·~거구나, 입음꼴 ~어졌네·~됐네)이 함께 있고, 앞에 '내'·'나의'·'우리'가 없을 때만 건다
+    ("자개가 정성스럽게 만들어졌네." — 2026-11-18 시험 S14). '몸'·'모습'은 거의 모든 문장에 나오는 낱말이라 뺀다. C# NpcLineChecks.SubjectContradiction 과 같다."""
     for thing in own_things or []:
         if not thing or thing in ("몸", "모습"):
             continue
