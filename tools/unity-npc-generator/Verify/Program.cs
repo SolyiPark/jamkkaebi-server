@@ -1611,18 +1611,21 @@ public static class Program
         Expect(validator, Out("greet", "player", "가장 친한 동료처럼 반긴다."), horseTap, OutputProblem.Forbidden, "'~처럼 반긴다'는 설명문 금칙어");
         Expect(validator, Out("greet", "player", "왔구나, 순찰은 내가 했어."), horseTap, OutputProblem.None, "평범한 인사는 통과");
         // 설명문 끝맺음: 동사 현재 평서형(-ㄴ다/-는다)·'-어/-고 있다'가 마침표·말줄임으로 끝나거나 부호 없이 끝나면 거른다. 형용사 '-다'·감탄('!')·'-단다'는 말이라 통과
-        // (2026-11-18 17:05 시험 S05 #1 "…반가운 마음이 담겨 있다."가 첫 시도에 통과했다)
         ReactionRequest firstGuest = Request(2, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet);
         firstGuest.Situation = "처음 온 친구가 와 있다.";
         Expect(validator, Out("wander_greet", "player", "와, 처음 온 친구에게 반가운 마음이 담겨 있다."), firstGuest, OutputProblem.Forbidden, "'~담겨 있다.'는 설명문 금칙어");
-        foreach (string narrated in new[] { "왔구나 반가운 마음에 헛기침이 나온다.", "개운하게 돌아온 고마워한다", "주인을 따라 장난치듯 버둥거린다.", "네 안부에 반가움을 느끼며 '내 자개는 공들였어'라고 말한다." })
+        foreach (string narrated in new[] { "왔구나 반가운 마음에 헛기침이 나온다.", "개운하게 돌아온 고마워한다", "주인을 따라 장난치듯 버둥거린다.", "네 안부에 반가움을 느끼며 '내 자개는 공들였어'라고 말한다.",
+                // 남을 주어로 한 현재형 설명 (CodeRabbit 리뷰)
+                "도깨비가 천천히 걷는다.", "친구가 전시관을 둘러보고 있다.", "발굴자가 너를 바라본다" })
         {
             Check(filter.Find(narrated) != null, "설명문 끝맺음은 거름: " + narrated);
         }
         foreach (string spoken in new[] { "왔구나, 반가운 마음이 드네.", "킁킁, 아는 냄새다!", "어서 와! 반갑다.", "드디어 나타났다!", "또 왔구나, 반갑다", "새끼 참새가 날아간다!",
                 "오, 내 자개 진짜 멋있다.", "향이 좋은 날엔 이런 전시도 참 예쁘단다.", "여기 있다!", "킁킁, 개운하다. 고마워!",
                 // 받침 ㄴ + 다로 넓게 잡으면 걸리던 말 (동사 현재형이라도 도깨비의 행동을 그리는 설명이 아니다)
-                "정말 신난다.", "네가 오니 힘이 난다.", "잘 어울린다.", "그럼 나도 간다.", "난 다 알고 있다.", "아직 남아 있다.", "기분이 좋아진다." })
+                "정말 신난다.", "네가 오니 힘이 난다.", "잘 어울린다.", "그럼 나도 간다.", "난 다 알고 있다.", "아직 남아 있다.", "기분이 좋아진다.",
+                // 남이 주어라도 '-니·-서'로 이어진 뒤 끝 동사의 주어가 다른 말, 형용사로 맺은 말
+                "친구가 오니 힘이 난다.", "친구가 와서 신난다.", "친구는 언제나 반갑다.", "발굴자는 다 알고 있다!" })
         {
             ForbiddenMatch hit = filter.Find(spoken);
             Check(hit == null, "말로 끝나는 '-다'는 통과: " + spoken + (hit != null ? " ← " + hit : ""));
@@ -2119,6 +2122,10 @@ public static class Program
         clear.Situation = "주인이 안부를 물었다.";
         clear.Facts.Add(new Fact(NpcFactKeys.Clarity, "선명"));
         Expect(validator, Out("answer_status", "player", "나는 잘 지내고 있어."), clear, OutputProblem.None, "선명한 안부는 부탁이 필요 없음");
+        // 말줄임 뒤의 '?'는 문장 끝으로 남긴다 — '…'로 합치면 끊긴 대사가 끝난 문장을 잃고 TooLong 이 되었다.
+        OutputCheck cutQuestion = validator.Check("{\"line\": \"별일 없었어...? 오늘", clear);
+        Check(cutQuestion.IsValid && cutQuestion.Truncated && cutQuestion.Line == "별일 없었어?",
+                "끊긴 대사의 '...?'는 '?'로 합쳐 끝난 문장을 남김 ← " + cutQuestion.Line + " " + cutQuestion.Problem + " " + cutQuestion.Detail);
 
         // 4) 토큰 한도에서 끊겨 '}' 만 빠진 JSON 도 읽는다 (묘작이 S08 #4: 문자열은 닫았는데 객체가 안 닫힘)
         ReactionRequest care = Request(9, InteractionMode.Owner, NpcInputs.Care, NpcActions.ThankJoyful);

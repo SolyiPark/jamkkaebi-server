@@ -176,12 +176,18 @@ public class ExhibitionService {
             int xLimit = properties.gridWidth() - width + 1;
             int yLimit = properties.gridHeight() - height + 1;
             boolean inside = true;
-            if (item.x() < 0 || item.x() >= xLimit) {
+            if (xLimit <= 0 || yLimit <= 0) {
+                // 그리드가 항목보다 작으면 어떤 좌표도 맞지 않는다 — "0 이상 0 미만" 같은 좌표 사유 대신 놓을 수 없다고 알린다
+                errors.add(new FieldError("items[%d]".formatted(i),
+                        "%d×%d 그리드에는 %d×%d 칸을 차지하는 항목을 놓을 수 없습니다.".formatted(
+                                properties.gridWidth(), properties.gridHeight(), width, height)));
+                inside = false;
+            } else if (item.x() < 0 || item.x() >= xLimit) {
                 errors.add(new FieldError("items[%d].x".formatted(i),
                         "0 이상 %d 미만이어야 합니다.".formatted(xLimit)));
                 inside = false;
             }
-            if (item.y() < 0 || item.y() >= yLimit) {
+            if (xLimit > 0 && yLimit > 0 && (item.y() < 0 || item.y() >= yLimit)) {
                 errors.add(new FieldError("items[%d].y".formatted(i),
                         "0 이상 %d 미만이어야 합니다.".formatted(yLimit)));
                 inside = false;

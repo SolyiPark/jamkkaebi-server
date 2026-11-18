@@ -1474,7 +1474,8 @@ namespace Jamkkaebi.Npc
 
         /// <summary>
         /// 연달아 붙은 문장 부호를 하나만 남긴다 ("반가워.!"→"반가워.", "하늘아.~"→"하늘아."). 앞의 끝 부호를 남기고, 쉼표와 끝 부호가 붙었으면 끝 부호를 남긴다("고마워,!"→"고마워!").
-        /// 말줄임('…', 점 둘 이상)으로 시작하면 '…' 하나로 바꾼다("그래..."→"그래…", "고마워,..."→"고마워…"). run.py 의 collapse_punctuation 과 같다.
+        /// 말줄임('…', 점 둘 이상)으로 시작하면 '…' 하나로 바꾸되, 뒤에 문장 끝 부호(?·!·~)가 있으면 그 부호를 남긴다("그래..."→"그래…", "고마워,..."→"고마워…",
+        /// "별일 없었어...?"→"별일 없었어?"). run.py 의 collapse_punctuation 과 같다.
         /// </summary>
         public static string CollapsePunctuation(string line)
         {
@@ -1491,7 +1492,10 @@ namespace Jamkkaebi.Npc
                 }
                 if (marks[0] == '…' || (marks[0] == '.' && marks.Length > 1 && (marks[1] == '.' || marks[1] == '…')))
                 {
-                    return "…";
+                    // 말줄임 뒤의 문장 끝 부호(?·!·~)는 남긴다 ("별일 없었어...?"→"별일 없었어?"). '…'는 문장 끝이 아니라서 '…'로 바꾸면
+                    // 토큰 한도에서 끊긴 대사가 끝난 문장을 잃고 TooLong 이 된다 (CodeRabbit 리뷰)
+                    int strong = marks.IndexOfAny(new[] { '?', '!', '~' });
+                    return strong >= 0 ? marks.Substring(strong, 1) : "…";
                 }
                 return marks.Substring(0, 1);
             });

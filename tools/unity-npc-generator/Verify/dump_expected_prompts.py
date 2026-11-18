@@ -93,6 +93,7 @@ SPEECH_SAMPLES = [
     ("반말", "왔구나?! 반가워!!"),
     ("반말", "그래... 고마워,!"),
     ("반말", "고마워,... 그래.… 와...! 좋아"),
+    ("반말", "별일 없었어...? 음…~ 그래..."),
 ]
 expected["_speechSamples"] = [
     {"label": label, "line": line, "want": run.normalize_speech(line, label)} for label, line in SPEECH_SAMPLES
