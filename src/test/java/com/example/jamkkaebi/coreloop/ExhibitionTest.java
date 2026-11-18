@@ -390,6 +390,59 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
+    @DisplayName("건물은 2×2 칸이라 왼쪽 위 칸이 그리드 끝에 붙으면 C001 이다")
+    void 건물은_두_칸을_차지해_그리드_안에_들어와야_한다() throws Exception {
+        Player player = player("학예사");
+        int buildingId = giveBuilding(player, Era.GORYEO);
+
+        // 7×7 그리드에서 건물의 왼쪽 위 칸은 0~5 (x+1, y+1 도 그리드 안이어야 한다)
+        put(player, "/api/exhibition/layout", layout(item("BUILDING", buildingId, 6, 5)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("C001"))
+                .andExpect(jsonPath("$.errors[0].field").value("items[0].x"))
+                .andExpect(jsonPath("$.errors[0].reason").value("0 이상 6 미만이어야 합니다."));
+        put(player, "/api/exhibition/layout", layout(item("BUILDING", buildingId, 5, 6)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("items[0].y"));
+        put(player, "/api/exhibition/layout", layout(item("BUILDING", buildingId, 5, 5)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("칸이 겹치는 항목이 있으면 C001 이고 아무것도 바뀌지 않는다")
+    void 칸이_겹치면_거부() throws Exception {
+        Player player = player("학예사");
+        giveCompleted(player, INCENSE_BURNER);
+        giveCompleted(player, MAPAE);
+        int buildingId = giveBuilding(player, Era.GORYEO);
+
+        // 건물(2,2)은 (2,2) (3,2) (2,3) (3,3) 을 차지한다 — 도깨비가 그 칸 안에 있으면 겹친다
+        put(player, "/api/exhibition/layout", layout(
+                item("BUILDING", buildingId, 2, 2),
+                item("SPIRIT", INCENSE_BURNER, 3, 3)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("C001"))
+                .andExpect(jsonPath("$.errors.length()").value(1))
+                .andExpect(jsonPath("$.errors[0].field").value("items[1]"))
+                .andExpect(jsonPath("$.errors[0].reason").value("items[0] 와 칸이 겹칩니다."));
+        // 도깨비끼리도 같은 칸이면 겹친다
+        put(player, "/api/exhibition/layout", layout(
+                item("SPIRIT", INCENSE_BURNER, 1, 1),
+                item("SPIRIT", MAPAE, 1, 1)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[0].field").value("items[1]"));
+
+        assertThat(userRelicRepository.findAllByUserId(player.id())).noneMatch(UserRelic::isDisplayed);
+
+        // 맞닿기만 하면(칸이 겹치지 않으면) 둘 수 있다: 건물 (2,2)~(3,3), 도깨비 (4,3), (1,2)
+        put(player, "/api/exhibition/layout", layout(
+                item("BUILDING", buildingId, 2, 2),
+                item("SPIRIT", INCENSE_BURNER, 4, 3),
+                item("SPIRIT", MAPAE, 1, 2)))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     @DisplayName("같은 번호라도 도깨비와 건물은 다른 항목이다")
     void 번호가_같은_도깨비와_건물() throws Exception {
         Player player = player("학예사");
