@@ -154,6 +154,196 @@ namespace Jamkkaebi.Npc
             return result.EndsWith(",") ? result.Substring(0, result.Length - 1) + "." : result;
         }
 
+        // 문장 끝 부호와 닫는 부호만 남은 꼬리, 쉼표로 가른 마디(clause). 문장은 SentenceEnds(출력 검사와 같은 문장 끝 규칙)로 가른다
+        private static readonly Regex SentenceTail = new Regex("[.!?~。…]*[\"'”’)\\]」』]*\\s*$", RegexOptions.CultureInvariant);
+        private static readonly Regex ClauseRun = new Regex("[^,]+,*\\s*", RegexOptions.CultureInvariant);
+        // 앞 낱말을 지울 때 함께 지우는 문장 안 부호 ("고마워… 정말 고마워" → "정말 고마워")
+        private static readonly Regex InnerMarks = new Regex("^[…~.]*\\s*", RegexOptions.CultureInvariant);
+
+        // 되풀이한 마디·낱말 사이에 이것만 있으면 같은 말을 되풀이한 것이다 ("또 왔네, 다시 왔네", "고마워 정말 고마워"). 주어·대상·다른 풀이말이 있으면
+        // 다른 말이라("나는 좋아, 너는 안 좋아") 지우지 않고 출력 검사 InnerRepeat 에 맡긴다 (CodeRabbit 리뷰)
+        private static readonly HashSet<string> RestateFillers = new HashSet<string>
+        {
+            "또", "다시", "정말", "진짜", "참", "너무", "아주", "정말로", "진짜로", "늘", "항상", "오늘도", "와", "오", "아", "음", "우와", "어서",
+            "많이", "꼭", "더", "좀", "역시", "엄청", "되게", "무척", "매우", "완전", "그래", "응", "어", "자", "참말"
+        };
+
+        /// <summary>
+        /// 한 문장 안에서 두 글자 이상 같은 낱말로 같은 말을 되풀이하면 하나만 남긴다 ("또 왔네, 다시 왔네" → "다시 왔네"). 거르면 다시 만드는 데 1.5~2초가 들어 고쳐 쓴다.
+        /// <list type="bullet">
+        /// <item>쉼표로 가른 서로 다른 마디에 있으면 짧은 마디를 통째로 지운다(길이가 같으면 뒤 마디). 낱말만 지우면 "또, 다시 왔네"처럼 마디가 망가진다.
+        /// 뒤 마디를 지우면 그 마디의 문장 끝 부호를 남긴다 ("닦아줘서 고마워, 정말 고마워!" → "닦아줘서 고마워!").</item>
+        /// <item>한 마디 안에 있으면 앞의 낱말만 지운다 ("고마워 정말 고마워." → "정말 고마워.").</item>
+        /// </list>
+        /// 같은 말일 때만 지운다: 지울 마디(또는 두 낱말 사이)에 되풀이한 낱말 말고는 '또·다시·정말' 같은 꾸밈(RestateFillers)만 있고, 두 마디의 부정(안·못·않·없)이 같아야 한다.
+        /// "나는 좋아, 너는 안 좋아"·"좋아, 정말 안 좋아"는 두 말이 달라 그대로 두고 InnerRepeat 가 거른다. 문장(SentenceEnds)이 다르면 건드리지 않고,
+        /// '나는'·'여기' 같은 RepeatExempt 낱말과 한 글자 낱말은 되풀이로 보지 않는다. 마디 길이는 코드 포인트로 센다(이모지 하나 = 1). run.py 의 drop_repeated_word 와 같다.
+        /// </summary>
+        public static string DropRepeatedWord(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return line;
+            }
+            var result = new System.Text.StringBuilder(line.Length);
+            int start = 0;
+            List<int> ends = SentenceEnds(line);
+            ends.Add(line.Length);
+            foreach (int end in ends)
+            {
+                if (end <= start)
+                {
+                    continue;
+                }
+                // 문장 뒤의 띄어쓰기도 그 문장에 붙여 둔다 (고친 뒤에도 문장 사이 띄어쓰기를 남긴다)
+                int stop = end;
+                while (stop < line.Length && char.IsWhiteSpace(line[stop]))
+                {
+                    stop++;
+                }
+                result.Append(DropRepeatedWordInSentence(line.Substring(start, stop - start)));
+                start = stop;
+            }
+            if (start < line.Length)
+            {
+                result.Append(line.Substring(start));
+            }
+            return result.ToString();
+        }
+
+        private static string DropRepeatedWordInSentence(string sentence)
+        {
+            // 한 번에 되풀이 하나를 지운다. 되풀이가 여럿이면 다시 본다 (낱말 수만큼이면 넉넉하다)
+            for (int guard = 0; guard < 16; guard++)
+            {
+                string tail = SentenceTail.Match(sentence).Value;
+                string body = sentence.Substring(0, sentence.Length - tail.Length);
+                string fixedBody = DropOneRepeat(body);
+                if (fixedBody == null)
+                {
+                    return sentence;
+                }
+                sentence = fixedBody + tail;
+            }
+            return sentence;
+        }
+
+        // 같은 말의 되풀이 하나를 지운 body, 지울 것이 없으면 null
+        private static string DropOneRepeat(string body)
+        {
+            var words = new List<Match>();
+            foreach (Match word in HangulWord.Matches(body))
+            {
+                if (word.Length >= 2 && !RepeatExempt.Contains(word.Value))
+                {
+                    words.Add(word);
+                }
+            }
+            MatchCollection clauses = ClauseRun.Matches(body);
+            for (int j = 1; j < words.Count; j++)
+            {
+                Match first = null;
+                for (int i = 0; i < j && first == null; i++)
+                {
+                    if (words[i].Value == words[j].Value)
+                    {
+                        first = words[i];
+                    }
+                }
+                if (first == null)
+                {
+                    continue;
+                }
+                Match second = words[j];
+                int firstClause = ClauseAt(clauses, first.Index);
+                int secondClause = ClauseAt(clauses, second.Index);
+                if (firstClause < 0 || secondClause < 0)
+                {
+                    continue;
+                }
+                if (firstClause == secondClause)
+                {
+                    int between = first.Index + first.Length;
+                    if (!OnlyFillers(body.Substring(between, second.Index - between), null))
+                    {
+                        continue;
+                    }
+                    int end = between + InnerMarks.Match(body.Substring(between)).Length;
+                    return body.Substring(0, first.Index) + body.Substring(end);
+                }
+                string firstText = clauses[firstClause].Value;
+                string secondText = clauses[secondClause].Value;
+                int drop = CodePoints(Core(firstText)) < CodePoints(Core(secondText)) ? firstClause : secondClause;
+                string dropped = clauses[drop].Value;
+                string kept = drop == firstClause ? secondText : firstText;
+                if (!OnlyFillers(dropped, first.Value) || Negated(dropped) != Negated(kept))
+                {
+                    continue;
+                }
+                string result = body.Remove(clauses[drop].Index, clauses[drop].Length);
+                if (drop == clauses.Count - 1)
+                {
+                    // 마지막 마디를 지우면 앞 마디의 쉼표가 문장 끝에 남는다 → 지우고 지운 마디의 끝 부호를 붙인다
+                    result = result.TrimEnd().TrimEnd(',').TrimEnd();
+                }
+                return result;
+            }
+            return null;
+        }
+
+        // text 의 한글 낱말이 repeated 와 RestateFillers 뿐인지
+        private static bool OnlyFillers(string text, string repeated)
+        {
+            foreach (Match word in HangulWord.Matches(text))
+            {
+                if (word.Value != repeated && !RestateFillers.Contains(word.Value))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // 부정하는 말(안·못·않·없)이 있는지
+        private static bool Negated(string text)
+        {
+            foreach (Match word in HangulWord.Matches(text))
+            {
+                string w = word.Value;
+                if (w == "안" || w.StartsWith("못", StringComparison.Ordinal) || w.Contains("않") || w.Contains("없"))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        // 코드 포인트 수 (이모지 같은 서로게이트 쌍은 하나로 센다 — Python len 과 같다)
+        private static int CodePoints(string text)
+        {
+            int count = 0;
+            foreach (char c in text)
+            {
+                if (!char.IsLowSurrogate(c))
+                {
+                    count++;
+                }
+            }
+            return count;
+        }
+
+        private static int ClauseAt(MatchCollection clauses, int index)
+        {
+            for (int i = 0; i < clauses.Count; i++)
+            {
+                if (index >= clauses[i].Index && index < clauses[i].Index + clauses[i].Length)
+                {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
         /// <summary>한 대사 안에서 두 번 나온 낱말(세 글자 이상은 앞 두 글자가 같으면 같은 말로 본다). 없으면 null. run.py 의 inner_repeat 와 같다.</summary>
         public static string InnerRepeat(string line)
         {
@@ -716,14 +906,58 @@ namespace Jamkkaebi.Npc
 
         private static readonly Dictionary<string, Regex> OwnPossessiveByThings = new Dictionary<string, Regex>();
 
-        private static readonly Regex CraftWords = new Regex("공들|정성껏|빚[어은]|새[긴겨]|칠한|세공|깎[은아]|만든", RegexOptions.Compiled);
-        private static readonly Regex SpectatorEnding = new Regex("거네|거구나|거로구나|것이네|것이로구나", RegexOptions.Compiled);
+        // 2026-11-18 20:22 시험 S14 #1: "오, 자개가 정말 정성스럽게 만들어졌네."가 통과했다 — '정성스럽게'·'만들어'와 입음꼴 끝맺음('~어졌네')을 몰랐다
+        private static readonly Regex CraftWords = new Regex("공들|정성껏|정성스럽|정성 ?들|빚[어은]|새[긴겨]|칠한|세공|깎[은아]|만든|만들어|다듬[어은]|꾸[며민]", RegexOptions.Compiled);
+        // 구경하는 끝맺음: '~거네'·'~거구나', 남이 만든 것처럼 말하는 입음꼴('만들어졌네'·'새겨져 있네'·'다듬어졌어'·'완성됐네')
+        private static readonly Regex SpectatorEnding = new Regex("거네|거구나|거로구나|것이네|것이로구나|졌|져 ?있|되었|됐|되어 ?있|돼 ?있", RegexOptions.Compiled);
+        // 자기 것을 말하는 풀이말은 쉼표나 다른 주어('그림은'·'내가')에서 끝난다. "자개가 반짝이고, 그림은 정성스럽게 완성됐어."의 '완성됐어'는 그림 이야기다 (CodeRabbit 리뷰)
+        private static readonly Regex SubjectToken = new Regex("^[가-힣]+[이가은는]$", RegexOptions.CultureInvariant);
+        // '-이'로 끝나는 부사 (주어가 아니다)
+        private static readonly HashSet<string> AdverbYi = new HashSet<string> { "많이", "같이", "깊이", "높이", "깨끗이", "반듯이", "따뜻이", "일찍이", "굳이", "고이", "가까이", "틈틈이" };
+
+        // 설명문 규칙(forbidden.json narration)이 주어로 보는 낱말과 끝 부호
+        private static readonly Regex NarrationSubject = new Regex("^(?:도깨비|친구|주인|손님|사람|상대|발굴자|아이)(?:이|가|은|는|도)", RegexOptions.CultureInvariant);
+        private static readonly Regex NarrationMarks = new Regex("[.!?…~,]+$", RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 다듬기 전 대사에서 걸린 설명문(공백을 지운 꼴)이 내보낼 대사(공백을 지운 꼴)에 남아 있는지. 주어('발굴자가')는 다듬기가 지웠을 수 있어 빼고 견준다
+        /// ("발굴자가그림을그리고있다." → "그림을그리고있다"). 남은 말이 네 글자보다 짧으면 보지 않는다 (낱말 금칙어는 내보낼 대사에서 이미 찾았다). run.py 의 narration_kept 와 같다.
+        /// </summary>
+        public static bool NarrationKept(string rawMatch, string deliveredCore)
+        {
+            if (string.IsNullOrEmpty(rawMatch) || string.IsNullOrEmpty(deliveredCore))
+            {
+                return false;
+            }
+            string rest = NarrationMarks.Replace(NarrationSubject.Replace(rawMatch, ""), "");
+            return rest.Length >= 4 && deliveredCore.IndexOf(rest, StringComparison.Ordinal) >= 0;
+        }
+
+        // 자기 것 뒤에 이어진 말에서, 그것을 말하는 풀이말만 (문장 끝·쉼표·다른 주어 앞까지)
+        private static string OwnPredicate(string rest)
+        {
+            int stop = rest.IndexOfAny(new[] { '.', '!', '?', '…', ',' });
+            if (stop >= 0)
+            {
+                rest = rest.Substring(0, stop);
+            }
+            int at = 0;
+            foreach (string token in rest.Split(' '))
+            {
+                if (token.Length >= 2 && SubjectToken.IsMatch(token) && !AdverbYi.Contains(token) && !CraftWords.IsMatch(token))
+                {
+                    return rest.Substring(0, at);
+                }
+                at += token.Length + 1;
+            }
+            return rest;
+        }
 
         /// <summary>
         /// 주체가 어긋난 대사의 그 낱말, 아니면 null. 도깨비가 자기 것(ownThings: 자개·옻칠…)을 '내 ~' 없이 남의 솜씨를 구경하듯 말하는 것을 잡는다
         /// ("오, 자개가 정말 공들여 만든 거네 덕분에 빛나네." — 2026-11-16 시험 S14). 자기 것이 주어(이·가·은·는)이고, 같은 문장에 만든 솜씨 낱말
-        /// (공들·정성껏·빚어·새겨·칠한…)과 구경하는 끝맺음(~거네·~거구나)이 함께 있고, 앞에 '내'·'나의'·'우리'가 없을 때만 건다.
-        /// "몸"·"모습"은 거의 모든 문장에 나오는 낱말이라 뺀다. run.py 의 subject_contradiction 과 같다.
+        /// (공들·정성껏·정성스럽게·빚어·새겨·만들어…)과 구경하는 끝맺음(~거네·~거구나, 입음꼴 ~어졌네·~됐네)이 함께 있고, 앞에 '내'·'나의'·'우리'가 없을 때만 건다
+        /// ("자개가 정성스럽게 만들어졌네." — 2026-11-18 시험 S14). "몸"·"모습"은 거의 모든 문장에 나오는 낱말이라 뺀다. run.py 의 subject_contradiction 과 같다.
         /// </summary>
         public static string SubjectContradiction(string line, IList<string> ownThings)
         {
@@ -756,12 +990,7 @@ namespace Jamkkaebi.Npc
                     {
                         continue;
                     }
-                    string rest = line.Substring(from + 1);
-                    int stop = rest.IndexOfAny(new[] { '.', '!', '?', '…' });
-                    if (stop >= 0)
-                    {
-                        rest = rest.Substring(0, stop);
-                    }
+                    string rest = OwnPredicate(line.Substring(from + 1));
                     if (CraftWords.IsMatch(rest) && SpectatorEnding.IsMatch(rest))
                     {
                         return thing;
@@ -1331,6 +1560,47 @@ namespace Jamkkaebi.Npc
         private static readonly string[] PlayerDropParticles = { "가", "이", "는", "은", "를", "을", "한테서", "한테", "에게서", "에게", "의" };
         private static readonly Regex FollowedByWords = new Regex("^\\s+[가-힣]", RegexOptions.CultureInvariant);
 
+        // 꾸밈말(관형형) 뒤의 플레이어 말은 지우지 않는다. "처음 온 너를 만나니 기쁘다"에서 '너를'을 지우면 꾸밈말만 남아 "처음 온 만나니 기쁘다"가 됐다
+        // (2026-11-18 20:22 시험 S05 #1). 지우지 않은 말은 이름으로 바뀌어("처음 온 발굴자를") 출력 검사 PlayerThirdPerson 이 거르고 다시 만든다.
+        // 꾸밈말: 받침 ㄴ·ㄹ로 끝나는 앞 낱말("온"·"만난"·"반가운"·"보고 싶던"·"올"). 조사('나는'·'에선'…)와 줄인 말('난'·'널'·'그건'), ㄴ·ㄹ로 끝나는 부사·때 낱말은 뺀다 ('만난'의 '난'은 꾸밈말).
+        // '-은·-는'은 끝 글자로는 조사('나는')와 꾸밈말('잘 아는 너를')을 가를 수 없다 → 앞말이 대명사·때 낱말·흔한 사람 낱말(TopicStems)일 때만 조사로 본다 (CodeRabbit 리뷰).
+        // run.py 의 _after_modifier 와 같다
+        private static readonly HashSet<char> NonModifierLast = new HashSet<char>("을를엔선만란론");
+        private static readonly HashSet<string> TopicStems = new HashSet<string>
+        {
+            "나", "너", "저", "우리", "그", "이", "그것", "이것", "저것", "그거", "이거", "오늘", "내일", "지금", "요즘", "이번", "이제", "사실", "실",
+            "여기", "거기", "저기", "처음", "다음", "정말", "진짜", "친구", "도깨비", "발굴자", "주인", "손님", "사람"
+        };
+        // ㄴ·ㄹ 받침으로 끝나는 부사·때 낱말과 줄인 말 ("사실 너를 기다렸어"는 예전처럼 '너를'을 지운다 — CodeRabbit 리뷰)
+        private static readonly HashSet<string> NonModifierWords = new HashSet<string> { "오늘", "내일", "정말", "참말", "늘", "얼른", "한번", "이번", "우선", "일단", "잘", "그만",
+                "사실", "제일", "매일", "종일", "잠깐", "물론", "조만간",
+                "난", "넌", "날", "널", "건", "걸", "그건", "이건", "저건", "그걸", "이걸", "땐", "그땐", "이젠" };
+        private static readonly Regex TrailingHangulWord = new Regex("([가-힣]+)\\s+$", RegexOptions.CultureInvariant);
+        // "너를 위한 거야"·"도윤을 위해 준비했어"도 지우면 "위한 거야"만 남는다
+        private static readonly Regex ForWhom = new Regex("^\\s+위[해한하]", RegexOptions.CultureInvariant);
+
+        /// <summary>line 의 index 자리 바로 앞 낱말이 꾸밈말(관형형)인지 ("처음 온 너를"의 '너를' 자리 → true, "오늘 너를" → false).</summary>
+        public static bool AfterModifier(string line, int index)
+        {
+            if (string.IsNullOrEmpty(line) || index <= 0 || index > line.Length)
+            {
+                return false;
+            }
+            Match m = TrailingHangulWord.Match(line.Substring(0, index));
+            if (!m.Success)
+            {
+                return false;
+            }
+            string word = m.Groups[1].Value;
+            char last = word[word.Length - 1];
+            int final = (last - 0xAC00) % 28;
+            if ((final != 4 && final != 8) || NonModifierLast.Contains(last) || NonModifierWords.Contains(word))
+            {
+                return false;
+            }
+            return !((last == '은' || last == '는') && TopicStems.Contains(word.Substring(0, word.Length - 1)));
+        }
+
         public static string PlayerPronounsToName(string line, string callName)
         {
             if (string.IsNullOrEmpty(line) || string.IsNullOrEmpty(callName))
@@ -1342,7 +1612,8 @@ namespace Jamkkaebi.Npc
             bool dropped = false;
             string result = PlayerPronoun.Replace(line, m =>
             {
-                bool canDrop = FollowedByWords.IsMatch(line.Substring(m.Index + m.Length));
+                string following = line.Substring(m.Index + m.Length);
+                bool canDrop = FollowedByWords.IsMatch(following) && !ForWhom.IsMatch(following) && !AfterModifier(line, m.Index);
                 if (m.Groups["ge"].Success)
                 {
                     if (canDrop)
@@ -1402,7 +1673,7 @@ namespace Jamkkaebi.Npc
 
         /// <summary>
         /// 대사에 플레이어 이름이 주어·목적어·여격으로 들어가 남 얘기처럼 들리면 그 말을 지운다 ("오랜만에 도윤을 찾아줘서"→"오랜만에 찾아줘서"). 부르는 말("도윤아"·"도윤이,")은 두고,
-        /// 이어지는 말이 있을 때만 지운다. 지우면 3글자도 안 남으면 그대로 둔다. run.py 의 drop_player_reference 와 같다.
+        /// 이어지는 말이 있을 때만 지운다. 꾸밈말 뒤("처음 온 도윤을")는 지우지 않는다(AfterModifier). 지우면 3글자도 안 남으면 그대로 둔다. run.py 의 drop_player_reference 와 같다.
         /// </summary>
         public static string DropPlayerReference(string line, string callName)
         {
@@ -1411,19 +1682,25 @@ namespace Jamkkaebi.Npc
                 return line;
             }
             string c = Regex.Escape(callName);
-            string result = Regex.Replace(line, "(?<![가-힣])" + c + "(?:을|를|이|가|은|는|한테서|한테|에게서|에게)\\s+(?=[가-힣])", "", RegexOptions.CultureInvariant);
+            // 꾸밈말 뒤("처음 온 도윤을 만나니")는 지우면 꾸밈말만 남는다 → 두고 PlayerThirdPerson 이 거른다
+            string result = Regex.Replace(line, "(?<![가-힣])" + c + "(?:을|를|이|가|은|는|한테서|한테|에게서|에게)\\s+(?=[가-힣])(?!위[해한하])",
+                    m => AfterModifier(line, m.Index) ? m.Value : "", RegexOptions.CultureInvariant);
             result = Regex.Replace(result, "(?<![가-힣])" + c + "\\s+(?=덕분)", "", RegexOptions.CultureInvariant);
             return Core(result).Length >= 3 ? result : line;
         }
 
-        /// <summary>고친 뒤에도 남은, 플레이어 이름이 남 얘기처럼 쓰인 말("도윤을"·"발굴자에게"). 없으면 null. run.py 의 player_third_person 과 같다.</summary>
+        /// <summary>
+        /// 고친 뒤에도 남은, 플레이어 이름이 남 얘기처럼 쓰인 말("도윤을"·"발굴자에게"·"처음 온 발굴자가 반가워"). 없으면 null. run.py 의 player_third_person 과 같다.
+        /// 주어('이·가')는 뒤에 말이 이어질 때만 본다 — "도윤이,"·"도윤이야"처럼 부르는 말은 통과한다 (꾸밈말 뒤라 지우지 않고 남긴 주어를 거른다, CodeRabbit 리뷰).
+        /// </summary>
         public static string PlayerThirdPerson(string line, string callName)
         {
             if (string.IsNullOrEmpty(line) || string.IsNullOrEmpty(callName))
             {
                 return null;
             }
-            Match found = Regex.Match(line, "(?<![가-힣])" + Regex.Escape(callName) + "(?:을|를|은|는|한테서|한테|에게서|에게|의)(?![가-힣])", RegexOptions.CultureInvariant);
+            Match found = Regex.Match(line, "(?<![가-힣])" + Regex.Escape(callName)
+                    + "(?:(?:을|를|은|는|한테서|한테|에게서|에게|의)(?![가-힣])|(?:이|가)(?=\\s+[가-힣]))", RegexOptions.CultureInvariant);
             return found.Success ? found.Value : null;
         }
 
@@ -1465,7 +1742,41 @@ namespace Jamkkaebi.Npc
             }
             // 말투 어미를 고치다 새로 생긴 이름("향산이예요"→"향산이야")을 한 번 더 지운다
             // "덕분에, 관리해 줘서 고마워."처럼 첫 낱말 뒤에 쉼표를 찍으면 어색하다 (첫 낱말을 정해 준 뒤 생겼다)
-            return DropPlayerReference(PlayerPronounsToName(UnifyPlayerCall(FixStatementQuestion(CollapseDoubleVerb(StarterComma.Replace(StripTrailingInterjection(DropRepeatedLead(GuestToFriend(StripAddress(FixThanksOverlap(FixTypos(ApplySpeech(line, label))), name)))), "$1 "))), addressName, nickname), addressName), addressName);
+            line = DropPlayerReference(PlayerPronounsToName(UnifyPlayerCall(FixStatementQuestion(CollapseDoubleVerb(StarterComma.Replace(StripTrailingInterjection(DropRepeatedWord(DropRepeatedLead(GuestToFriend(StripAddress(FixThanksOverlap(FixTypos(ApplySpeech(line, label))), name))))), "$1 "))), addressName, nickname), addressName), addressName);
+            // 말줄임을 합치면 '?'가 어미 바로 뒤로 온다 ("기분이 좋구나...?"→"기분이 좋구나?"). 이때 평서 어미의 '?'를 한 번 더 고친다 (CodeRabbit 리뷰)
+            return FixStatementQuestion(CollapsePunctuation(line));
+        }
+
+        // 연달아 붙은 문장 부호. 호칭·자기 이름을 지운 자리("반가워. 주인님!"→"반가워.!")나 '?'를 '.'로 고친 자리("왔구나?!"→"왔구나.!")에 생긴다 (2026-11-18 시험)
+        private static readonly Regex PunctuationRun = new Regex("[.,!?~…]{2,}", RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 연달아 붙은 문장 부호를 하나만 남긴다 ("반가워.!"→"반가워.", "하늘아.~"→"하늘아."). 앞의 끝 부호를 남기고, 쉼표와 끝 부호가 붙었으면 끝 부호를 남긴다("고마워,!"→"고마워!").
+        /// 말줄임('…', 점 둘 이상)으로 시작하면 '…' 하나로 바꾸되, 뒤에 문장 끝 부호(?·!·~)가 있으면 그 부호를 남긴다("그래..."→"그래…", "고마워,..."→"고마워…",
+        /// "별일 없었어...?"→"별일 없었어?"). run.py 의 collapse_punctuation 과 같다.
+        /// </summary>
+        public static string CollapsePunctuation(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return line;
+            }
+            return PunctuationRun.Replace(line, m =>
+            {
+                string marks = m.Value.Replace(",", "");
+                if (marks.Length == 0)
+                {
+                    return ",";
+                }
+                if (marks[0] == '…' || (marks[0] == '.' && marks.Length > 1 && (marks[1] == '.' || marks[1] == '…')))
+                {
+                    // 말줄임 뒤의 문장 끝 부호(?·!·~)는 남긴다 ("별일 없었어...?"→"별일 없었어?"). '…'는 문장 끝이 아니라서 '…'로 바꾸면
+                    // 토큰 한도에서 끊긴 대사가 끝난 문장을 잃고 TooLong 이 된다 (CodeRabbit 리뷰)
+                    int strong = marks.IndexOfAny(new[] { '?', '!', '~' });
+                    return strong >= 0 ? marks.Substring(strong, 1) : "…";
+                }
+                return marks.Substring(0, 1);
+            });
         }
 
         private static string ApplySpeech(string line, string label)

@@ -64,6 +64,25 @@ namespace Jamkkaebi.Npc
     {
         private readonly List<Entry> entries = new List<Entry>();
 
+        /// <summary>
+        /// patterns 의 {ㄴ받침} 자리에 넣는 글자: 받침이 ㄴ인 한글 글자 399자. '-ㄴ다/-는다'(걷는다·온다) 동사 현재 평서형을 가린다.
+        /// run.py 의 NIEUN_FINAL 과 같다.
+        /// </summary>
+        public static readonly string NieunFinal = BuildNieunFinal();
+
+        private static string BuildNieunFinal()
+        {
+            var builder = new StringBuilder();
+            for (int i = 0; i < 11172; i++)
+            {
+                if (i % 28 == 4)
+                {
+                    builder.Append((char)(0xAC00 + i));
+                }
+            }
+            return builder.ToString();
+        }
+
         public NpcLineFilter(ForbiddenCatalog catalog)
         {
             if (catalog == null)
@@ -98,7 +117,7 @@ namespace Jamkkaebi.Npc
                     {
                         if (!string.IsNullOrEmpty(pattern))
                         {
-                            entry.Patterns.Add(new Regex(pattern, RegexOptions.CultureInvariant));
+                            entry.Patterns.Add(new Regex(pattern.Replace("{ㄴ받침}", NieunFinal), RegexOptions.CultureInvariant));
                         }
                     }
                 }

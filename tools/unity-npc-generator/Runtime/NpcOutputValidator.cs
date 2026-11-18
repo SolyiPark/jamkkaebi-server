@@ -99,7 +99,8 @@ namespace Jamkkaebi.Npc
                       + " (" + FullLine.Length + "자 → " + Line.Length + "자)";
             if (LineBeforeSpeechFix != null)
             {
-                string fix = "어미를 말투에 맞게 고침 ('" + LineBeforeSpeechFix + "')";
+                // 고친 뒤 코드가 앞 문장·부탁을 붙이거나 바꾸기도 해서(흐려진 안부) 고치기 전 대사만 적으면 최종 대사와 전혀 달라 보였다 (2026-11-18 기기 시험 S03). 최종 대사를 함께 적는다
+                string fix = "어미를 말투에 맞게 고침 ('" + LineBeforeSpeechFix + "' → '" + Line + "')";
                 note = note == null ? fix : note + "; " + fix;
             }
             return ReactionResult.Success(requestId, ActionId, TargetId, Line, ReactionSource.Slm, note);
@@ -354,10 +355,13 @@ namespace Jamkkaebi.Npc
             ForbiddenMatch bad = filter.Find(fitted);
             if (bad == null && NormalizeSpeech)
             {
-                // 말투 다듬기가 '네가'를 지우면 "네가 관리를 안 해줘서"의 탓하는 말이 문장으로 안 보인다 — 다듬기 전 대사로도 '지나친 퉁명스러움·무시' 묶음(cold)을 본다
+                // 말투 다듬기가 '네가'를 지우면 "네가 관리를 안 해줘서"의 탓하는 말이 문장으로 안 보인다 — 다듬기 전 대사로도 '지나친 퉁명스러움·무시' 묶음(cold)을 본다.
+                // 설명문(narration)도 같다: "발굴자가 그림을 그리고 있다."에서 '발굴자가'를 지우면 주어가 없어 설명문 규칙에 안 걸린다. 다듬기 전 대사에서 걸린
+                // 설명문이 내보낼 대사에 남아 있을 때만 거른다 (앞 문장만 남겨 그 문장이 빠졌으면 통과, CodeRabbit 리뷰)
+                string fittedCore = NpcLineFilter.Normalize(fitted);
                 foreach (ForbiddenMatch rawHit in filter.FindAll(rawLine))
                 {
-                    if (rawHit.GroupId == "cold")
+                    if (rawHit.GroupId == "cold" || (rawHit.GroupId == "narration" && NpcLineChecks.NarrationKept(rawHit.Text, fittedCore)))
                     {
                         bad = rawHit;
                         break;

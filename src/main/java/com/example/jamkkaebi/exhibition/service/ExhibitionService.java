@@ -36,6 +36,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -43,12 +44,11 @@ import java.util.Set;
  * 내 전시관 — 조회, 배치 저장, 도깨비 숨기기.
  *
  * <p>배치 상태는 유물·건물 행({@code user_relics} · {@code user_buildings})에 좌표와 함께 들어 있다.
- * (따로 테이블로 두지 않는다.)
  */
 @Service
 public class ExhibitionService {
 
-    /** 방문 기록·친밀도에 쓰는 기간(일). 오늘을 포함한 최근 30일. */
+    /** 방문 기록·친밀도에 쓰는 기간. 오늘을 포함한 최근 30일. */
     public static final int RECENT_VISIT_DAYS = 30;
 
     private final UserRepository userRepository;
@@ -161,25 +161,59 @@ public class ExhibitionService {
     /**
      * 형식 검사
      *
-     * <p>사유를 항목마다 모아 한 번에 돌려준다.
+     * <p>좌표는 항목이 차지하는 칸(도깨비 1×1, 건물 2×2, {@link ExhibitItemType})이 모두 그리드 안에 들어오는지 본다 —
+     * 건물은 왼쪽 위 칸 좌표가 {@code 0 ≤ x ≤ 가로-2} 여야 한다. 그리고 항목끼리 칸이 겹치지 않는지 본다.
+     * 사유를 항목마다 모아 한 번에 돌려준다.
      */
     private void validate(List<ExhibitionLayoutRequest.Item> items) {
         List<FieldError> errors = new ArrayList<>();
         Set<Slot> seen = new HashSet<>();
+        Map<Cell, Integer> occupied = new HashMap<>();
         for (int i = 0; i < items.size(); i++) {
             ExhibitionLayoutRequest.Item item = items.get(i);
-            //좌표가 그리드 안인지
-            if (item.x() < 0 || item.x() >= properties.gridWidth()) {
-                errors.add(new FieldError("items[%d].x".formatted(i),
-                        "0 이상 %d 미만이어야 합니다.".formatted(properties.gridWidth())));
+            int width = item.type().width();
+            int height = item.type().height();
+            // 항목이 차지하는 칸이 모두 그리드 안인지 (왼쪽 위 칸 좌표의 범위는 그리드 - 크기 + 1 미만)
+            int xLimit = properties.gridWidth() - width + 1;
+            int yLimit = properties.gridHeight() - height + 1;
+            boolean inside = true;
+            if (xLimit <= 0 || yLimit <= 0) {
+                // 그리드가 항목보다 작으면 어떤 좌표도 맞지 않는다 — "0 이상 0 미만" 같은 좌표 사유 대신 놓을 수 없다고 알린다
+                errors.add(new FieldError(itemPath(i),
+                        String.format(Locale.ROOT, "%d×%d 그리드에는 %d×%d 칸을 차지하는 항목을 놓을 수 없습니다.",
+                                properties.gridWidth(), properties.gridHeight(), width, height)));
+                inside = false;
+            } else if (item.x() < 0 || item.x() >= xLimit) {
+                errors.add(new FieldError(itemPath(i, "x"),
+                        String.format(Locale.ROOT, "0 이상 %d 미만이어야 합니다.", xLimit)));
+                inside = false;
             }
-            if (item.y() < 0 || item.y() >= properties.gridHeight()) {
-                errors.add(new FieldError("items[%d].y".formatted(i),
-                        "0 이상 %d 미만이어야 합니다.".formatted(properties.gridHeight())));
+            if (xLimit > 0 && yLimit > 0 && (item.y() < 0 || item.y() >= yLimit)) {
+                errors.add(new FieldError(itemPath(i, "y"),
+                        String.format(Locale.ROOT, "0 이상 %d 미만이어야 합니다.", yLimit)));
+                inside = false;
             }
             // 중복 검사
             if (!seen.add(new Slot(item.type(), item.id()))) {
-                errors.add(new FieldError("items[%d]".formatted(i), "같은 항목이 두 번 들어 있습니다."));
+                errors.add(new FieldError(itemPath(i), "같은 항목이 두 번 들어 있습니다."));
+                continue;
+            }
+            // 칸 겹침 검사
+            if (!inside) {
+                continue;
+            }
+            Integer overlapped = null;
+            for (int dx = 0; dx < width; dx++) {
+                for (int dy = 0; dy < height; dy++) {
+                    Integer other = occupied.putIfAbsent(new Cell(item.x() + dx, item.y() + dy), i);
+                    if (other != null && overlapped == null) {
+                        overlapped = other;
+                    }
+                }
+            }
+            if (overlapped != null) {
+                errors.add(new FieldError(itemPath(i),
+                        itemPath(overlapped) + " 와 칸이 겹칩니다."));
             }
         }
         if (!errors.isEmpty()) {
@@ -206,7 +240,7 @@ public class ExhibitionService {
                     ? placeableSpirits.contains(item.id())
                     : ownedBuildings.contains(item.id());
             if (!placeable) {
-                errors.add(new FieldError("items[%d]".formatted(i), item.type() == ExhibitItemType.SPIRIT
+                errors.add(new FieldError(itemPath(i), item.type() == ExhibitItemType.SPIRIT
                         ? "오염 관리까지 마친 도깨비만 둘 수 있습니다."
                         : "보유한 건물만 둘 수 있습니다."));
                 continue;
@@ -256,6 +290,21 @@ public class ExhibitionService {
         return exhibitionVisitRepository.findVisitDates(userId, today.minusDays(RECENT_VISIT_DAYS - 1));
     }
 
+    /**
+     * 요청 항목의 필드 경로 ({@code items[0]}, {@code items[0].x}). 정수 연결은 JVM 로캘과 상관없이 아라비아 숫자로 적힌다
+     * ({@code formatted} 는 로캘에 따라 다른 숫자를 쓸 수 있다).
+     */
+    private static String itemPath(int index) {
+        return "items[" + index + "]";
+    }
+
+    private static String itemPath(int index, String field) {
+        return itemPath(index) + "." + field;
+    }
+
     private record Slot(ExhibitItemType type, Integer id) {
+    }
+
+    private record Cell(int x, int y) {
     }
 }

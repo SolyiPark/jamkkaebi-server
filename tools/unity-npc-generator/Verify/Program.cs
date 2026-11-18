@@ -1091,7 +1091,46 @@ public static class Program
                 && NpcLineChecks.NormalizeSpeech("오랜만이야!", "반말", "향산이", null, null, "오늘") == "반가워!"
                 && NpcLineChecks.NormalizeSpeech("오랜만에 왔네.", "반말", "향산이", null, null, "오늘, 3일 전") == "또 왔네.",
                 "처음 온 친구의 '오랜만'은 고치고, 최근에 온 단골의 '오랜만에'는 '또'로");
-        Expect(strict, Out("greet", "player", "관리해 줘서 고마워, 관리가 좋아서 고마워."), Tap(9), OutputProblem.InnerRepeat, "한 대사 안에서 같은 말이 되풀이되면 걸림 (두 문장은 첫 문장 하나로 줄어든다)");
+        // 한 문장 안에서 두 글자 이상 같은 낱말이 되풀이되면 하나만 남긴다 (DropRepeatedWord)
+        foreach (string[] pair in new[]
+        {
+            new[] { "또 왔네, 다시 왔네", "다시 왔네" },                              // 다른 마디: 짧은 마디를 통째로 지운다
+            new[] { "또 왔네, 다시 왔네!", "다시 왔네!" },
+            new[] { "향로를 닦아줘서 고마워, 정말 고마워!", "향로를 닦아줘서 고마워!" },  // 뒤 마디를 지우면 쉼표 대신 끝 부호를 남긴다
+            new[] { "반가워, 반가워!", "반가워!" },                                  // 길이가 같으면 뒤 마디를 지운다
+            new[] { "고마워 정말 고마워.", "정말 고마워." },                          // 한 마디 안: 앞 낱말만 지운다
+            new[] { "또 왔네, 다시 왔네! 고마워 정말 고마워.", "다시 왔네! 정말 고마워." },  // 문장마다 따로 고친다
+            new[] { "반가워, 또 왔네, 다시 왔네, 반가워!", "반가워, 다시 왔네!" },     // 되풀이가 여럿이면 모두 고친다 (먼저 나온 되풀이부터)
+            new[] { "왔네! 오늘도 왔네.", "왔네! 오늘도 왔네." },                     // 다른 문장의 되풀이는 건드리지 않는다 (InnerRepeat 가 본다)
+            new[] { "나는 좋아, 나는 행복해.", "나는 좋아, 나는 행복해." },           // RepeatExempt 낱말은 되풀이로 보지 않는다
+            new[] { "또 와, 또 놀자.", "또 와, 또 놀자." },                           // 한 글자 낱말은 보지 않는다
+            new[] { "고마워, 관리해줘서 고마웠어.", "고마워, 관리해줘서 고마웠어." },   // 꼴이 다른 낱말은 같은 말로 보지 않는다
+            new[] { "안녕? 오늘도 순찰 잘 다녀왔어?", "안녕? 오늘도 순찰 잘 다녀왔어?" },
+            new[] { "", "" },
+            // 같은 말일 때만 지운다: 주어·대상·부정이 다르면 다른 말이라 그대로 두고 InnerRepeat 가 거른다 (CodeRabbit 리뷰)
+            new[] { "나는 좋아, 너는 안 좋아.", "나는 좋아, 너는 안 좋아." },
+            new[] { "좋아, 정말 안 좋아.", "좋아, 정말 안 좋아." },
+            new[] { "나는 좋아 너는 안 좋아.", "나는 좋아 너는 안 좋아." },
+            new[] { "관리해 줘서 고마워, 관리가 좋아서 고마워.", "관리해 줘서 고마워, 관리가 좋아서 고마워." },
+            // 문장은 출력 검사와 같은 문장 끝(SentenceEnds)으로 가른다: '。'는 문장 끝, '…'는 말줄임이라 한 문장 (CodeRabbit 리뷰)
+            new[] { "몸이 가벼워。 마음도 가벼워!", "몸이 가벼워。 마음도 가벼워!" },
+            new[] { "고마워… 정말 고마워!", "정말 고마워!" },
+            // 마디 길이는 코드 포인트로 센다: 두 마디가 4자로 같아 뒤 마디를 지운다 (UTF-16 으로 세면 이모지 마디가 5자라 앞 마디를 지웠다)
+            new[] { "참 고마워, 😀 고마워!", "참 고마워!" },
+        })
+        {
+            string dropped = NpcLineChecks.DropRepeatedWord(pair[0]);
+            Check(dropped == pair[1], "한 문장 안의 낱말 되풀이: '" + pair[0] + "' → '" + pair[1] + "' ← '" + dropped + "'");
+        }
+        Check(NpcLineChecks.DropRepeatedWord(null) == null, "DropRepeatedWord(null) 은 null");
+        Check(NpcLineChecks.NormalizeSpeech("또 왔네, 다시 왔네!", "반말", "말발굽") == "다시 왔네!", "말투 다듬기에서 '또 왔네, 다시 왔네!'는 '다시 왔네!'로");
+        OutputCheck repeatFixed = strict.Check(Out("greet", "player", "향로를 닦아줘서 고마워, 정말 고마워!"), Tap(9));
+        Check(repeatFixed.IsValid && repeatFixed.Line == "향로를 닦아줘서 고마워!",
+                "같은 말 되풀이('정말 고마워')는 거르지 않고 짧은 마디를 지워 통과 ← " + repeatFixed.Line + " " + repeatFixed.Problem + " " + repeatFixed.Detail);
+        Expect(strict, Out("greet", "player", "관리해 줘서 고마워, 관리가 좋아서 고마워."), Tap(9), OutputProblem.InnerRepeat,
+                "다른 말끼리 '고마워'가 겹치면 지우지 않고 걸림 (CodeRabbit 리뷰)");
+        Expect(strict, Out("greet", "player", "관리해 줘서 고마워, 관리가 좋아서 고마웠어."), Tap(9), OutputProblem.InnerRepeat,
+                "꼴이 달라 지우지 못한 되풀이('관리해'·'관리가')는 걸림 (두 문장은 첫 문장 하나로 줄어든다)");
         Check(NpcLineChecks.InnerRepeat("고마워, 관리해줘서 고마웠어") == "고마웠어" && NpcLineChecks.InnerRepeat("나는 나는 좋아") == null
                 && NpcLineChecks.InnerRepeat("안녕? 오늘도 순찰 잘 다녀왔어?") == null, "한 대사 안의 반복 찾기");
         Expect(strict, Out("greet", "player", "안녕."), Tap(8), OutputProblem.TooPlain, "부호만 달라도 인사말뿐이면 걸림");
@@ -1100,7 +1139,7 @@ public static class Program
         // 말투 다듬기: 흔한 어미는 검사 전에 고치고, 고치지 못한 것만 어미 검사가 거른다
         OutputCheck fixedCheck = strict.Check(Out("greet", "player", "나 왔어, 고마워요!"), Tap(9));
         Check(fixedCheck.IsValid && fixedCheck.Line == "나 왔어, 고마워!" && fixedCheck.LineBeforeSpeechFix == "나 왔어, 고마워요!"
-                && (fixedCheck.ToResult("s").Note ?? "").Contains("어미를 말투에 맞게 고침"),
+                && (fixedCheck.ToResult("s").Note ?? "").Contains("어미를 말투에 맞게 고침 ('나 왔어, 고마워요!' → '나 왔어, 고마워!')"),
                 "반말 도깨비의 '고마워요'는 '고마워'로 고쳐 통과, 고치기 전 대사와 Note 를 남김 ← " + fixedCheck.Line + " / " + fixedCheck.ToResult("s").Note);
         Expect(strict, Out("greet", "player", "이거 어떠세요!"), Tap(9), OutputProblem.SpeechMismatch, "반말 도깨비가 고치지 못하는 '~요'를 쓰면 걸림");
         var unfixed = new NpcOutputValidator(new NpcLineFilter(forbidden), personas) { NormalizeSpeech = false };
@@ -1262,7 +1301,7 @@ public static class Program
         Expect(validator, Out("greet", "player", "주인이 너를 탭했다. 화면이 너에게 가까이 다가왔다."), tap, OutputProblem.Forbidden, "탭 상황 문장을 그대로 옮기면 거름 (금칙어)");
         ReactionRequest copyOnly = Request(8, InteractionMode.Owner, NpcInputs.Tap, NpcActions.Greet);
         copyOnly.Situation = "주인이 너를 불러 옆자리에 앉혔다. 고양이가 느긋하게 하품한다.";
-        Expect(validator, Out("greet", "player", "옆자리에 앉아, 고양이가 느긋하게 하품한다."), copyOnly, OutputProblem.SituationCopy,
+        Expect(validator, Out("greet", "player", "옆자리에 앉아, 고양이가 느긋하게 하품한다니 좋아."), copyOnly, OutputProblem.SituationCopy,
                 "금칙어가 아니어도 상황 문장 구절을 10자 넘게 옮기면 SituationCopy");
         Expect(validator, Out("greet", "player", "옆자리에 앉아 볼래? 고양이 졸려."), copyOnly, OutputProblem.None, "낱말 몇 개만 겹치면 통과");
         Check(NpcLineChecks.CopiedFromSituation("안녕", "시험") == null && NpcLineChecks.CopiedFromSituation(null, null) == null,
@@ -1559,6 +1598,68 @@ public static class Program
                 && NpcLineChecks.SubjectContradiction("우리 자개가 공들여 만든 거네.", new List<string> { "자개" }) == null
                 && NpcLineChecks.SubjectContradiction("자개가 공들여 만든 거네.", null) == null,
                 "주체 검사: 자기 것 + 솜씨 낱말 + 구경하는 끝맺음일 때만. 내·우리가 앞에 있거나 몸이거나 끝맺음이 다르면 통과");
+        // 2026-11-18 20:22 시험 S14 #1: 자기 것을 남이 만든 것처럼 입음꼴로 말한 "자개가 정성스럽게 만들어졌네"가 통과했다
+        var craftThings = new List<string> { "자개", "옻칠", "몸" };
+        foreach (string shifted in new[] { "오, 자개가 정말 정성스럽게 만들어졌네.", "자개가 공들여 새겨져 있네!", "옻칠이 정성스럽게 칠해졌구나.", "자개는 정성 들여 다듬어졌어.",
+                "자개가 정성껏 빚은 거네.", "자개가 많이 정성스럽게 만들어졌네." })
+        {
+            Check(NpcLineChecks.SubjectContradiction(shifted, craftThings) != null, "자기 것을 입음꼴로 구경하듯 말하면 주체 어긋남: " + shifted);
+        }
+        foreach (string own in new[] { "내 자개가 정성스럽게 만들어졌어.", "옻칠이 벗겨졌어.", "자개가 흐려졌어.", "자개가 정성 덕분에 빛나네.", "몸이 정성스럽게 다듬어졌네.",
+                // 쉼표·다른 주어 뒤의 입음꼴은 자기 것 이야기가 아니다 (CodeRabbit 리뷰)
+                "자개가 반짝이고, 그림은 정성스럽게 완성됐어.", "자개가 반짝이고 그림은 정성스럽게 완성됐어.", "자개가 빛나, 그림이 공들여 만들어졌네." })
+        {
+            Check(NpcLineChecks.SubjectContradiction(own, craftThings) == null, "솜씨 낱말이 없거나 '내'가 있거나 몸이면 통과: " + own);
+        }
+        Expect(validator, Out("recall_talk", "player", "오, 자개가 정말 정성스럽게 만들어졌네."), memoryTalk, OutputProblem.WrongSubject, "'자개가 정성스럽게 만들어졌네'는 WrongSubject (S14 #1)");
+
+        // 2026-11-18 20:22 시험 S05 #1: "처음 온 너를 만나니 기쁘다!"에서 '너를'을 지워 "처음 온 만나니 기쁘다!"가 됐다.
+        // 꾸밈말 뒤·'위해/위한' 앞의 플레이어 말은 지우지 않고 이름으로 바꿔 둔다 → PlayerThirdPerson 이 거르고 다시 만든다
+        foreach (string[] pair in new[]
+        {
+            new[] { "와, 처음 온 너를 만나니 기쁘다!", "발굴자", "와, 처음 온 발굴자를 만나니 기쁘다!" },
+            new[] { "다시 만난 도윤을 보니 좋아.", "도윤", "다시 만난 도윤을 보니 좋아." },
+            new[] { "보고 싶던 너를 만나 기뻐!", "도윤", "보고 싶던 도윤을 만나 기뻐!" },
+            new[] { "반가운 너를 보니 좋아.", "도윤", "반가운 도윤을 보니 좋아." },
+            new[] { "그건 너를 위한 거야.", "도윤", "그건 도윤을 위한 거야." },
+            new[] { "도윤을 위해 준비했어.", "도윤", "도윤을 위해 준비했어." },
+            // 꾸밈말이 아닌 앞 낱말(때·부사·'나는'의 줄임)은 예전처럼 지운다
+            new[] { "오늘 너를 만나서 기뻐!", "도윤", "오늘 만나서 기뻐!" },
+            new[] { "정말 너를 기다렸어.", "도윤", "정말 기다렸어." },
+            new[] { "난 너를 기다렸어.", "도윤", "난 기다렸어." },
+            new[] { "나는 너를 기다렸어.", "도윤", "나는 기다렸어." },
+            new[] { "오랜만에 너를 찾아줘서 고마워!", "도윤", "오랜만에 찾아줘서 고마워!" },
+            // '-는' 꾸밈말('아는')은 조사('나는')와 다르다, '사실'은 부사 (CodeRabbit 리뷰)
+            new[] { "잘 아는 너를 만나서 기뻐.", "도윤", "잘 아는 도윤을 만나서 기뻐." },
+            new[] { "사실 너를 기다렸어.", "도윤", "사실 기다렸어." },
+            new[] { "친구는 너를 좋아해.", "도윤", "친구는 좋아해." },
+            new[] { "처음 온 네가 반가워!", "발굴자", "처음 온 발굴자가 반가워!" },
+        })
+        {
+            string fixedLine = NpcLineChecks.DropPlayerReference(NpcLineChecks.PlayerPronounsToName(pair[0], pair[1]), pair[1]);
+            Check(fixedLine == pair[2], "꾸밈말 뒤 플레이어 말: '" + pair[0] + "' → '" + pair[2] + "' ← '" + fixedLine + "'");
+        }
+        Check(NpcLineChecks.AfterModifier("처음 온 너를", 5) && NpcLineChecks.AfterModifier("다시 만난 너를", 6) && !NpcLineChecks.AfterModifier("오늘 너를", 3)
+                && !NpcLineChecks.AfterModifier("나는 너를", 3) && !NpcLineChecks.AfterModifier("너를", 0) && !NpcLineChecks.AfterModifier("고마워, 너를", 5),
+                "꾸밈말 찾기: '온'·'만난'은 꾸밈말, '오늘'·'나는'·쉼표 뒤·첫머리는 아님");
+        ReactionRequest firstVisit = Request(2, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet);
+        OutputCheck dangling = validator.Check(Out("wander_greet", "player", "와, 처음 온 너를 만나니 기쁘다!"), firstVisit);
+        Check(dangling.Problem == OutputProblem.WrongSubject && dangling.Line != "와, 처음 온 만나니 기쁘다!",
+                "'처음 온 너를 만나니'는 '처음 온 만나니'로 내보내지 않고 거름 (S05 #1) ← " + dangling.Problem + " " + dangling.Line);
+        Expect(validator, Out("wander_greet", "player", "와, 너를 만나니 기쁘다!"), firstVisit, OutputProblem.None, "꾸밈말이 없으면 '너를'을 지우고 통과");
+        Check(NpcLineChecks.AfterModifier("잘 아는 너를", 5) && !NpcLineChecks.AfterModifier("사실 너를", 3) && !NpcLineChecks.AfterModifier("친구는 너를", 4),
+                "꾸밈말 찾기: '아는'은 꾸밈말, '사실'·'친구는'은 아님");
+        // 꾸밈말 뒤라 남긴 주어('발굴자가')도 거른다. 부르는 말('발굴자,'·'도윤이,'·'도윤이야')은 통과 (CodeRabbit 리뷰)
+        Expect(validator, Out("wander_greet", "player", "와, 처음 온 네가 반가워!"), firstVisit, OutputProblem.WrongSubject, "'처음 온 발굴자가 반가워'는 남 얘기하듯 부름");
+        Expect(validator, Out("wander_greet", "player", "발굴자, 반가워! 편히 구경해."), firstVisit, OutputProblem.None, "'발굴자,'라고 부르는 말은 통과");
+        Check(NpcLineChecks.PlayerThirdPerson("처음 온 발굴자가 반가워!", "발굴자") == "발굴자가" && NpcLineChecks.PlayerThirdPerson("도윤이, 반가워!", "도윤") == null
+                && NpcLineChecks.PlayerThirdPerson("도윤이야, 반가워.", "도윤") == null && NpcLineChecks.PlayerThirdPerson("발굴자가!", "발굴자") == null,
+                "남은 주어 '발굴자가 ~'는 거르고, '도윤이,'·'도윤이야' 부르는 말은 통과");
+        // 다듬기가 주어 '발굴자가'를 지워도 설명문은 거른다 — 다듬기 전 대사에서 걸린 설명문이 내보낼 대사에 남았으면 (CodeRabbit 리뷰)
+        Expect(validator, Out("wander_greet", "player", "발굴자가 그림을 그리고 있다."), firstVisit, OutputProblem.Forbidden, "주어를 지운 '그림을 그리고 있다.'도 설명문");
+        Expect(validator, Out("wander_greet", "player", "와, 반가워! 난 다 알고 있다."), firstVisit, OutputProblem.None, "주어가 나인 '난 다 알고 있다.'는 통과");
+        Check(NpcLineChecks.NarrationKept("발굴자가그림을그리고있다.", "그림을그리고있다.") && !NpcLineChecks.NarrationKept("발굴자가그림을그리고있다.", "와,반가워!")
+                && !NpcLineChecks.NarrationKept("화면", "화면"), "설명문이 내보낼 대사에 남았는지 (주어를 빼고 견줌, 네 글자 미만은 안 봄)");
         Check(NpcLineChecks.DayRefs("어제랑 10일 전, 이틀전, 오늘", false).Select(r => r.Value).OrderBy(v => v).SequenceEqual(new[] { 1, 2, 10 }),
                 "'며칠 전' 표현 읽기 (어제·N일 전·이틀전, 오늘은 뺌)");
 
@@ -1610,6 +1711,31 @@ public static class Program
         Expect(validator, Out("greet", "player", "가까운 동료를 대하듯 편한 태도로 왔어."), horseTap, OutputProblem.PersonaCopy, "상대를 대하는 태도 설명을 옮기면 PersonaCopy");
         Expect(validator, Out("greet", "player", "가장 친한 동료처럼 반긴다."), horseTap, OutputProblem.Forbidden, "'~처럼 반긴다'는 설명문 금칙어");
         Expect(validator, Out("greet", "player", "왔구나, 순찰은 내가 했어."), horseTap, OutputProblem.None, "평범한 인사는 통과");
+        // 설명문 끝맺음: 동사 현재 평서형(-ㄴ다/-는다)·'-어/-고 있다'가 마침표·말줄임으로 끝나거나 부호 없이 끝나면 거른다. 형용사 '-다'·감탄('!')·'-단다'는 말이라 통과
+        ReactionRequest firstGuest = Request(2, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet);
+        firstGuest.Situation = "처음 온 친구가 와 있다.";
+        Expect(validator, Out("wander_greet", "player", "와, 처음 온 친구에게 반가운 마음이 담겨 있다."), firstGuest, OutputProblem.Forbidden, "'~담겨 있다.'는 설명문 금칙어");
+        foreach (string narrated in new[] { "왔구나 반가운 마음에 헛기침이 나온다.", "개운하게 돌아온 고마워한다", "주인을 따라 장난치듯 버둥거린다.", "네 안부에 반가움을 느끼며 '내 자개는 공들였어'라고 말한다.",
+                // 남을 주어로 한 현재형 설명 (CodeRabbit 리뷰)
+                "도깨비가 천천히 걷는다.", "친구가 그림을 그리고 있다.", "발굴자가 너를 바라본다",
+                // 자리 조사 '에서'의 '서'는 이음 어미가 아니다
+                "도깨비가 전시관에서 걷는다.", "친구가 여기서 걷는다." })
+        {
+            Check(filter.Find(narrated) != null, "설명문 끝맺음은 거름: " + narrated);
+        }
+        foreach (string spoken in new[] { "왔구나, 반가운 마음이 드네.", "킁킁, 아는 냄새다!", "어서 와! 반갑다.", "드디어 나타났다!", "또 왔구나, 반갑다", "새끼 참새가 날아간다!",
+                "오, 내 자개 진짜 멋있다.", "향이 좋은 날엔 이런 전시도 참 예쁘단다.", "여기 있다!", "킁킁, 개운하다. 고마워!",
+                // 받침 ㄴ + 다로 넓게 잡으면 걸리던 말 (동사 현재형이라도 도깨비의 행동을 그리는 설명이 아니다)
+                "정말 신난다.", "네가 오니 힘이 난다.", "잘 어울린다.", "그럼 나도 간다.", "난 다 알고 있다.", "아직 남아 있다.", "기분이 좋아진다.",
+                // 남이 주어라도 '-니·-서'로 이어진 뒤 끝 동사의 주어가 다른 말, 형용사로 맺은 말
+                "친구가 오니 힘이 난다.", "친구가 와서 신난다.", "친구는 언제나 반갑다.", "발굴자는 다 알고 있다!",
+                // 남이 주어라도 '-단다'는 전하는 말
+                "친구가 정말 보고 싶단다." })
+        {
+            ForbiddenMatch hit = filter.Find(spoken);
+            Check(hit == null, "말로 끝나는 '-다'는 통과: " + spoken + (hit != null ? " ← " + hit : ""));
+        }
+        Expect(validator, Out("wander_greet", "player", "와, 반가워! 편히 구경해."), firstGuest, OutputProblem.None, "같은 장면의 평범한 인사는 통과");
         foreach (Persona persona in personas.personas)
         {
             foreach (string field in new[] { persona.toOwner, persona.toVisitor, persona.onCare, persona.values })
@@ -2101,6 +2227,13 @@ public static class Program
         clear.Situation = "주인이 안부를 물었다.";
         clear.Facts.Add(new Fact(NpcFactKeys.Clarity, "선명"));
         Expect(validator, Out("answer_status", "player", "나는 잘 지내고 있어."), clear, OutputProblem.None, "선명한 안부는 부탁이 필요 없음");
+        // 말줄임 뒤의 '?'는 문장 끝으로 남긴다 — '…'로 합치면 끊긴 대사가 끝난 문장을 잃고 TooLong 이 되었다.
+        OutputCheck cutQuestion = validator.Check("{\"line\": \"별일 없었어...? 오늘", clear);
+        Check(cutQuestion.IsValid && cutQuestion.Truncated && cutQuestion.Line == "별일 없었어?",
+                "끊긴 대사의 '...?'는 '?'로 합쳐 끝난 문장을 남김 ← " + cutQuestion.Line + " " + cutQuestion.Problem + " " + cutQuestion.Detail);
+        // 말줄임을 합쳐 드러난 평서 어미의 '?'는 한 번 더 고친다 (CodeRabbit 리뷰). 참 물음('없었어?')은 그대로
+        string collapsedStatement = NpcLineChecks.NormalizeSpeech("기분이 좋구나...? 별일 없었어...?", "반말", "말발굽");
+        Check(collapsedStatement == "기분이 좋구나. 별일 없었어?", "'좋구나...?'는 '좋구나.'로, '없었어...?'는 '없었어?'로 ← " + collapsedStatement);
 
         // 4) 토큰 한도에서 끊겨 '}' 만 빠진 JSON 도 읽는다 (묘작이 S08 #4: 문자열은 닫았는데 객체가 안 닫힘)
         ReactionRequest care = Request(9, InteractionMode.Owner, NpcInputs.Care, NpcActions.ThankJoyful);
@@ -2556,6 +2689,9 @@ public static class Program
                 case "thirdPerson": got = NpcLineChecks.PlayerThirdPerson(line, arg) ?? ""; break;
                 case "reversed": got = NpcLineChecks.ReversedCall(line, arg) ?? ""; break;
                 case "probe": got = NpcLineChecks.GreetingProbe(line, arg) ?? ""; break;
+                case "subject": got = NpcLineChecks.SubjectContradiction(line, ownThings) ?? ""; break;
+                case "narrationKept": got = NpcLineChecks.NarrationKept(line, arg) ? "true" : "false"; break;
+                case "pronouns": got = NpcLineChecks.DropPlayerReference(NpcLineChecks.PlayerPronounsToName(line, arg), arg); break;
                 default: got = "(알 수 없는 함수 " + fn + ")"; break;
             }
             if (got == want)
