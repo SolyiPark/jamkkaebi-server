@@ -1100,7 +1100,7 @@ public static class Program
         // 말투 다듬기: 흔한 어미는 검사 전에 고치고, 고치지 못한 것만 어미 검사가 거른다
         OutputCheck fixedCheck = strict.Check(Out("greet", "player", "나 왔어, 고마워요!"), Tap(9));
         Check(fixedCheck.IsValid && fixedCheck.Line == "나 왔어, 고마워!" && fixedCheck.LineBeforeSpeechFix == "나 왔어, 고마워요!"
-                && (fixedCheck.ToResult("s").Note ?? "").Contains("어미를 말투에 맞게 고침"),
+                && (fixedCheck.ToResult("s").Note ?? "").Contains("어미를 말투에 맞게 고침 ('나 왔어, 고마워요!' → '나 왔어, 고마워!')"),
                 "반말 도깨비의 '고마워요'는 '고마워'로 고쳐 통과, 고치기 전 대사와 Note 를 남김 ← " + fixedCheck.Line + " / " + fixedCheck.ToResult("s").Note);
         Expect(strict, Out("greet", "player", "이거 어떠세요!"), Tap(9), OutputProblem.SpeechMismatch, "반말 도깨비가 고치지 못하는 '~요'를 쓰면 걸림");
         var unfixed = new NpcOutputValidator(new NpcLineFilter(forbidden), personas) { NormalizeSpeech = false };
@@ -1262,7 +1262,7 @@ public static class Program
         Expect(validator, Out("greet", "player", "주인이 너를 탭했다. 화면이 너에게 가까이 다가왔다."), tap, OutputProblem.Forbidden, "탭 상황 문장을 그대로 옮기면 거름 (금칙어)");
         ReactionRequest copyOnly = Request(8, InteractionMode.Owner, NpcInputs.Tap, NpcActions.Greet);
         copyOnly.Situation = "주인이 너를 불러 옆자리에 앉혔다. 고양이가 느긋하게 하품한다.";
-        Expect(validator, Out("greet", "player", "옆자리에 앉아, 고양이가 느긋하게 하품한다."), copyOnly, OutputProblem.SituationCopy,
+        Expect(validator, Out("greet", "player", "옆자리에 앉아, 고양이가 느긋하게 하품한다니 좋아."), copyOnly, OutputProblem.SituationCopy,
                 "금칙어가 아니어도 상황 문장 구절을 10자 넘게 옮기면 SituationCopy");
         Expect(validator, Out("greet", "player", "옆자리에 앉아 볼래? 고양이 졸려."), copyOnly, OutputProblem.None, "낱말 몇 개만 겹치면 통과");
         Check(NpcLineChecks.CopiedFromSituation("안녕", "시험") == null && NpcLineChecks.CopiedFromSituation(null, null) == null,
@@ -1610,6 +1610,22 @@ public static class Program
         Expect(validator, Out("greet", "player", "가까운 동료를 대하듯 편한 태도로 왔어."), horseTap, OutputProblem.PersonaCopy, "상대를 대하는 태도 설명을 옮기면 PersonaCopy");
         Expect(validator, Out("greet", "player", "가장 친한 동료처럼 반긴다."), horseTap, OutputProblem.Forbidden, "'~처럼 반긴다'는 설명문 금칙어");
         Expect(validator, Out("greet", "player", "왔구나, 순찰은 내가 했어."), horseTap, OutputProblem.None, "평범한 인사는 통과");
+        // 설명문 끝맺음: 동사 현재 평서형(-ㄴ다/-는다)·'-어/-고 있다'가 마침표·말줄임으로 끝나거나 부호 없이 끝나면 거른다. 형용사 '-다'·감탄('!')·'-단다'는 말이라 통과
+        // (2026-11-18 17:05 시험 S05 #1 "…반가운 마음이 담겨 있다."가 첫 시도에 통과했다)
+        ReactionRequest firstGuest = Request(2, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet);
+        firstGuest.Situation = "처음 온 친구가 와 있다.";
+        Expect(validator, Out("wander_greet", "player", "와, 처음 온 친구에게 반가운 마음이 담겨 있다."), firstGuest, OutputProblem.Forbidden, "'~담겨 있다.'는 설명문 금칙어");
+        foreach (string narrated in new[] { "왔구나 반가운 마음에 헛기침이 나온다.", "개운하게 돌아온 고마워한다", "주인을 따라 장난치듯 버둥거린다.", "네 안부에 반가움을 느끼며 '내 자개는 공들였어'라고 말한다." })
+        {
+            Check(filter.Find(narrated) != null, "설명문 끝맺음은 거름: " + narrated);
+        }
+        foreach (string spoken in new[] { "왔구나, 반가운 마음이 드네.", "킁킁, 아는 냄새다!", "어서 와! 반갑다.", "드디어 나타났다!", "또 왔구나, 반갑다", "새끼 참새가 날아간다!",
+                "오, 내 자개 진짜 멋있다.", "향이 좋은 날엔 이런 전시도 참 예쁘단다.", "여기 있다!", "킁킁, 개운하다. 고마워!" })
+        {
+            ForbiddenMatch hit = filter.Find(spoken);
+            Check(hit == null, "말로 끝나는 '-다'는 통과: " + spoken + (hit != null ? " ← " + hit : ""));
+        }
+        Expect(validator, Out("wander_greet", "player", "와, 반가워! 편히 구경해."), firstGuest, OutputProblem.None, "같은 장면의 평범한 인사는 통과");
         foreach (Persona persona in personas.personas)
         {
             foreach (string field in new[] { persona.toOwner, persona.toVisitor, persona.onCare, persona.values })

@@ -99,7 +99,8 @@ namespace Jamkkaebi.Npc
                       + " (" + FullLine.Length + "자 → " + Line.Length + "자)";
             if (LineBeforeSpeechFix != null)
             {
-                string fix = "어미를 말투에 맞게 고침 ('" + LineBeforeSpeechFix + "')";
+                // 고친 뒤 코드가 앞 문장·부탁을 붙이거나 바꾸기도 해서(흐려진 안부) 고치기 전 대사만 적으면 최종 대사와 전혀 달라 보였다 (2026-11-18 기기 시험 S03). 최종 대사를 함께 적는다
+                string fix = "어미를 말투에 맞게 고침 ('" + LineBeforeSpeechFix + "' → '" + Line + "')";
                 note = note == null ? fix : note + "; " + fix;
             }
             return ReactionResult.Success(requestId, ActionId, TargetId, Line, ReactionSource.Slm, note);
