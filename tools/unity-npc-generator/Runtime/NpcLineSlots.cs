@@ -103,12 +103,13 @@ namespace Jamkkaebi.Npc
             }
             string text = line;
             // 0) 마지막 관리 날 수: 마지막 관리를 말하는 꼴에서만 견본 숫자를 칸으로 — 코드가 붙인 앞 문장("마지막 관리가 9일 전이었어"·"관리받은 지 9일이 지났어")과
-            //    돌아온 날 수("9일 만이야"·"9일 만에"). "9일 전에도 왔지?"처럼 방문을 말한 날 수는 숫자가 같아도 칸으로 만들지 않는다 — 다른 날 수로 채우면
+            //    관리를 말하는 "9일 만에 닦아 줘서". "9일 만에 다시 만나서"·"9일 만이야"(만남의 간격)나 "9일 전에도 왔지?"(방문)는 숫자가 같아도 칸으로 만들지 않는다 —
+            //    다른 날 수로 채우면
             //    없던 방문이 되는데 마지막 관리 사실과 같은 숫자라 기록 검사(RecordConflict)도 통과한다 (CodeRabbit 리뷰). 칸이 아닌 숫자는 아래 AnyDays 가 거른다
             if (sample.CareDays.HasValue)
             {
                 string n = sample.CareDays.Value.ToString();
-                text = NpcLineChecks.Cached("(?<=마지막 관리가 )" + n + "(?=일 전)|(?<=관리받은 지 )" + n + "(?=일이 지났)|(?<![0-9])" + n + "(?= ?일 ?만)").Replace(text, DaysSlot);
+                text = NpcLineChecks.Cached("(?<=마지막 관리가 )" + n + "(?=일 전)|(?<=관리받은 지 )" + n + "(?=일이 지났)|(?<![0-9])" + n + "(?= ?일 ?만에 ?(?:닦|관리|깨워|깨어|씻|챙|돌봐|돌보))").Replace(text, DaysSlot);
             }
             if (DayRef.IsMatch(text) || KoreanCount.IsMatch(text) || AnyDays.IsMatch(text) || FixedSpan.IsMatch(text))
             {

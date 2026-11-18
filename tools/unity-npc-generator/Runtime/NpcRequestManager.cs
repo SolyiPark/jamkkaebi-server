@@ -96,6 +96,7 @@ namespace Jamkkaebi.Npc
         private string storeVersion;
         private readonly object storeWriteGate = new object();
         private int savePending;
+        private bool closed;   // CloseStore 뒤 — 새 미리 만들기를 받지 않는다
 
         // 쓴 만큼 다시 만드는 선택지 (NpcContextBuilder.PrefetchTemplates 가 미리 만드는 것과 같다)
         private static readonly string[] RefillInputs = { NpcInputs.Tap, NpcInputs.AskStatus, NpcInputs.Care, NpcInputs.Visit };
@@ -265,6 +266,11 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public void CloseStore(bool save, TimeSpan wait)
         {
+            // 닫는 중에 끝난 요청이 다시 만들기를 줄에 넣지 못하게 먼저 닫힘을 표시한다 — 그대로 두면 모델을 내린 뒤에도 일꾼이 남아 그 일을 기다렸다 (CodeRabbit 리뷰)
+            lock (gate)
+            {
+                closed = true;
+            }
             CancelPrefetch();
             try
             {
@@ -568,6 +574,10 @@ namespace Jamkkaebi.Npc
             }
             lock (gate)
             {
+                if (closed)
+                {
+                    return; // CloseStore 뒤에는 미리 만들기·다시 만들기를 받지 않는다
+                }
                 // 같은 상황이 이미 줄에 있으면 더하지 않는다
                 string key = isTemplate ? NpcLineCache.TemplateKeyOf(template) : NpcLineCache.KeyOf(template);
                 foreach (PrefetchJob queued in prefetchJobs)

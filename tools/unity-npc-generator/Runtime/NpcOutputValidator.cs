@@ -313,7 +313,11 @@ namespace Jamkkaebi.Npc
                     for (int variant = 1; variant < NpcLineChecks.NoRecordGreetings.Length; variant++)
                     {
                         string other = SpeechFixed(line, action, request, persona, true, variant);
-                        string otherFitted = Comparable(other, fitLimit, truncated);
+                        string otherFitted = string.IsNullOrEmpty(other) ? other : FitSentences(other, fitLimit, truncated);
+                        if (otherFitted == null)
+                        {
+                            continue; // 길이에 맞지 않는 말은 고르면 뒤에서 TooLong 으로 걸린다 (CodeRabbit 리뷰)
+                        }
                         if (NpcLineChecks.GreetingProbe(otherFitted, action) == null && !NpcLineChecks.FindSimilar(otherFitted, request.RecentLines).HasValue)
                         {
                             fixedLine = other;

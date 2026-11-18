@@ -1762,8 +1762,10 @@ THANKS_OVERLAP_RE = re.compile(r"덕분에\s*(관리해|닦아)\s?(줘서)")
 # 관리는 늘 플레이어가 한다. 도깨비가 자기를 관리한 쪽으로 말한 주어("개운하게 도깨비가 관리해줘서 고마워", "내가 닦아 줘서")는 지운다 — 주어를 빼면 받은 쪽에서 고마워하는 말이 된다 (2026-11-19). C# NpcLineChecks.FixCareGiver 와 같다
 SELF_CARE_GIVER_RE = re.compile(r"(?<![가-힣])(?:도깨비(?:가|는|께서)|내가|나는|난)\s?(?=(?:관리|닦|챙겨|챙기|돌봐|돌보|깨워|씻겨)[가-힣]*\s?(?:줘서|주어서|줬|준|주니))")
 # 실화 이야기는 늘 도깨비가 들려주고 플레이어는 듣는다. "자개 반짝임 얘기해줘서 고마워"처럼 플레이어가 이야기한 것으로 말하면 "얘기 들어줘서"로 바꾼다 (2026-11-19). C# NpcLineChecks.FixStoryTeller 와 같다
-PLAYER_TOLD_RE = re.compile(r"(얘기|이야기)\s?(?:를\s?)?해(\s?)(줘서|주어서|줬|준|주니)")
-PLAYER_TOLD_TO_RE = re.compile(r"들려(\s?)(줘서|주어서|줬|준|주니)")
+# 고마워하는 꼴("~해 줘서·주어서·주니")만 본다 — "내가 이야기를 들려줬잖아"는 도깨비가 들려준 것을 바르게 말했다 (CodeRabbit 리뷰)
+PLAYER_TOLD_RE = re.compile(r"(얘기|이야기)\s?(?:를\s?)?해(\s?)(줘서|주어서|주니)")
+PLAYER_TOLD_TO_RE = re.compile(r"들려(\s?)(줘서|주어서|주니)")
+TELLER_IS_SELF_RE = re.compile("(?<![가-힣])(?:내가|나는|난)(?![가-힣])")
 
 
 def fix_care_giver(line):
@@ -1773,6 +1775,8 @@ def fix_care_giver(line):
 def fix_story_teller(line):
     if not line:
         return line
+    if TELLER_IS_SELF_RE.search(line):
+        return line  # 도깨비가 들려준 것을 자기 입으로 말했다
     line = PLAYER_TOLD_RE.sub(r"\1 들어\2\3", line)
     return PLAYER_TOLD_TO_RE.sub(r"들어\1\2", line)
 
@@ -2231,14 +2235,18 @@ CRAFT_NE_RE = re.compile("(었|았|였|했)네([.!?…~]|$)")
 
 # 지난 대화를 "~던 일"로 끝내면 말이 끝나지 않는다 → "~던 일이 기억나." (앞의 "기억난다,"는 겹치므로 뗀다). C# NpcLineChecks.FixRecallFragment 와 같다
 RECALL_FRAGMENT_END_RE = re.compile("던 일([.!…~]*)$")
-RECALL_LEAD_RE = re.compile(r"^(?:기억난다|기억나|생각난다|생각나)[,.!]?\s*")
+# 낱말이 끝날 때만 지운다 — "기억나는 건 함께 웃었던 일"의 '기억나'를 지우면 "는 건 …"이 남았다 (CodeRabbit 리뷰)
+RECALL_LEAD_RE = re.compile(r"^(?:기억난다|기억나|생각난다|생각나)(?=[,.!\s]|$)[,.!]?\s*")
+RECALL_SUBJECT_RE = re.compile("(?:기억|생각)나는 (?:건|게|것은)")
 
 
 def fix_recall_fragment(line):
     if not line or not RECALL_FRAGMENT_END_RE.search(line):
         return line
     line = RECALL_LEAD_RE.sub("", line)
-    return RECALL_FRAGMENT_END_RE.sub(lambda m: "던 일이 기억나" + (m.group(1) or "."), line)
+    # "기억나는 건 함께 웃었던 일"처럼 이미 '기억나는 건'으로 시작했으면 "…던 일이야."로 끝맺는다 ("…던 일이 기억나"를 붙이면 '기억나'가 겹친다)
+    ending = "던 일이야" if RECALL_SUBJECT_RE.search(line) else "던 일이 기억나"
+    return RECALL_FRAGMENT_END_RE.sub(lambda m: ending + (m.group(1) or "."), line)
 
 
 def fix_bare_own_thing(line, own_things):
@@ -2424,7 +2432,7 @@ def fix_starter_adverb(line, call_name=None):
     return m.group(1) + "해, " + line[m.start(2):]
 
 
-STARTER_COMMA_RE = re.compile(r"^(덕분에|이제|훨씬|한결|역시|요즘|조금|점점|많이|어느새|자꾸|몸이|기분이|개운하게|깨끗하게|마지막|벌써|드디어|어서|살살|괜찮으면|시간 되면|조심조심|혹시|이왕이면),\s*")
+STARTER_COMMA_RE = re.compile(r"^(덕분에|이제|훨씬|한결|역시|요즘|조금|점점|많이|어느새|자꾸|몸이|기분이|개운하게|깨끗하게|마지막|벌써|드디어|어서|살살|괜찮으면|시간 되면|조심조심|혹시|이왕이면),[ \t]*")  # 가로 공백만 (줄바꿈은 검사가 거른다, CodeRabbit 리뷰)
 
 
 def long_absence_contradiction(line, visit_days):
@@ -2665,8 +2673,11 @@ def pick_no_record_variant(said, action, scene, persona, recent, limit=None, tru
     if find_similar(comparable(0), recent) is None:
         return 0
     for variant in range(1, len(NO_RECORD_GREETINGS)):
-        line = comparable(variant)
-        if greeting_probe(line, action) is None and find_similar(line, recent) is None:
+        line = speech_fixed(said, action, scene, persona, variant)
+        fitted = fit_sentences(line, limit + LENGTH_TOLERANCE, truncated) if limit is not None and line else line
+        if fitted is None:
+            continue  # 길이에 맞지 않는 말은 고르면 뒤에서 길이X 로 걸린다 (CodeRabbit 리뷰)
+        if greeting_probe(fitted, action) is None and find_similar(fitted, recent) is None:
             return variant
     return 0
 

@@ -47,7 +47,7 @@ public class CodexController {
     @GetMapping("/relics/{relicId}")
     public ResponseEntity<ApiResponse<CodexRelicResponse>> getRelic(
             @AuthenticationPrincipal AuthPrincipal principal,
-            @PathVariable Integer relicId
+            @PathVaria2ble Integer relicId
     ) {
         return ResponseEntity.ok(ApiResponse.success(
                 "OK", "도감 카드를 조회했습니다.", codexService.relic(principal.friendCode(), relicId)));

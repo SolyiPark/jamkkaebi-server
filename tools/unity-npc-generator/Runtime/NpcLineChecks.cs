@@ -693,7 +693,7 @@ namespace Jamkkaebi.Npc
             return m.Groups[1].Value + "해, " + line.Substring(m.Groups[2].Index);
         }
 
-        private static readonly Regex StarterComma = new Regex("^(덕분에|이제|훨씬|한결|역시|요즘|조금|점점|많이|어느새|자꾸|몸이|기분이|개운하게|깨끗하게|마지막|벌써|드디어|어서|살살|괜찮으면|시간 되면|조심조심|혹시|이왕이면),\\s*", RegexOptions.CultureInvariant);
+        private static readonly Regex StarterComma = new Regex("^(덕분에|이제|훨씬|한결|역시|요즘|조금|점점|많이|어느새|자꾸|몸이|기분이|개운하게|깨끗하게|마지막|벌써|드디어|어서|살살|괜찮으면|시간 되면|조심조심|혹시|이왕이면),[ \\t]*", RegexOptions.CultureInvariant); // 가로 공백만 (줄바꿈은 검사가 거른다, CodeRabbit 리뷰)
 
         private static readonly Regex DanglingConnective = new Regex("(서|며|면서|려고|도록|다가|지만|으나|니까|면)$", RegexOptions.CultureInvariant);
         private static readonly Regex DanglingParticle = new Regex("(은|는|을|를|의)$", RegexOptions.CultureInvariant);
@@ -1155,7 +1155,9 @@ namespace Jamkkaebi.Npc
 
         // 지난 대화를 "~던 일"로 끝내면 말이 끝나지 않는다 → "~던 일이 기억나." (앞의 "기억난다,"는 겹치므로 뗀다). run.py 의 fix_recall_fragment 와 같다
         private static readonly Regex RecallFragmentEnd = new Regex("던 일([.!…~]*)$", RegexOptions.CultureInvariant);
-        private static readonly Regex RecallLead = new Regex("^(?:기억난다|기억나|생각난다|생각나)[,.!]?\\s*", RegexOptions.CultureInvariant);
+        // 낱말이 끝날 때만 지운다 — "기억나는 건 함께 웃었던 일"의 '기억나'를 지우면 "는 건 …"이 남았다 (CodeRabbit 리뷰)
+        private static readonly Regex RecallLead = new Regex("^(?:기억난다|기억나|생각난다|생각나)(?=[,.!\\s]|$)[,.!]?\\s*", RegexOptions.CultureInvariant);
+        private static readonly Regex RecallSubject = new Regex("(?:기억|생각)나는 (?:건|게|것은)", RegexOptions.CultureInvariant);
 
         public static string FixRecallFragment(string line)
         {
@@ -1164,7 +1166,9 @@ namespace Jamkkaebi.Npc
                 return line;
             }
             line = RecallLead.Replace(line, "");
-            return RecallFragmentEnd.Replace(line, m => "던 일이 기억나" + (m.Groups[1].Value.Length > 0 ? m.Groups[1].Value : "."));
+            // "기억나는 건 함께 웃었던 일"처럼 이미 '기억나는 건'으로 시작했으면 "…던 일이야."로 끝맺는다 ("…던 일이 기억나"를 붙이면 '기억나'가 겹친다)
+            string ending = RecallSubject.IsMatch(line) ? "던 일이야" : "던 일이 기억나";
+            return RecallFragmentEnd.Replace(line, m => ending + (m.Groups[1].Value.Length > 0 ? m.Groups[1].Value : "."));
         }
 
         /// <summary>자기 솜씨를 말하면서 자기 것을 '내' 없이 맨 이름으로 말하면("기억난다, 자개 공들여 만들었다고 자랑했던 일") 남의 자개처럼 들린다 → '내 자개'. 조사가 없어 주체 검사도 놓쳤다 (2026-11-19 --live-store). run.py 의 fix_bare_own_thing 과 같다. '몸'·'모습'은 상대의 것일 수 있어 고치지 않는다.</summary>
@@ -1294,8 +1298,10 @@ namespace Jamkkaebi.Npc
         private static readonly Regex SelfCareGiver = new Regex(
                 "(?<![가-힣])(?:도깨비(?:가|는|께서)|내가|나는|난)\\s?(?=(?:관리|닦|챙겨|챙기|돌봐|돌보|깨워|씻겨)[가-힣]*\\s?(?:줘서|주어서|줬|준|주니))", RegexOptions.CultureInvariant);
         // 실화 이야기는 늘 도깨비가 들려주고 플레이어는 듣는다. "자개 반짝임 얘기해줘서 고마워"처럼 플레이어가 이야기한 것으로 말하면 "얘기 들어줘서"로 바꾼다 (2026-11-19). run.py 의 fix_story_teller 와 같다
-        private static readonly Regex PlayerTold = new Regex("(얘기|이야기)\\s?(?:를\\s?)?해(\\s?)(줘서|주어서|줬|준|주니)", RegexOptions.CultureInvariant);
-        private static readonly Regex PlayerToldTo = new Regex("들려(\\s?)(줘서|주어서|줬|준|주니)", RegexOptions.CultureInvariant);
+        // 고마워하는 꼴("~해 줘서·주어서·주니")만 본다 — "내가 이야기를 들려줬잖아"는 도깨비가 들려준 것을 바르게 말했다 (CodeRabbit 리뷰)
+        private static readonly Regex PlayerTold = new Regex("(얘기|이야기)\\s?(?:를\\s?)?해(\\s?)(줘서|주어서|주니)", RegexOptions.CultureInvariant);
+        private static readonly Regex PlayerToldTo = new Regex("들려(\\s?)(줘서|주어서|주니)", RegexOptions.CultureInvariant);
+        private static readonly Regex TellerIsSelf = new Regex("(?<![가-힣])(?:내가|나는|난)(?![가-힣])", RegexOptions.CultureInvariant);
 
         public static string FixCareGiver(string line)
         {
@@ -1307,6 +1313,10 @@ namespace Jamkkaebi.Npc
             if (string.IsNullOrEmpty(line))
             {
                 return line;
+            }
+            if (TellerIsSelf.IsMatch(line))
+            {
+                return line; // 도깨비가 들려준 것을 자기 입으로 말했다
             }
             line = PlayerTold.Replace(line, "$1 들어$2$3");
             return PlayerToldTo.Replace(line, "들어$1$2");
