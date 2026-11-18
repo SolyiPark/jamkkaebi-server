@@ -173,12 +173,16 @@ def read_json(name):
         return json.load(f)
 
 
+# patterns 의 {ㄴ받침}: 받침이 ㄴ인 한글 글자 399자 (나온다·한다·간다…의 동사 현재 평서형을 가린다). C# NpcLineFilter.NieunFinal 과 같다
+NIEUN_FINAL = "".join(chr(0xAC00 + i) for i in range(11172) if i % 28 == 4)
+
+
 def compile_forbidden(data):
     """공통 금칙어 (data/forbidden.json). 대사와 낱말의 공백을 지우고 찾는다 — C# NpcLineFilter 와 같은 규칙."""
     groups = []
     for g in data["groups"]:
         words = [SPACE_RE.sub("", w) for w in g.get("words", []) if w.strip()]
-        patterns = [re.compile(p) for p in g.get("patterns", [])]
+        patterns = [re.compile(p.replace("{ㄴ받침}", NIEUN_FINAL)) for p in g.get("patterns", [])]
         groups.append((g["label"], words, patterns))
     return groups
 
@@ -1684,7 +1688,24 @@ def normalize_speech(line, label, name=None, own_things=None, nickname=None, vis
         return line
     # "덕분에, 관리해 줘서 고마워."처럼 첫 낱말 뒤에 쉼표를 찍으면 어색하다 (첫 낱말을 정해 준 뒤 생겼다)
     line = collapse_double_verb(STARTER_COMMA_RE.sub(r"\1 ", strip_trailing_interjection(drop_repeated_lead(guest_to_friend(strip_address(fix_thanks_overlap(fix_typos(_apply_speech(line, label))), name))))))
-    return drop_player_reference(player_pronouns_to_name(unify_player_call(fix_statement_question(line), call_name, nickname), call_name), call_name)
+    line = drop_player_reference(player_pronouns_to_name(unify_player_call(fix_statement_question(line), call_name, nickname), call_name), call_name)
+    return collapse_punctuation(line)
+
+
+# 연달아 붙은 문장 부호. 호칭·자기 이름을 지운 자리("반가워. 주인님!"→"반가워.!")나 '?'를 '.'로 고친 자리("왔구나?!"→"왔구나.!")에 생긴다 (2026-11-18 시험)
+PUNCTUATION_RUN_RE = re.compile("[.,!?~…]{2,}")
+
+
+def collapse_punctuation(line):
+    """연달아 붙은 문장 부호를 하나만 남긴다 ("반가워.!"→"반가워.", "하늘아.~"→"하늘아."). 앞의 끝 부호를 남기고, 쉼표와 끝 부호가 붙었으면 끝 부호를 남긴다("고마워,!"→"고마워!").
+    점이 둘 이상이면 말줄임이라 '…' 하나로 바꾼다("그래..."→"그래…"). C# NpcLineChecks.CollapsePunctuation 과 같다."""
+    def one(m):
+        run = m.group(0)
+        if run.startswith(".."):
+            return "…"
+        marks = run.replace(",", "")
+        return marks[0] if marks else ","
+    return PUNCTUATION_RUN_RE.sub(one, line or "")
 
 
 STATE_WORDS = ("흐려", "흐릿", "뿌예", "뿌옜", "봉인")

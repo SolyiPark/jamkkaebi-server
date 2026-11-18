@@ -1465,7 +1465,33 @@ namespace Jamkkaebi.Npc
             }
             // 말투 어미를 고치다 새로 생긴 이름("향산이예요"→"향산이야")을 한 번 더 지운다
             // "덕분에, 관리해 줘서 고마워."처럼 첫 낱말 뒤에 쉼표를 찍으면 어색하다 (첫 낱말을 정해 준 뒤 생겼다)
-            return DropPlayerReference(PlayerPronounsToName(UnifyPlayerCall(FixStatementQuestion(CollapseDoubleVerb(StarterComma.Replace(StripTrailingInterjection(DropRepeatedLead(GuestToFriend(StripAddress(FixThanksOverlap(FixTypos(ApplySpeech(line, label))), name)))), "$1 "))), addressName, nickname), addressName), addressName);
+            line = DropPlayerReference(PlayerPronounsToName(UnifyPlayerCall(FixStatementQuestion(CollapseDoubleVerb(StarterComma.Replace(StripTrailingInterjection(DropRepeatedLead(GuestToFriend(StripAddress(FixThanksOverlap(FixTypos(ApplySpeech(line, label))), name)))), "$1 "))), addressName, nickname), addressName), addressName);
+            return CollapsePunctuation(line);
+        }
+
+        // 연달아 붙은 문장 부호. 호칭·자기 이름을 지운 자리("반가워. 주인님!"→"반가워.!")나 '?'를 '.'로 고친 자리("왔구나?!"→"왔구나.!")에 생긴다 (2026-11-18 시험)
+        private static readonly Regex PunctuationRun = new Regex("[.,!?~…]{2,}", RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 연달아 붙은 문장 부호를 하나만 남긴다 ("반가워.!"→"반가워.", "하늘아.~"→"하늘아."). 앞의 끝 부호를 남기고, 쉼표와 끝 부호가 붙었으면 끝 부호를 남긴다("고마워,!"→"고마워!").
+        /// 점이 둘 이상이면 말줄임이라 '…' 하나로 바꾼다("그래..."→"그래…"). run.py 의 collapse_punctuation 과 같다.
+        /// </summary>
+        public static string CollapsePunctuation(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return line;
+            }
+            return PunctuationRun.Replace(line, m =>
+            {
+                string run = m.Value;
+                if (run.StartsWith("..", StringComparison.Ordinal))
+                {
+                    return "…";
+                }
+                string marks = run.Replace(",", "");
+                return marks.Length > 0 ? marks.Substring(0, 1) : ",";
+            });
         }
 
         private static string ApplySpeech(string line, string label)
