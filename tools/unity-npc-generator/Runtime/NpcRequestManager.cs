@@ -75,6 +75,18 @@ namespace Jamkkaebi.Npc
         /// <summary>미리 만들어 둔 대사를 꺼내 쓴 경우의 Note. 그 요청에서는 SLM 을 부르지 않았다 (응답이 바로 뜬다).</summary>
         public const string PrefetchedNote = "미리 만든 대사";
 
+        /// <summary>
+        /// 모델이 멈춰(취소한 생성이 CancelHold 가 지나도 끝나지 않음, <see cref="INpcModelHealth"/>) 기본 대사로 대신한 경우의 Note.
+        /// 아직 안 올라온 것("모델이 아직 준비되지 않음")과 구분한다 — 기기 시험에서 이 메모가 나오면 모델이 묶인 것이다.
+        /// </summary>
+        public const string StalledNote = "모델이 멈춤(취소한 생성이 끝나지 않음) → 기본 대사";
+
+        // 미리 만들기가 기다리며 다시 볼 간격. 요청이 끝나기를 기다릴 때는 바로 이어 만들도록 자주, 모델이 안 올라왔으면
+        // (올리기 실패면 끝내 안 올라온다) 드물게, 멈췄으면(앱을 다시 켤 때까지 안 풀릴 수 있다) 더 드물게 본다 — 25ms 마다 깨어나면 폰의 배터리를 쓴다
+        private const int RequestPollMs = 25;
+        private const int NotReadyPollMs = 250;
+        private const int StalledPollMs = 1000;
+
         private readonly INpcReactionGenerator slm;
         private readonly INpcReactionGenerator rule;
         private readonly object gate = new object();
@@ -128,6 +140,16 @@ namespace Jamkkaebi.Npc
             if (generator != null)
             {
                 Cache.Recheck = generator.Recheck;
+            }
+        }
+
+        /// <summary>SLM 의 모델이 멈췄는지 (SlmReactionGenerator.IsStalled). 다른 생성기는 멈추지 않는 것으로 본다.</summary>
+        public bool SlmStalled
+        {
+            get
+            {
+                SlmReactionGenerator generator = slm as SlmReactionGenerator;
+                return generator != null && generator.IsStalled;
             }
         }
 
@@ -489,7 +511,7 @@ namespace Jamkkaebi.Npc
                 }
                 else if (!slm.IsReady)
                 {
-                    fallbackNote = "모델이 아직 준비되지 않음 → 기본 대사";
+                    fallbackNote = SlmStalled ? StalledNote : "모델이 아직 준비되지 않음 → 기본 대사";
                 }
                 else
                 {
@@ -663,7 +685,8 @@ namespace Jamkkaebi.Npc
                                 return;
                             }
                         }
-                        await Task.Delay(25).ConfigureAwait(false);
+                        int poll = Volatile.Read(ref activeRequests) > 0 ? RequestPollMs : (SlmStalled ? StalledPollMs : NotReadyPollMs);
+                        await Task.Delay(poll).ConfigureAwait(false);
                     }
                     bool finished = await RunPrefetchJob(job).ConfigureAwait(false);
                     if (finished)

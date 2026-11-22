@@ -3928,16 +3928,56 @@ public static class Program
             Task.WaitAll(Enumerable.Range(0, 3).Select(i => Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None))).ToArray());
             Check(first.MaxActive == 1, "CompleteAsync: 동시에 불러도 모델에는 한 번에 하나씩 ← 최대 동시 " + first.MaxActive);
 
-            // 취소: 모델에 멈추라고 하고 바로 돌아온다
-            first.Delay = TimeSpan.FromSeconds(3);
+            // 취소 (2026-11-20 버그 리포트): 프롬프트를 읽는 중(첫 글자 전)에는 모델에 멈추라고 하지 않는다. LlamaLib 2.0.5 는 그 구간에
+            // 멈추라고 하면 슬롯이 묶여 그 호출과 이후의 모든 호출이 돌아오지 않는다 — 가짜 모델도 그 구간의 CancelRequests 를 받으면 묶인다(Stranded)
+            first.ReadTime = TimeSpan.FromMilliseconds(1000);
+            first.Delay = TimeSpan.FromSeconds(5);
             int cancels = first.Cancels;
             var cancel = new CancellationTokenSource();
             cancel.CancelAfter(100);
             Stopwatch watch = Stopwatch.StartNew();
             string cancelled = Error(Task.Run(() => backend.CompleteAsync(prompt, cancel.Token)));
             watch.Stop();
-            Check(cancelled == "OperationCanceledException" && first.Cancels == cancels + 1 && watch.ElapsedMilliseconds < 1500,
-                    "취소되면 모델에 CancelRequests 하고 바로 OperationCanceledException ← " + cancelled + ", " + watch.ElapsedMilliseconds + "ms");
+            int cancelsAtReturn = first.Cancels;
+            first.ReadTime = null;
+            first.Delay = TimeSpan.FromMilliseconds(20);
+            Check(cancelled == "OperationCanceledException" && cancelsAtReturn == cancels && watch.ElapsedMilliseconds < 1000,
+                    "프롬프트를 읽는 중에 취소하면 모델에 멈추라고 하지 않고 CancelGrace 뒤 OperationCanceledException ← " + cancelled + ", "
+                    + watch.ElapsedMilliseconds + "ms, 멈추라고 한 횟수 " + (cancelsAtReturn - cancels));
+            watch = Stopwatch.StartNew();
+            Task<string> afterReading = Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None));
+            bool returned = afterReading.Wait(2500);
+            watch.Stop();
+            Check(returned && afterReading.Result == reply && first.Cancels == cancels + 1 && first.EarlyCancels == 0 && !first.Stranded,
+                    "미뤄 둔 취소는 첫 글자가 나오면 보내고(생성 5초를 다 기다리지 않음), 모델이 묶이지 않아 다음 요청도 돌아옴 ← "
+                    + watch.ElapsedMilliseconds + "ms, 멈추라고 한 횟수 " + (first.Cancels - cancels) + ", 읽는 중 " + first.EarlyCancels);
+
+            // 첫 글자 뒤(생성 단계)의 취소는 바로 모델에 멈추라고 한다
+            first.ReadTime = TimeSpan.FromMilliseconds(50);
+            first.Delay = TimeSpan.FromSeconds(5);
+            cancels = first.Cancels;
+            var generatingCancel = new CancellationTokenSource();
+            generatingCancel.CancelAfter(300);
+            watch = Stopwatch.StartNew();
+            string generatingError = Error(Task.Run(() => backend.CompleteAsync(prompt, generatingCancel.Token)));
+            watch.Stop();
+            first.ReadTime = null;
+            first.Delay = TimeSpan.FromMilliseconds(20);
+            Check(generatingError == "OperationCanceledException" && first.Cancels == cancels + 1 && first.EarlyCancels == 0 && watch.ElapsedMilliseconds < 1500,
+                    "생성 단계에서 취소하면 바로 모델에 멈추라고 하고 돌아옴 ← " + generatingError + ", " + watch.ElapsedMilliseconds + "ms");
+            Check(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)).Wait(1000), "생성 단계 취소 뒤 다음 요청도 바로 돌아옴");
+
+            // 미리 읽기(1토큰)는 취소돼도 멈추라고 하지 않는다 — 스스로 곧 끝난다
+            first.Delay = TimeSpan.FromMilliseconds(600);
+            cancels = first.Cancels;
+            var prepareCancel = new CancellationTokenSource();
+            prepareCancel.CancelAfter(100);
+            string prepareError = Error(Task.Run(() => backend.PrepareAsync("미리 읽다 취소할 시스템 메시지", prepareCancel.Token)));
+            first.Delay = TimeSpan.FromMilliseconds(20);
+            Check(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)).Wait(2000) && prepareError == "OperationCanceledException"
+                    && first.Cancels == cancels && first.EarlyCancels == 0,
+                    "미리 읽기가 취소되면 모델에 멈추라고 하지 않고, 끝나기를 기다렸다 다음 요청을 보냄 ← " + prepareError + ", 멈추라고 한 횟수 "
+                    + (first.Cancels - cancels));
 
             // 멈추라고 해도 안 멈추는 모델 (LlamaLib 은 프롬프트를 읽는 도중에는 멈추지 않는다): 부른 쪽은 CancelGrace 뒤 돌아오지만,
             // 그 생성이 끝날 때까지 다음 요청을 모델에 보내지 않는다. 보내면 llama.cpp 줄에 쌓여 취소되지 않는다 (2026-11-18 S22)
@@ -3961,49 +4001,122 @@ public static class Program
             first.FinishStuck();
             Check(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)).Result == reply, "멈추지 않던 생성이 끝나면 다음 요청도 정상");
 
-            // 끝내 안 끝나는 모델: CancelHold 가 지나면 멈춘 모델로 보고 다음 요청을 받는다
+            // 끝내 안 끝나는 모델: CancelHold 가 지나면 멈춘 모델로 보고(IsLoaded false) 다음 요청을 모델에 보내지 않는다.
+            // 예전에는 보냈는데, 묶인 슬롯 뒤에 선 요청은 또 끝나지 않아 5분마다 하나씩 쌓였다 (버그 리포트 7.2)
             options.CancelHold = TimeSpan.FromMilliseconds(400);
             first.NeverReturn = true;
             var hung = new CancellationTokenSource();
             hung.CancelAfter(100);
             Error(Task.Run(() => backend.CompleteAsync(prompt, hung.Token)));
             first.NeverReturn = false;
+            int callsWhileHung = first.Calls.Count;
+            Task<string> queuedBehindHung = Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None));
             Thread.Sleep(600);
-            Check(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)).Wait(1500), "CancelHold 가 지나면 안 끝난 생성을 두고 다음 요청을 받음");
+            Check(backend.IsStalled && !backend.IsLoaded, "CancelHold 가 지나도 안 끝나면 멈춘 모델로 봄 (IsStalled, IsLoaded false)");
+            Check(Error(queuedBehindHung) == "InvalidOperationException" && first.Calls.Count == callsWhileHung,
+                    "줄에서 기다리던 요청은 멈춘 모델에 보내지 않고 바로 실패 ← 모델 호출 " + (first.Calls.Count - callsWhileHung) + "번");
+            Check(Error(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None))) == "InvalidOperationException"
+                    && Error(Task.Run(() => backend.PrepareAsync("멈춘 뒤 미리 읽기", CancellationToken.None))) == "InvalidOperationException"
+                    && first.Calls.Count == callsWhileHung, "멈춘 뒤의 생성·미리 읽기도 모델에 보내지 않음");
+            // 멈춘 동안 LoadAsync 는 조용히 돌아오지 않고 멈췄다고 알린다 (새로 올리지도 않는다 — 묶인 모델과 둘이 올라가지 않게)
+            string stalledLoad = Message(Task.Run(() => backend.LoadAsync(CancellationToken.None)));
+            Check(stalledLoad.Contains("멈춰") && runtime.Starts == 1 && backend.IsStalled,
+                    "멈춘 동안 LoadAsync 는 InvalidOperationException (새로 올리지 않음) ← " + stalledLoad);
+            // 요청 관리자는 '아직 준비되지 않음'이 아니라 '모델이 멈춤'으로 기본 대사를 쓴다
+            var stalledSlm = new SlmReactionGenerator(backend, new PromptAssembler(personas, actions), new NpcOutputValidator(new NpcLineFilter(forbidden)));
+            var stalledManager = new NpcRequestManager(stalledSlm, new RuleBasedReactionGenerator(lines, new Random(7)));
+            NpcResponse stalledResponse = Task.Run(() => stalledManager.RequestAsync(Tap(8))).Result;
+            Check(stalledSlm.IsStalled && stalledManager.SlmStalled && stalledResponse.ShouldShow && stalledResponse.UsedFallback
+                    && stalledResponse.Note == NpcRequestManager.StalledNote && first.Calls.Count == callsWhileHung,
+                    "모델이 멈추면 요청 관리자는 모델을 부르지 않고 '모델이 멈춤' 메모로 기본 대사 ← " + stalledResponse.Note);
+            first.FinishStuck();
+            Thread.Sleep(100);
+            Check(backend.IsLoaded && !backend.IsStalled && !stalledManager.SlmStalled
+                    && Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)).Result == reply,
+                    "멈췄던 생성이 뒤늦게 끝나면 모델을 다시 씀");
+            Check(first.Active == 0, "가짜 모델: 뒤늦게 끝난 생성도 진행 중 수에서 빠짐 ← " + first.Active);
             options.CancelHold = TimeSpan.FromMinutes(5);
 
             // 취소된 생성 뒤에는 모델이 무엇을 기억하는지 모르니 같은 시스템 메시지도 다시 읽는다
+            first.ReadTime = TimeSpan.FromMilliseconds(50);
             first.Delay = TimeSpan.FromSeconds(3);
             var abort = new CancellationTokenSource();
             abort.CancelAfter(100);
             Error(Task.Run(() => backend.CompleteAsync(prompt, abort.Token)));
+            first.ReadTime = null;
             first.Delay = TimeSpan.FromMilliseconds(20);
             int beforePrepare = first.Calls.Count;
             Task.Run(() => backend.PrepareAsync(prompt.System, CancellationToken.None)).Wait();
             Check(first.Calls.Count == beforePrepare + 1, "생성이 취소된 뒤에는 같은 시스템 메시지도 다시 미리 읽음");
+            Check(first.EarlyCancels == 0 && !first.Stranded, "여기까지 프롬프트를 읽는 중에 모델에 멈추라고 한 적 없음 (" + first.EarlyCancels + "번)");
 
-            // Unload: 진행 중인 요청을 취소하고 모델을 내린다
-            first.Delay = TimeSpan.FromSeconds(3);
+            // Unload: 바로 돌아오고 진행 중인 요청은 취소. 프롬프트를 읽는 중이면 모델에 멈추라고 하지 않고(슬롯이 묶이지 않게),
+            // 모델은 그 생성이 끝난 뒤에 지운다 — LlamaLib 은 진행 중인 생성이 있을 때 지우면 메인 스레드가 멈추고 앱이 죽기도 한다 (2026-11-21 phase 4)
+            // 가짜 모델도 진짜 Unity 처럼 지우기를 미룬다(Object.Destroy 는 프레임 끝). 그 사이 새로 올리면 메모리에 모델이 둘이다 — StartsWhileDestroying 로 잡는다
+            runtime.DestroyDelay = TimeSpan.FromMilliseconds(200);
+            first.Delay = TimeSpan.FromMilliseconds(1500);
+            int firstStarted = Volatile.Read(ref first.ChatsStarted);
             Task<string> during = Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None));
-            Thread.Sleep(150);
+            Check(WaitUntil(() => Volatile.Read(ref first.ChatsStarted) > firstStarted, 2000), "Unload 시험: 생성이 모델에 들어감");
+            watch = Stopwatch.StartNew();
             backend.Unload();
-            Check(Error(during) == "OperationCanceledException", "Unload: 진행 중인 요청은 취소");
-            Thread.Sleep(100);
-            Check(!backend.IsLoaded && first.Destroyed && first.Cancels > cancels + 1, "Unload: 모델에 멈추라고 하고 내림(Destroy), IsLoaded false");
+            long unloadMs = watch.ElapsedMilliseconds;
+            Check(Error(during) == "OperationCanceledException" && unloadMs < 100, "Unload: 바로 돌아오고 진행 중인 요청은 취소 ← Unload " + unloadMs + "ms");
+            Check(!backend.IsLoaded && !first.Destroying, "Unload: 읽는 중인 생성이 끝나기 전에는 모델을 지우지 않음 (IsLoaded 는 바로 false)");
             Check(Error(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None))) == "InvalidOperationException",
                     "Unload 뒤 생성하면 InvalidOperationException");
-            Task.Run(() => backend.LoadAsync(CancellationToken.None)).Wait();
+            // 그 사이 다시 올리면 앞 모델이 실제로 지워지기를 기다렸다가 올린다 (메모리에 모델이 둘 올라가지 않게)
+            Task reloading = Task.Run(() => backend.LoadAsync(CancellationToken.None));
+            Check(!reloading.Wait(200) && runtime.Starts == 1, "앞 모델을 지우기 전에는 새로 올리지 않음 ← 올린 횟수 " + runtime.Starts);
+            Check(reloading.Wait(4000) && first.Destroyed && first.EarlyCancels == 0 && !first.Stranded && !first.DestroyedWhileActive
+                    && runtime.StartsWhileDestroying == 0,
+                    "생성이 끝나고 모델이 실제로 지워진 뒤 다시 올림, 읽는 중에 멈추라고 하지 않음 ← 읽는 중 " + first.EarlyCancels
+                    + ", 지워지는 중에 올림 " + runtime.StartsWhileDestroying);
             Check(backend.IsLoaded && runtime.Starts == 2 && runtime.Last != first, "Unload 뒤 LoadAsync 하면 새로 올림 (정화 미니게임 뒤)");
+
+            // 생성 단계에서 Unload: 첫 글자 뒤라 안전하니 멈추라고 하고, 멈추면 바로 지운다 (3초 생성을 다 기다리지 않음)
+            FakeLlmSession second = runtime.Last;
+            second.ReadTime = TimeSpan.FromMilliseconds(50);
+            second.Delay = TimeSpan.FromSeconds(3);
+            int secondTokens = Volatile.Read(ref second.FirstTokens);
+            Task<string> generatingUnload = Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None));
+            Check(WaitUntil(() => Volatile.Read(ref second.FirstTokens) > secondTokens, 2000), "생성 단계 Unload 시험: 첫 글자가 나옴");
+            backend.Unload();
+            Check(Error(generatingUnload) == "OperationCanceledException", "생성 단계에서 Unload 하면 진행 중인 요청은 취소");
+            Check(WaitUntil(() => second.Destroyed, 2000) && !backend.IsLoaded && !second.DestroyedWhileActive && second.Cancels == 1
+                    && second.EarlyCancels == 0,
+                    "생성 단계에서 Unload: 멈추라고 한 뒤 생성이 멈추면 지움 ← 멈추라고 한 횟수 " + second.Cancels);
+            Task.Run(() => backend.LoadAsync(CancellationToken.None)).Wait();
+            Check(backend.IsLoaded && runtime.Starts == 3 && runtime.Last != second, "생성 단계 Unload 뒤에도 다시 올림");
+
+            // 끝나지 않는 생성을 안은 채 Unload: 지우지 않는다(지우면 앱이 죽을 수 있다). 다시 올리기는 CancelHold 뒤 실패하고, 생성이 뒤늦게 끝나면 지우고 올린다
+            FakeLlmSession third = runtime.Last;
+            options.CancelHold = TimeSpan.FromMilliseconds(400);
+            third.NeverReturn = true;
+            int thirdStarted = Volatile.Read(ref third.ChatsStarted);
+            Task<string> stuckUnload = Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None));
+            Check(WaitUntil(() => Volatile.Read(ref third.ChatsStarted) > thirdStarted, 2000), "끝나지 않는 생성 시험: 생성이 모델에 들어감");
+            backend.Unload();
+            Check(Error(stuckUnload) == "OperationCanceledException", "끝나지 않는 생성이 있어도 Unload 하면 요청은 취소");
+            string stuckLoad = Message(Task.Run(() => backend.LoadAsync(CancellationToken.None)));
+            Check(stuckLoad.Contains("아직 지우지 못했다") && !third.Destroyed && runtime.Starts == 3,
+                    "생성이 끝나지 않으면 지우지 않고, 다시 올리기는 CancelHold 뒤 실패 ← " + stuckLoad);
+            third.NeverReturn = false;
+            third.FinishStuck();
+            Task.Run(() => backend.LoadAsync(CancellationToken.None)).Wait();
+            Check(third.Destroyed && !third.DestroyedWhileActive && backend.IsLoaded && runtime.Starts == 4,
+                    "그 생성이 뒤늦게 끝나면 지우고 다시 올림");
+            options.CancelHold = TimeSpan.FromMinutes(5);
 
             // 올리는 도중 Unload: 올린 모델을 바로 내린다
             backend.Unload();
             runtime.StartDelay = TimeSpan.FromMilliseconds(500);
+            int startsBefore = runtime.Starts;
             Task loadingTask = Task.Run(() => backend.LoadAsync(CancellationToken.None));
-            Thread.Sleep(150);
+            Check(WaitUntil(() => runtime.Starts > startsBefore, 2000), "올리는 도중 Unload 시험: 올리기가 시작됨");
             backend.Unload();
             string loadError = Error(loadingTask);
-            Thread.Sleep(100);
-            Check(loadError == "OperationCanceledException" && !backend.IsLoaded && runtime.Last.Destroyed,
+            Check(loadError == "OperationCanceledException" && !backend.IsLoaded && WaitUntil(() => runtime.Last.Destroyed, 2000),
                     "올리는 도중 Unload 하면 올린 모델을 내리고 IsLoaded false ← " + loadError);
             runtime.StartDelay = TimeSpan.Zero;
 
@@ -4014,10 +4127,16 @@ public static class Program
             runtime.StartError = null;
             runtime.WarmUpError = new InvalidOperationException("문법 오류");
             string warmError = Message(Task.Run(() => backend.LoadAsync(CancellationToken.None)));
-            Thread.Sleep(100); // 내리기는 메인 스레드에 맡겨 두므로 잠깐 기다린다
-            Check(warmError.Contains("문법 오류") && !backend.IsLoaded && runtime.Last.Destroyed,
+            Check(warmError.Contains("문법 오류") && !backend.IsLoaded && WaitUntil(() => runtime.Last.Destroyed, 2000),
                     "미리 데우기가 실패하면 올린 모델을 내리고 예외");
             runtime.WarmUpError = null;
+            // 데우기에 실패해 내린 모델도 다 지워진 뒤에 다시 올린다
+            FakeLlmSession failedWarm = runtime.Last;
+            Task.Run(() => backend.LoadAsync(CancellationToken.None)).Wait();
+            Check(backend.IsLoaded && failedWarm.Destroyed && runtime.StartsWhileDestroying == 0,
+                    "Unload·올리는 도중 Unload·데우기 실패 어느 경우에도 앞 모델이 지워지는 중에 새로 올리지 않음 ← " + runtime.StartsWhileDestroying + "번");
+            backend.Unload();
+            runtime.DestroyDelay = TimeSpan.Zero;
 
             // 형식 제약 고르기
             Check(GrammarSent(unity, runtime, LlmUnityGrammar.JsonSchema, prompt) == prompt.JsonSchema, "Grammar = JsonSchema 면 JSON 스키마를 넘김");
@@ -4050,6 +4169,12 @@ public static class Program
         string grammar = runtime.Last.Calls[runtime.Last.Calls.Count - 1].Grammar;
         backend.Unload();
         return grammar;
+    }
+
+    // 잠으로 때를 짐작하지 않고, 조건이 될 때까지 기다린다 (바쁜 기계에서 시험이 틀리게 지나가거나 실패하지 않게)
+    private static bool WaitUntil(Func<bool> condition, int timeoutMs)
+    {
+        return SpinWait.SpinUntil(condition, timeoutMs);
     }
 
     private static string Error(Task task)
@@ -4174,6 +4299,8 @@ public static class Program
         public TimeSpan StartDelay;
         public Exception StartError;
         public Exception WarmUpError;
+        public TimeSpan DestroyDelay;   // 지우기를 이만큼 미룬다 (Unity 의 Object.Destroy 는 프레임 끝에 지운다)
+        public int StartsWhileDestroying; // 앞 모델이 아직 지워지는 중에 새로 올린 횟수 (메모리에 모델이 둘)
 
         public FakeLlmSession Last
         {
@@ -4214,6 +4341,10 @@ public static class Program
             var session = new FakeLlmSession(this, reply, WarmUpError);
             lock (sessions)
             {
+                if (sessions.Any(s => s.Destroying && !s.Destroyed))
+                {
+                    StartsWhileDestroying++;
+                }
                 sessions.Add(session);
             }
             if (StartDelay > TimeSpan.Zero)
@@ -4225,12 +4356,22 @@ public static class Program
         }
     }
 
+    // 진행 중인 생성 하나. 첫 글자가 나왔으면(Generating) 슬롯이 생성 단계에 들어간 것이다
+    private sealed class FakeChat
+    {
+        public readonly TaskCompletionSource<string> Done = new TaskCompletionSource<string>();
+        public volatile bool Generating;
+        public volatile bool Stranded;
+    }
+
+    // LLMUnity 의 모델 하나 흉내. LlamaLib 2.0.5 처럼, 첫 글자가 나오기 전(프롬프트를 읽는 중)에 CancelRequests 를 받으면 슬롯이 묶여
+    // 그 생성도 그 뒤의 생성도 끝나지 않는다 (Stranded, 2026-11-20 버그 리포트). 첫 글자 뒤의 CancelRequests 는 바로 멈춘다
     private sealed class FakeLlmSession : ILlmUnitySession, ILlmUnityStateStore
     {
         private readonly FakeLlmRuntime runtime;
         private readonly string reply;
         private readonly Exception warmUpError;
-        private TaskCompletionSource<string> pending;
+        private FakeChat pending;
         private int active;
 
         public FakeLlmSession(FakeLlmRuntime runtime, string reply, Exception warmUpError)
@@ -4242,11 +4383,14 @@ public static class Program
         }
 
         public readonly List<FakeLlmCall> Calls = new List<FakeLlmCall>();
-        public TimeSpan Delay;
+        public TimeSpan Delay;      // 생성 하나의 전체 시간
+        public TimeSpan? ReadTime;  // 첫 글자까지(프롬프트 읽기). null 이면 Delay 끝에 첫 글자가 나오고 바로 끝난다
         public bool NeverReturn;
         public int MaxActive;
         public int Cancels;
-        public bool Destroyed;
+        public int EarlyCancels;    // 첫 글자 전에 받은 CancelRequests 수 (진짜 LlamaLib 이면 슬롯이 묶인다)
+        public volatile bool Stranded;
+        public volatile bool Destroyed;
 
         // 시스템 메시지 기억 저장소. null 이면 저장·복원을 지원하지 않는 모델처럼 항상 false
         public HashSet<string> Store;
@@ -4297,54 +4441,104 @@ public static class Program
             {
                 MaxActive = Math.Max(MaxActive, now);
             }
-            var done = new TaskCompletionSource<string>();
-            pending = done;
-            if (NeverReturn)
-            {
-                return done.Task; // CancelRequests 해도 끝나지 않는 모델
-            }
-            // 첫 글자 알림은 끝나기 전에 꼭 한 번 온다 (타이머 해상도 때문에 따로 걸면 순서가 뒤바뀔 수 있다)
-            Task.Delay(Delay).ContinueWith(_ =>
-            {
-                if (onFirstToken != null)
-                {
-                    onFirstToken();
-                }
-                done.TrySetResult(reply);
-            });
-            return done.Task.ContinueWith(t =>
+            var call = new FakeChat();
+            pending = call;
+            Interlocked.Increment(ref ChatsStarted);
+            // 끝나면(뒤늦게 FinishStuck 으로 끝나도) 진행 중 수에서 뺀다
+            Task<string> finished = call.Done.Task.ContinueWith(t =>
             {
                 Interlocked.Decrement(ref active);
                 return t.Result;
             });
+            if (NeverReturn || Stranded)
+            {
+                return finished; // CancelRequests 해도 끝나지 않는 모델, 또는 묶인 슬롯 뒤에 선 요청
+            }
+            TimeSpan total = Delay;
+            TimeSpan read = ReadTime.HasValue && ReadTime.Value < total ? ReadTime.Value : total;
+            Task.Delay(read).ContinueWith(_ =>
+            {
+                if (call.Stranded)
+                {
+                    return; // 묶인 슬롯은 생성 단계로 넘어가지 못한다
+                }
+                call.Generating = true;
+                Interlocked.Increment(ref FirstTokens);
+                if (onFirstToken != null)
+                {
+                    onFirstToken();
+                }
+                if (read >= total)
+                {
+                    // 첫 글자 알림은 끝나기 전에 꼭 한 번 온다 (타이머 해상도 때문에 따로 걸면 순서가 뒤바뀔 수 있다)
+                    call.Done.TrySetResult(reply);
+                }
+                else
+                {
+                    Task.Delay(total - read).ContinueWith(__ => call.Done.TrySetResult(reply));
+                }
+            });
+            return finished;
+        }
+
+        /// <summary>지금 진행 중인 생성 수 (끝나지 않은 생성 포함).</summary>
+        public int Active
+        {
+            get { return Volatile.Read(ref active); }
         }
 
         public void CancelRequests()
         {
             runtime.Record();
             Interlocked.Increment(ref Cancels);
-            TaskCompletionSource<string> current = pending;
-            if (current != null && !NeverReturn)
+            FakeChat current = pending;
+            if (current == null || NeverReturn || current.Done.Task.IsCompleted)
             {
-                current.TrySetResult(""); // 멈추면 지금까지의 글(여기서는 빈 글)을 돌려준다
+                return;
             }
+            if (!current.Generating)
+            {
+                // LlamaLib 2.0.5: 프롬프트를 읽는 중의 취소는 슬롯을 영구히 묶는다
+                Interlocked.Increment(ref EarlyCancels);
+                current.Stranded = true;
+                Stranded = true;
+                return;
+            }
+            current.Done.TrySetResult(""); // 멈추면 지금까지의 글(여기서는 빈 글)을 돌려준다
         }
 
         // NeverReturn 으로 멈추지 않던 생성을 뒤늦게 끝낸다 (프롬프트를 다 읽고 나서야 멈추는 llama.cpp 처럼)
         public void FinishStuck()
         {
-            TaskCompletionSource<string> current = pending;
+            FakeChat current = pending;
             if (current != null)
             {
-                current.TrySetResult("");
+                current.Done.TrySetResult("");
             }
         }
 
-        public void Destroy()
+        // Unity 의 Object.Destroy 처럼 지우기를 미룬다 (프레임 끝). 그동안 Destroying 이고, 다 지우면 Destroyed
+        public async Task DestroyAsync()
         {
             runtime.Record();
+            if (Volatile.Read(ref active) > 0)
+            {
+                DestroyedWhileActive = true; // 진짜 LlamaLib 이면 메인 스레드가 멈추고, 지운 뒤 그 생성의 스레드가 앱을 죽일 수 있다
+            }
+            Destroying = true;
+            if (runtime.DestroyDelay > TimeSpan.Zero)
+            {
+                await Task.Delay(runtime.DestroyDelay);
+            }
             Destroyed = true;
         }
+
+        public volatile bool Destroying;
+        public bool DestroyedWhileActive;
+
+        // 시험이 잠으로 때를 짐작하지 않고 기다릴 수 있게: 시작한 생성 수, 첫 글자가 나온 생성 수
+        public int ChatsStarted;
+        public int FirstTokens;
     }
 
     // ---------- 실기기 시험 장면 변환 ----------

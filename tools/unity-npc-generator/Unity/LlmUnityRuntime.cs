@@ -226,11 +226,19 @@ namespace Jamkkaebi.Npc
                 }
             }
 
-            public void Destroy()
+            public async Task DestroyAsync()
             {
-                if (holder != null)
+                if (holder == null)
                 {
-                    Object.Destroy(holder); // LLM 의 OnDestroy 가 모델 서비스를 멈추고 정리한다
+                    return;
+                }
+                Object.Destroy(holder); // LLM 의 OnDestroy 가 모델 서비스를 멈추고 정리한다
+                // Object.Destroy 는 이 프레임 끝에 지운다. 그 전에 끝내면 다음 StartAsync 가 같은 프레임에 새 LLM 을 만들어
+                // 앞 모델이 메모리에 남은 채로 하나를 더 올리고, 앞 모델의 OnDestroy 가 새 모델을 올리는 동안 LLMUnity 의 잠금을 기다리며
+                // 메인 스레드를 멈춘다. 지워질 때까지(Unity 의 == null) 프레임을 넘기며 기다린다
+                while (holder != null)
+                {
+                    await Task.Yield();
                 }
             }
         }

@@ -36,6 +36,16 @@ namespace Jamkkaebi.Npc
     }
 
     /// <summary>
+    /// 모델이 멈췄는지 알려 주는 백엔드 (<see cref="LlmUnityModelBackend"/>). 멈추면 IsLoaded 도 false 지만, 아직 안 올라온 것과 구분하려고 따로 둔다.
+    /// 이 인터페이스가 없는 백엔드는 멈추지 않는 것으로 본다.
+    /// </summary>
+    public interface INpcModelHealth
+    {
+        /// <summary>취소한 생성이 끝나지 않아 모델을 쓰지 않는 중인지.</summary>
+        bool IsStalled { get; }
+    }
+
+    /// <summary>
     /// SLM 으로 반응을 만드는 생성기. 프롬프트 조립 → 모델 호출 → 출력 검사를 하고, 검사를 통과한 것만 Success 로 돌려준다.
     ///
     /// <para>실패하면 예외 대신 Failed 를 돌려준다. 요청 관리자는 Failed 를 받으면 규칙 기반 생성기로 대신한다.</para>
@@ -141,6 +151,16 @@ namespace Jamkkaebi.Npc
         public bool IsReady
         {
             get { return backend.IsLoaded; }
+        }
+
+        /// <summary>모델이 멈췄는지 (<see cref="INpcModelHealth"/>). 그동안 IsReady 도 false 다. 멈춤을 알려 주지 않는 백엔드면 늘 false.</summary>
+        public bool IsStalled
+        {
+            get
+            {
+                var health = backend as INpcModelHealth;
+                return health != null && health.IsStalled;
+            }
         }
 
         public Task LoadAsync(CancellationToken ct)
