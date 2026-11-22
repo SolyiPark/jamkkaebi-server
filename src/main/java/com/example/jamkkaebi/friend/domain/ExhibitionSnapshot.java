@@ -29,7 +29,8 @@ public class ExhibitionSnapshot extends BaseTimeEntity {
     private Long userId;
 
     @Lob
-    @Column(nullable = false)
+    // @Lob 만 두면 MySQL 에서 TINYTEXT(255바이트)로 만들어져 도깨비를 2마리 이상 배치한 전시관이 저장되지 않는다.
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String payload;
 
     // 스냅샷을 찍은 접속 시각
