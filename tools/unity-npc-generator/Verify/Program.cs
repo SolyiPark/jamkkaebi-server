@@ -16,6 +16,7 @@
 //
 //   verify.exe ... --live [주소] [모델]  → 위 검사 뒤에 실제 LM Studio 로 18장면을 요청 관리자에 통과시켜 본다
 //   verify.exe ... --live-store [주소] [모델] [반복]  → 실제 LM Studio 로 미리 만든 대사 파일·쓴 만큼 다시 만들기를 두 판(처음 설치·다시 켬) 돌려 본다
+//   verify.exe ... --device [옵션]  → 검사 없이 실기기 시험(NpcDeviceTestRunner)과 같은 흐름을 LM Studio 로 돌리고 CSV 를 쓴다 (DeviceRun.cs)
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
@@ -61,6 +62,12 @@ public static class Program
         var scenes = ((IEnumerable)sceneFile["scenes"]).Cast<Dictionary<string, object>>().ToList();
         var labels = ((Dictionary<string, object>)sceneFile["labels"]).ToDictionary(p => p.Key, p => (string)p.Value);
 
+        // 실기기 시험을 PC 에서 (DeviceRun.cs): 검사는 건너뛰고 바로 돌린다
+        if (args.Length > 3 && args[3] == "--device")
+        {
+            return DeviceRun.Run(args.Skip(4).ToArray(), ReadText(Path.Combine(testDataDir, "scenes.json")), personas, actions, lines, forbidden);
+        }
+
         CheckData(packageDir, testDataDir, lines, personas);
         CheckGenerator(lines, scenes);
         CheckStories(lines);
@@ -83,6 +90,7 @@ public static class Program
         CheckTestScenes(ReadText(Path.Combine(testDataDir, "scenes.json")), scenes, personas, actions, labels);
         CheckContextBuilder(personas, actions, lines, forbidden);
         CheckStoryReturn(personas, actions, lines, forbidden);
+        CheckReviewCases(forbidden, personas, actions, lines);
         if (args.Length > 3 && args[3] == "--live-store")
         {
             int liveRepeat;
@@ -98,6 +106,145 @@ public static class Program
 
         Console.WriteLine(failures == 0 ? "모두 통과" : "실패 " + failures + "건");
         return failures == 0 ? 0 : 1;
+    }
+
+    // ---------- 지난 대화: 꺼냈음 표시(T/F)·오래된 것부터·꺼낸 뒤 한 번 쉬기 (2026-11-24) ----------
+    // 예전에는 꺼낸 기억을 표시하지 않아 늘 가장 최근 기억만 꺼냈고, 같은 것을 다시 고르지 않으려고 꺼낸 뒤에는 새 이야기가 올 때까지 꺼내지 않았다
+    private static void CheckRecallQueue(NpcContextBuilder builder)
+    {
+        NpcResponse shown = Show();
+        var older = new MemoryEntry(6, NpcActions.TellStory, "주인에게 해외 소장 이야기를 들려줬다");
+        var newer = new MemoryEntry(3, NpcActions.TellStory, "주인에게 옻칠 자개 이야기를 들려줬다");
+        var memory = new List<MemoryEntry> { older, newer };   // 게임은 새 기억을 뒤에 붙인다
+
+        // 1) 가장 오래된 기억부터
+        NpcContext first = builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, memory.ToArray()));
+        Check(first.KeyFact == "recall" && first.Request.Memory.Count == 1 && first.Request.Memory[0] == older && first.MemoryToMark == older
+                && first.Request.Situation.Contains("6일 전 주인에게 해외 소장"), "지난 대화: 아직 안 꺼낸 것 중 가장 오래된 기억부터 ← " + first.Request.Situation);
+        Check(!older.Recalled, "띄우기 전에는 꺼냈음을 표시하지 않음");
+        MemoryEntry talked = first.Finish(shown);
+        Check(older.Recalled && !newer.Recalled && talked != null && talked.ActionId == NpcActions.RecallTalk && !talked.Recalled,
+                "띄우면 꺼낸 기억에 꺼냈음(T) 표시, 지난 대화를 꺼냈다는 기억을 남김");
+        memory.Add(new MemoryEntry(0, talked.ActionId, talked.Summary));
+
+        // 2) 꺼낸 다음 안부는 평소대로 (선명도·관리 이야기), 띄운 뒤 쉰 것을 표시
+        NpcContext rest = builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, memory.ToArray()));
+        Check(rest.KeyFact == "none" && Acts(rest) == "answer_status" && rest.Request.Memory.Count == 0 && FactsOf(rest).Contains("clarity=선명")
+                && rest.MemoryToMark == memory[2] && rest.MemoryToSave == null, "지난 대화를 꺼낸 다음 안부는 평소 안부, 쉰 것을 표시할 기억은 그 recall_talk ← " + FactsOf(rest));
+        Check(rest.Finish(shown) == null && memory[2].Recalled, "평소 안부를 띄우면 recall_talk 에 쉬었음(T) 표시, 남길 기억 없음");
+
+        // 3) 그다음 안부는 다음 기억 (먼저 꺼낸 것은 다시 꺼내지 않음)
+        NpcContext second = builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, memory.ToArray()));
+        Check(second.KeyFact == "recall" && second.Request.Memory[0] == newer && second.MemoryToMark == newer, "쉰 뒤에는 아직 안 꺼낸 다음 기억 ← " + second.Request.Situation);
+        memory.Add(new MemoryEntry(0, second.Finish(shown).ActionId, "주인과 지난 일을 다시 이야기했다"));
+        builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, memory.ToArray())).Finish(shown);
+        Check(builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, memory.ToArray())).KeyFact == "none", "모두 꺼냈으면 평소 안부");
+
+        // 4) 띄우지 못하면 표시하지 않는다 — 다음 안부에 같은 기억을 다시 꺼낸다
+        var unshown = new MemoryEntry(2, NpcActions.TellStory, "주인에게 암행어사 이야기를 들려줬다");
+        NpcContext dropped = builder.Build(Owner(8, NpcInputs.AskStatus, "CLEAR", 5, unshown));
+        Check(dropped.Finish(Dropped()) == null && !unshown.Recalled && dropped.MemoryToMark == null
+                && builder.Build(Owner(8, NpcInputs.AskStatus, "CLEAR", 5, unshown)).MemoryToMark == unshown,
+                "못 띄운 지난 대화는 표시하지 않고(MemoryToMark 도 비움 — 게임이 저장하지 않게) 다음에 다시 꺼냄");
+        Check(dropped.Finish(shown) == null && !unshown.Recalled, "Finish 는 한 번만 — 뒤늦게 '띄움'을 줘도 표시하지 않음");
+        // 꺼낸 뒤 이야기를 들려줘(가장 최근 기억이 이야기) 다음 안부도 쉰다. 표시 없이 저장된 옛 recall_talk 가 여럿이어도 한 번만 쉰다
+        var recalledStory = new MemoryEntry(5, NpcActions.TellStory, "주인에게 해외 소장 이야기를 들려줬다") { Recalled = true };
+        var oldTalk = new MemoryEntry(4, NpcActions.RecallTalk, "주인과 지난 일을 다시 이야기했다");
+        var lastTalk = new MemoryEntry(0, NpcActions.RecallTalk, "주인과 지난 일을 다시 이야기했다");
+        var toldAfter = new MemoryEntry(0, NpcActions.TellStory, "주인에게 옻칠 자개 이야기를 들려줬다");
+        NpcContext afterStory = builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, recalledStory, oldTalk, lastTalk, toldAfter));
+        Check(afterStory.KeyFact == "none" && afterStory.MemoryToMark == lastTalk, "꺼낸 뒤 이야기를 들려줘도 다음 안부는 평소대로 쉼 ← " + afterStory.KeyFact);
+        afterStory.Finish(shown);
+        NpcContext nextRecall = builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, recalledStory, oldTalk, lastTalk, toldAfter));
+        Check(lastTalk.Recalled && !oldTalk.Recalled && nextRecall.KeyFact == "recall" && nextRecall.MemoryToMark == toldAfter,
+                "쉰 뒤에는 새로 들려준 이야기를 꺼냄 (옛 recall_talk 때문에 또 쉬지 않음)");
+
+        // 5) 흐려짐·최근 관리 안부도 쉰 것으로 친다. 탭 인사는 기억을 건드리지 않는다
+        var pendingFaded = new MemoryEntry(0, NpcActions.RecallTalk, "주인과 지난 일을 다시 이야기했다");
+        NpcContext faded = builder.Build(Owner(6, NpcInputs.AskStatus, "FADED", 9, new MemoryEntry(4, NpcActions.TellStory, "주인에게 해외 소장 이야기를 들려줬다"), pendingFaded));
+        faded.Finish(shown);
+        Check(faded.KeyFact == "faded" && pendingFaded.Recalled, "흐려짐 안부도 꺼낸 뒤 쉰 것으로 표시");
+        var pendingCare = new MemoryEntry(0, NpcActions.RecallTalk, "주인과 지난 일을 다시 이야기했다");
+        NpcContext care = builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 1, pendingCare));
+        care.Finish(shown);
+        Check(care.KeyFact == "recent_care" && pendingCare.Recalled, "최근 관리 안부도 꺼낸 뒤 쉰 것으로 표시");
+        var untouched = new MemoryEntry(0, NpcActions.RecallTalk, "주인과 지난 일을 다시 이야기했다");
+        NpcContext tap = builder.Build(Owner(6, NpcInputs.Tap, "CLEAR", 5, untouched));
+        tap.Finish(shown);
+        Check(tap.MemoryToMark == null && !untouched.Recalled, "탭 인사는 꺼냈음 표시를 바꾸지 않음");
+
+        // 6) 같은 날 기억은 먼저 붙인 것부터
+        var morning = new MemoryEntry(1, NpcActions.TellStory, "주인에게 아침 이야기를 들려줬다");
+        var evening = new MemoryEntry(1, NpcActions.TellStory, "주인에게 저녁 이야기를 들려줬다");
+        Check(builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, morning, evening)).MemoryToMark == morning, "같은 날 기억은 먼저 들어온 것부터");
+
+        // 7) 미리 만들기: 지난 대화 안부와 그다음 평소 안부를 함께 만든다
+        var waiting = new MemoryEntry(3, NpcActions.TellStory, "주인에게 옻칠 자개 이야기를 들려줬다");
+        List<ReactionRequest> asks = builder.PrefetchTemplates(Owner(6, NpcInputs.Tap, "CLEAR", 5, waiting)).Where(r => r.Input == NpcInputs.AskStatus).ToList();
+        Check(asks.Count == 2 && asks[0].Candidates[0].ActionId == NpcActions.RecallTalk && asks[1].Candidates[0].ActionId == NpcActions.AnswerStatus
+                && asks[1].Memory.Count == 0 && !waiting.Recalled,
+                "지난 대화를 꺼낼 차례면 그다음 평소 안부도 미리 만듦 ← " + string.Join(", ", asks.Select(r => r.Candidates[0].ActionId).ToArray()));
+        Check(builder.PrefetchTemplates(Owner(6, NpcInputs.Tap, "CLEAR", 5)).Count(r => r.Input == NpcInputs.AskStatus) == 1, "기억이 없으면 안부는 하나");
+    }
+
+    // ---------- CodeRabbit 리뷰 사례 (2026-11-23 다시 점검) ----------
+    // 리뷰에 적힌 입력을 그대로 넣어 본다. 이미 고친 것도 다시 나빠지지 않게 남겨 둔다
+    private static void CheckReviewCases(ForbiddenCatalog forbidden, PersonaCatalog personas, ActionCatalog actions, DefaultLineCatalog lines)
+    {
+        Console.WriteLine("=== CodeRabbit 리뷰 사례 ===");
+        // '입니다'는 앞 낱말의 받침에 따라 '야'·'이야'
+        Check(NpcLineChecks.NormalizeSpeech("나는 친구입니다.", "반말", "밤바다") == "나는 친구야.", "받침 없는 낱말 + 입니다 → 야 ← " + NpcLineChecks.NormalizeSpeech("나는 친구입니다.", "반말", "밤바다"));
+        Check(NpcLineChecks.NormalizeSpeech("여기가 내 집입니다.", "반말", "밤바다") == "여기가 내 집이야.", "받침 있는 낱말 + 입니다 → 이야 ← " + NpcLineChecks.NormalizeSpeech("여기가 내 집입니다.", "반말", "밤바다"));
+        // '손님'을 '친구'로 바꿀 때 붙은 조사도 바꾼다
+        Check(NpcLineChecks.GuestToFriend("손님이 왔어") == "친구가 왔어" && NpcLineChecks.GuestToFriend("손님은 반가워") == "친구는 반가워"
+                && NpcLineChecks.GuestToFriend("손님을 기다렸어") == "친구를 기다렸어",
+                "손님이·은·을 → 친구가·는·를 ← " + NpcLineChecks.GuestToFriend("손님이 왔어") + " / " + NpcLineChecks.GuestToFriend("손님은 반가워") + " / " + NpcLineChecks.GuestToFriend("손님을 기다렸어"));
+        // 처음 온 친구에게 "다음에 또 와"는 초대다 — 전에 왔다는 말만 어긋난다
+        Check(NpcLineChecks.HistoryContradiction("반가워! 다음에 또 와.", 1) == null && NpcLineChecks.HistoryContradiction("또 왔네, 반가워!", 1) != null,
+                "첫 방문: '또 와'(초대)는 통과, '또 왔네'는 어긋남");
+        // '다시는'의 '시'는 높임이 아니다
+        string again = NpcLineChecks.NormalizeSpeech("다시는 안 늦을게. 같이 놀자!", "반말", "밤바다");
+        Check(again.StartsWith("다시는", StringComparison.Ordinal), "'다시는'의 '시'를 지우지 않음 ← " + again);
+        // 닉네임이 조사로 끝나 보여도('다은') 부르는 말이면 끊긴 문장이 아니다
+        Check(NpcLineChecks.IncompleteEnding("어서 와, 다은.", "다은") == null && NpcLineChecks.IncompleteEnding("내 꼬리를", "다은") != null,
+                "끝의 부르는 말('다은')은 끊긴 조사로 보지 않고, '내 꼬리를'은 끊긴 문장");
+        // '오전'도 시간대 낱말이다
+        Check(NpcLineChecks.TimeContradiction("지금은 오전이야, 반가워!", "밤") != null && NpcLineChecks.TimeContradiction("지금은 오전이야, 반가워!", "오전") == null,
+                "밤에 '오전'은 어긋나고 오전에는 통과");
+        Check(NpcLineSlots.Slotify("오전에 와 줬구나.", new SlotValues { TimeWord = "오전" }) != null, "견본 시간대가 오전이면 '오전에'를 칸으로 보관");
+        // "닦아 줄까?"는 내가 닦아 주겠다는 말이라 부탁이 아니다
+        Check(!NpcLineChecks.HasAsk("몸이 흐려졌어. 살살 닦아 줄까?") && !NpcLineChecks.IsCleanAsk("살살 닦아 줄까?") && NpcLineChecks.HasAsk("몸이 흐려졌어. 살살 닦아 줄래?"),
+                "'닦아 줄까?'는 부탁으로 보지 않고 '닦아 줄래?'는 부탁");
+        // 보관함에 없는 열쇠를 읽기만 해서는 칸이 생기지 않는다
+        var missCache = new NpcLineCache();
+        ReactionRequest missing = Request(8, InteractionMode.Owner, NpcInputs.Tap, NpcActions.Greet);
+        missCache.TryTake(missing, null);
+        missCache.TryTakeTemplate(missing, null);
+        missCache.Count(missing);
+        missCache.Count(missing, new[] { "왔구나!" });
+        missCache.UsableTemplateCount(missing, 40);
+        missCache.UsableTemplateCount(missing, 40, new[] { "왔구나!" });
+        Check(missCache.BucketCount == 0, "없는 열쇠를 읽고 세기만 해서는 보관함 칸이 생기지 않음 ← " + missCache.BucketCount);
+
+        // 칸 있는 대사의 열쇠는 방문 횟수·방문한 날을 빼서, 처음 온 친구에게 만든 말이 단골에게 갈 수 있다 — 꺼낼 때 방문 기록으로 다시 본다
+        Func<int, string, ReactionRequest> visitor = (count, days) =>
+        {
+            ReactionRequest v = Request(8, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderRecall);
+            v.Situation = "친구가 놀러 왔다.";
+            v.Facts.Add(new Fact(NpcFactKeys.VisitCount30d, count.ToString()));
+            v.Facts.Add(new Fact(NpcFactKeys.VisitDays, days));
+            return v;
+        };
+        ReactionRequest firstVisit = visitor(1, "오늘");
+        ReactionRequest regular = visitor(7, "오늘, 3일 전, 5일 전");
+        var visitCache = new NpcLineCache();
+        Check(NpcLineCache.TemplateKeyOf(firstVisit) == NpcLineCache.TemplateKeyOf(regular), "처음 온 친구와 단골의 손님 관람은 칸 있는 대사 열쇠가 같음 (방문 기록은 열쇠에서 뺀다)");
+        visitCache.AddTemplate(firstVisit, ReactionResult.Success("v1", NpcActions.WanderRecall, NpcTargets.Player, "처음 와 줬구나, 반가워!", ReactionSource.Slm, null));
+        visitCache.AddTemplate(regular, ReactionResult.Success("v2", NpcActions.WanderRecall, NpcTargets.Player, "오랜만이야, 반가워!", ReactionSource.Slm, null));
+        Check(visitCache.TryTakeTemplate(regular, null) == null && visitCache.TemplateCount(regular) == 2,
+                "단골에게 '처음 와 줬구나', 3일 전에도 온 친구에게 '오랜만'은 꺼내지 않고 다른 요청을 위해 둠");
+        ReactionResult toFirst = visitCache.TryTakeTemplate(firstVisit, null);
+        Check(toFirst != null && toFirst.Line == "처음 와 줬구나, 반가워!", "처음 온 친구에게는 '처음 와 줬구나'를 꺼냄 ← " + (toFirst != null ? toFirst.Line : "(없음)"));
     }
 
     // ---------- 데이터 ----------
@@ -2418,7 +2565,7 @@ public static class Program
         var backend = new FakeBackend();
         var slm = new SlmReactionGenerator(backend, assembler, validator);
         slm.LoadAsync(CancellationToken.None).Wait();
-        var manager = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(5) };
+        var manager = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), PrefetchIdleDelay = TimeSpan.Zero };
         Func<ReactionRequest> tapRequest = () =>
         {
             ReactionRequest r = Request(8, InteractionMode.Owner, NpcInputs.Tap, NpcActions.Greet);
@@ -2464,7 +2611,7 @@ public static class Program
         var slowBackend = new FakeBackend();
         var slowSlm = new SlmReactionGenerator(slowBackend, assembler, validator);
         slowSlm.LoadAsync(CancellationToken.None).Wait();
-        var slowManager = new NpcRequestManager(slowSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5) };
+        var slowManager = new NpcRequestManager(slowSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), PrefetchIdleDelay = TimeSpan.Zero };
         int started = 0;
         slowBackend.Delayed = async c =>
         {
@@ -2676,7 +2823,7 @@ public static class Program
         var refillBackend = new FakeBackend();
         var refillSlm = new SlmReactionGenerator(refillBackend, assembler, validator);
         refillSlm.LoadAsync(CancellationToken.None).Wait();
-        var refill = new NpcRequestManager(refillSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), RefillAfterUse = true };
+        var refill = new NpcRequestManager(refillSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), RefillAfterUse = true, PrefetchIdleDelay = TimeSpan.Zero };
         refillBackend.Replies.Enqueue(Out(careAction, "player", "오랜만에 닦아 줘서 개운해, 고마워!"));
         refill.PrefetchTemplate(faded9, 1);
         Check(refill.PrefetchCompletion.Wait(5000) && refill.Cache.TemplateCount(faded9) == 1, "정화 대사 1개를 미리 만듦");
@@ -2693,10 +2840,13 @@ public static class Program
         string clearAction = clear2.Candidates[0].ActionId;
         refillBackend.Replies.Enqueue(Out(clearAction, "player", "개운해, 고마워!"));
         refillBackend.Replies.Enqueue(Out(clearAction, "player", "몸이 가벼워, 고마워!"));
+        refillBackend.Replies.Enqueue(Out(clearAction, "player", "무늬가 또렷해졌어, 고마워!"));
         int beforeLive = refillBackend.Calls;
         NpcResponse live = Ask(refill, clear2);
-        Check(live.Note != NpcRequestManager.PrefetchedNote && refill.PrefetchCompletion.Wait(5000) && refill.Cache.TemplateCount(clear2) == 1
-                && refillBackend.Calls == beforeLive + 2, "보관함이 비어 그 자리에서 만든 뒤에도 다음 정화 것 1개를 만들어 둠 ← " + refill.Cache.TemplateCount(clear2));
+        // 빗나간 상황은 채운 것보다 빨리 쓰인다 — 채울 수(정화 1)보다 하나 더 (2026-11-23 적중 개선)
+        Check(live.Note != NpcRequestManager.PrefetchedNote && refill.PrefetchCompletion.Wait(5000) && refill.Cache.TemplateCount(clear2) == 2
+                && refillBackend.Calls == beforeLive + 3, "보관함이 비어 그 자리에서 만들었으면 다음 정화 것을 하나 더(2개) 만들어 둠 ← " + refill.Cache.TemplateCount(clear2)
+                + "개, 모델 " + (refillBackend.Calls - beforeLive) + "번");
         Check(refill.RefillTarget(Tap(8)) == 2 && refill.RefillTarget(Request(8, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderRecall)) == 2 && refill.RefillTarget(faded9) == 1,
                 "채울 수: 탭 인사·손님 관람 2 (여러 친구가 잇달아 온다), 정화·안부 1");
         Check(refill.Store == null && !refill.SaveStore(), "저장소를 붙이지 않았으면 쓰지 않음");
@@ -2751,7 +2901,7 @@ public static class Program
         var longBackend = new FakeBackend();
         var longSlm = new SlmReactionGenerator(longBackend, assembler, validator);
         longSlm.LoadAsync(CancellationToken.None).Wait();
-        var longManager = new NpcRequestManager(longSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), RefillAfterUse = true };
+        var longManager = new NpcRequestManager(longSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), RefillAfterUse = true, PrefetchIdleDelay = TimeSpan.Zero };
         longManager.Cache.AddTemplate(shortNick, ReactionResult.Success("l1", "greet", NpcTargets.Player, "도윤, 어서 와 줘서 고마워!", ReactionSource.Slm, null));
         longManager.Cache.AddTemplate(shortNick, ReactionResult.Success("l2", "greet", NpcTargets.Player, "도윤, 낮에 와서 반가워!", ReactionSource.Slm, null));
         // 관리자의 탭 길이 한도(여유 포함)를 넘는 닉네임 — 보관한 두 대사 모두 칸을 채우면 한도를 넘는다 (CodeRabbit 리뷰: 시험이 정말 길이 때문에 빗나가게)
@@ -2762,11 +2912,12 @@ public static class Program
         longBackend.Replies.Enqueue(Out("greet", "player", "왔구나, 순찰 중이었어!"));
         longBackend.Replies.Enqueue(Out("greet", "player", "드디어 왔구나, 기다렸어!"));
         longBackend.Replies.Enqueue(Out("greet", "player", "어서 와, 갓 끈 고쳐 맸어!"));
+        longBackend.Replies.Enqueue(Out("greet", "player", "안녕, 오늘도 순찰 끝냈어!"));
         int beforeLong = longBackend.Calls;
         NpcResponse longLive = Ask(longManager, longNick);
-        Check(longLive.Note != NpcRequestManager.PrefetchedNote && longManager.PrefetchCompletion.Wait(5000) && longManager.Cache.UsableTemplateCount(longNick, maxLen) == 2
-                && longBackend.Calls == beforeLong + 3,
-                "긴 닉네임 요청이 빗나가면 그 요청이 쓸 수 있는 대사를 탭 목표(2개)만큼 다시 만듦 ← 쓸 수 있는 " + longManager.Cache.UsableTemplateCount(longNick, maxLen)
+        Check(longLive.Note != NpcRequestManager.PrefetchedNote && longManager.PrefetchCompletion.Wait(5000) && longManager.Cache.UsableTemplateCount(longNick, maxLen) == 3
+                && longBackend.Calls == beforeLong + 4,
+                "긴 닉네임 요청이 빗나가면 그 요청이 쓸 수 있는 대사를 탭 목표(2개)보다 하나 더(3개, 못 쓰는 것을 비우고) 만듦 ← 쓸 수 있는 " + longManager.Cache.UsableTemplateCount(longNick, maxLen)
                 + "개, 모델 " + (longBackend.Calls - beforeLong) + "번");
 
         // CodeRabbit 리뷰: 버리는 관리자는 저장소를 닫는다 — 닫은 뒤에는 다시 만들기·저장이 같은 파일에 쓰지 않는다
@@ -2882,7 +3033,7 @@ public static class Program
         };
         var slowSlm = new SlmReactionGenerator(slowBackend, assembler, validator);
         slowSlm.LoadAsync(CancellationToken.None).Wait();
-        var keepGoing = new NpcRequestManager(slowSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), PrefetchTimeout = TimeSpan.FromSeconds(5) };
+        var keepGoing = new NpcRequestManager(slowSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), PrefetchTimeout = TimeSpan.FromSeconds(5), PrefetchIdleDelay = TimeSpan.Zero };
         keepGoing.Cache.AddTemplate(faded9, ReactionResult.Success("k1", careAction, NpcTargets.Player, "오랜만에 닦아 줘서 개운해, 고마워!", ReactionSource.Slm, null));
         holdNext = 1;
         keepGoing.PrefetchTemplate(clear2, 1);
@@ -2904,7 +3055,227 @@ public static class Program
         Check(liveWhileBuilding.ShouldShow && liveWhileBuilding.Note != NpcRequestManager.PrefetchedNote && slowCancelled == 1,
                 "그 자리에서 모델을 쓰는 요청은 만들던 미리 만들기를 멈춤 ← 취소 " + slowCancelled + "번");
         keepGoing.PrefetchCompletion.Wait(5000);
+
+        // 2026-11-23 기기 시험: 뒤에서 다시 만들기가 모델을 붙잡아 미리 읽기가 0ms → 60초 안팎으로 늘었다.
+        // ① 요청이 끝난 뒤 PrefetchIdleDelay 동안은 다시 만들기를 새로 시작하지 않고, 지나면 만든다
+        Check(new NpcRequestManager(slowSlm, rule).PrefetchIdleDelay == TimeSpan.FromSeconds(10), "다시 만들기 전에 쉬는 시간은 기본 10초");
+        var idleBackend = new FakeBackend();
+        var idleSlm = new SlmReactionGenerator(idleBackend, assembler, validator);
+        idleSlm.LoadAsync(CancellationToken.None).Wait();
+        var idle = new NpcRequestManager(idleSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), RefillAfterUse = true, PrefetchIdleDelay = TimeSpan.FromMilliseconds(2000) };
+        idle.Cache.AddTemplate(faded9, ReactionResult.Success("i1", careAction, NpcTargets.Player, "오랜만에 닦아 줘서 개운해, 고마워!", ReactionSource.Slm, null));
+        idleBackend.Reply = Out(careAction, "player", "드디어 몸이 맑아졌어, 고마워!");
+        NpcResponse idleHit = Ask(idle, faded12);
+        Stopwatch idleWatch = Stopwatch.StartNew();
+        Thread.Sleep(300);
+        int idleCallsEarly = idleBackend.Calls;
+        bool idleLookedEarly = idleWatch.ElapsedMilliseconds < 1500;   // 시험 기계가 느려 쉬는 시간을 넘겨 봤으면 '아직'을 따지지 않는다
+        Check(idleHit.Note == NpcRequestManager.PrefetchedNote && (idleCallsEarly == 0 || !idleLookedEarly), "요청이 끝나자마자는 다시 만들지 않음 (쉬는 시간 안) ← 모델 " + idleCallsEarly + "번");
+        Check(idle.PrefetchCompletion.Wait(8000) && idleBackend.Calls == 1 && idle.Cache.TemplateCount(faded12) == 1,
+                "쉬는 시간이 지나면 쓴 만큼 다시 만듦 ← 모델 " + idleBackend.Calls + "번, 보관 " + idle.Cache.TemplateCount(faded12) + "개");
+
+        // ② 미리 읽기(도깨비를 확대)는 뒤에서 만들던 것을 멈추고, 끝난 뒤 쉬는 시간 동안 새로 만들지 않으며, 그 뒤 이어 만든다 (멈춘 것은 실패로 세지 않는다)
+        var focusBackend = new FakeBackend();
+        int focusCancelled = 0;
+        int focusHold = 1;
+        var focusStarted = new TaskCompletionSource<bool>();
+        focusBackend.Delayed = async ct =>
+        {
+            if (Interlocked.Exchange(ref focusHold, 0) == 1)
+            {
+                focusStarted.TrySetResult(true);
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    Interlocked.Increment(ref focusCancelled);
+                    throw;
+                }
+            }
+            return Out(clearAction, "player", "몸이 한결 가벼워졌어, 고마워!");
+        };
+        var focusSlm = new SlmReactionGenerator(focusBackend, assembler, validator);
+        focusSlm.LoadAsync(CancellationToken.None).Wait();
+        var focus = new NpcRequestManager(focusSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), PrefetchTimeout = TimeSpan.FromSeconds(5), PrefetchIdleDelay = TimeSpan.FromMilliseconds(2000) };
+        focus.PrefetchTemplate(clear2, 1);
+        Check(focusStarted.Task.Wait(5000), "미리 읽기 전: 뒤에서 미리 만들기가 모델을 부르기 시작함");
+        Check(focus.PrepareAsync(clear2.RelicId).Wait(3000) && Volatile.Read(ref focusCancelled) == 1 && focusBackend.Prepared.Count == 1,
+                "미리 읽기가 뒤에서 만들던 것을 멈추고 끝남 ← 취소 " + focusCancelled + "번");
+        Stopwatch focusWatch = Stopwatch.StartNew();
+        Thread.Sleep(300);
+        int focusCallsEarly = focusBackend.Calls;
+        bool focusLookedEarly = focusWatch.ElapsedMilliseconds < 1500;
+        Check(!focusLookedEarly || (focusCallsEarly == 1 && !focus.PrefetchCompletion.IsCompleted),
+                "미리 읽기가 끝난 뒤 쉬는 시간 동안은 새로 만들지 않음 (선택지를 고르는 사이) ← 모델 " + focusCallsEarly + "번");
+        Check(focus.PrefetchCompletion.Wait(8000) && focusBackend.Calls == 2 && focus.Cache.TemplateCount(clear2) == 1,
+                "쉬는 시간이 지나면 멈췄던 것을 이어 만듦 ← 모델 " + focusBackend.Calls + "번, 보관 " + focus.Cache.TemplateCount(clear2) + "개");
         Check(NpcLineChecks.Cached("가(나)다") == NpcLineChecks.Cached("가(나)다"), "같은 패턴의 정규식은 한 번 만들어 다시 씀");
+
+        // ③ 미리 읽기·요청이 멈춘 생성은 실패로 세지 않는다 — 쉬는 시간이 0 이고 미리 읽기가 바로 끝나면, 멈춘 생성이 돌아왔을 때 이미 한가해
+        //    예전에는 시간 초과로 세어 세 번이면 그 상황을 그만 만들었다
+        var preemptBackend = new FakeBackend();
+        int preemptHolds = 3;
+        var preemptStarted = new SemaphoreSlim(0);
+        preemptBackend.Delayed = async ct =>
+        {
+            if (Interlocked.Decrement(ref preemptHolds) >= 0)
+            {
+                preemptStarted.Release();
+                bool stopped = false;
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, ct);   // 멈출 때까지 붙잡는다
+                }
+                catch (OperationCanceledException)
+                {
+                    stopped = true;
+                }
+                if (stopped)
+                {
+                    // 기기 백엔드처럼 늦게 멈춘다 (프롬프트를 다 읽고 첫 글자가 나온 뒤에야 멈춤) — 취소한 쪽(미리 읽기)은 기다리지 않고 끝나 그사이 한가해진다.
+                    // 취소는 부른 스레드에서 이어 돌 수 있어, 다른 스레드로 넘긴 뒤 기다린다 (C# 5 는 catch 안에서 await 하지 못한다)
+                    await Task.Run(() => Thread.Sleep(300));
+                    throw new OperationCanceledException(ct);
+                }
+            }
+            return Out(clearAction, "player", "몸이 한결 가벼워졌어, 고마워!");
+        };
+        var preemptSlm = new SlmReactionGenerator(preemptBackend, assembler, validator) { MaxAttempts = 1 };
+        preemptSlm.LoadAsync(CancellationToken.None).Wait();
+        var preemptManager = new NpcRequestManager(preemptSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), PrefetchTimeout = TimeSpan.FromSeconds(5), PrefetchIdleDelay = TimeSpan.Zero };
+        preemptManager.PrefetchTemplate(clear2, 1);
+        bool preemptedAll = true;
+        for (int i = 0; i < 3; i++)
+        {
+            preemptedAll &= preemptStarted.Wait(5000) && preemptManager.PrepareAsync(clear2.RelicId).Wait(3000);
+        }
+        Check(preemptedAll && preemptManager.PrefetchCompletion.Wait(5000) && preemptManager.Cache.TemplateCount(clear2) == 1 && preemptBackend.Calls == 4,
+                "미리 읽기에 세 번 멈춰도 그 상황을 그만두지 않고 끝내 만듦 ← 보관 " + preemptManager.Cache.TemplateCount(clear2) + "개, 모델 " + preemptBackend.Calls + "번");
+
+        // ④ 같은 상황을 더 많이 채워 달라고 해도 상황마다 둘 수 있는 수(MaxPerKey 3)를 넘겨 만들지 않는다 (넘기면 넣지 못할 생성을 실패가 쌓일 때까지 거듭했다)
+        var capBackend = new FakeBackend();
+        var capStarted = new TaskCompletionSource<bool>();
+        var capRelease = new TaskCompletionSource<bool>();
+        int capFirst = 1;
+        string[] capLines = { "몸이 한결 가벼워졌어, 고마워!", "무늬가 또렷해졌어, 고마워!", "자개가 반짝반짝해, 고마워!", "향이 맑아졌어, 고마워!", "옻칠이 윤이 나, 고마워!", "덕분에 개운해졌어, 고마워!" };
+        int capIndex = -1;
+        capBackend.Delayed = async ct =>
+        {
+            if (Interlocked.Exchange(ref capFirst, 0) == 1)
+            {
+                capStarted.TrySetResult(true);
+                await capRelease.Task;
+            }
+            return Out(clearAction, "player", capLines[Math.Min(Interlocked.Increment(ref capIndex), capLines.Length - 1)]);
+        };
+        var capSlm = new SlmReactionGenerator(capBackend, assembler, validator) { MaxAttempts = 1 };
+        capSlm.LoadAsync(CancellationToken.None).Wait();
+        var capManager = new NpcRequestManager(capSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), PrefetchTimeout = TimeSpan.FromSeconds(5), PrefetchIdleDelay = TimeSpan.Zero };
+        capManager.PrefetchTemplate(clear2, 1);
+        Check(capStarted.Task.Wait(5000), "한도 시험: 첫 생성이 시작됨");
+        capManager.PrefetchTemplate(clear2, 10);   // 줄에 있는 같은 상황과 합친다
+        capRelease.TrySetResult(true);
+        Check(capManager.PrefetchCompletion.Wait(5000) && capManager.Cache.TemplateCount(clear2) == 3 && capBackend.Calls == 3,
+                "합친 작업도 MaxPerKey(3)까지만 만듦 ← 보관 " + capManager.Cache.TemplateCount(clear2) + "개, 모델 " + capBackend.Calls + "번");
+
+        // 2026-11-23 기기 시험: SLM 실패의 대부분이 '반복'이었다 (같은 첫 낱말 → 같은 대사, seed 0 → 같은 프롬프트에 같은 대사)
+        // ① 같은 시나리오에 같은 번호로 잇달아 와도(S22·S23·S24 같은 탭 인사) 첫 낱말을 바꿔 준다
+        Func<NpcPrompt, string> starterOf = prompt =>
+        {
+            if (prompt == null)
+            {
+                return null;
+            }
+            string found = prompt.User.Split('\n').FirstOrDefault(l => l.StartsWith(PromptAssembler.StarterLabel + ": ", StringComparison.Ordinal));
+            return found != null ? found.Substring(PromptAssembler.StarterLabel.Length + 2).Trim() : null;
+        };
+        var starterBackend = new FakeBackend();
+        // 한 번만 만드는 생성기 — 검사에 걸려 다시 만들면 생성기가 번호를 1 늘려, LastPrompt 가 관리자가 고른 프롬프트가 아니게 된다 (CodeRabbit 식 검토)
+        var starterSlm = new SlmReactionGenerator(starterBackend, assembler, validator) { MaxAttempts = 1 };
+        starterSlm.LoadAsync(CancellationToken.None).Wait();
+        var starters = new NpcRequestManager(starterSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5) };
+        string[] starterReplies = { "왔구나, 순찰 중이었어!", "드디어 왔구나, 기다렸어!", "어서 와, 갓 끈 고쳐 맸어!" };
+        var given = new List<string>();
+        for (int i = 0; i < 3; i++)
+        {
+            starterBackend.Reply = Out("greet", "player", starterReplies[i]);
+            Ask(starters, Tap(8));   // 늘 Variation 0
+            given.Add(starterOf(starterBackend.LastPrompt));
+        }
+        Check(given.All(s => s != null) && given.Distinct().Count() == 3,
+                "같은 번호로 세 번 와도 첫 낱말이 셋 다 다름 ← " + string.Join(" / ", given.ToArray()));
+        // ② 최근 대사가 그 첫 낱말로 시작하면 다른 첫 낱말을 준다 (앱을 다시 켜 같은 번호부터 세도 파일의 최근 대사와 겹치지 않게)
+        var starters2 = new NpcRequestManager(starterSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5) };
+        ReactionRequest againTap = Tap(8);
+        string planned = PromptAssembler.Starter(againTap);
+        againTap.RecentLines = new List<string> { planned + ", 반가워!" };
+        Ask(starters2, againTap);
+        string gotStarter = starterOf(starterBackend.LastPrompt);
+        Check(planned != null && gotStarter != null && gotStarter != planned, "최근 대사 '" + planned + ", 반가워!'와 같은 첫 낱말은 피함 ← " + gotStarter);
+        // ③ 미리 만들기도 보관한 대사·최근 대사의 첫 낱말을 피한다
+        var starters3 = new NpcRequestManager(starterSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), PrefetchIdleDelay = TimeSpan.Zero };
+        ReactionRequest prefetchTap = Tap(8);
+        string prefetchPlanned = PromptAssembler.Starter(prefetchTap);
+        starters3.Cache.Add(prefetchTap, ReactionResult.Success("s1", "greet", NpcTargets.Player, prefetchPlanned + " 왔네, 기다렸어!", ReactionSource.Slm, null));
+        starterBackend.Reply = Out("greet", "player", "어서 와, 갓 끈 고쳐 맸어!");
+        starters3.Prefetch(prefetchTap, 2);
+        starters3.PrefetchCompletion.Wait(5000);
+        string prefetchStarter = starterOf(starterBackend.LastPrompt);
+        Check(prefetchStarter != null && prefetchStarter != prefetchPlanned, "미리 만들기는 보관한 대사의 첫 낱말('" + prefetchPlanned + "')을 피함 ← " + prefetchStarter);
+        // ⑤ 흐려진 안부는 코드가 붙인 앞 문장을 떼고 부탁의 말머리를 견준다 — 다른 날(다른 날 수)의 최근 대사도 (CodeRabbit 리뷰)
+        foreach (string lead in new[] { "몸이 흐려졌어. ", "마지막 관리가 30일 전이었어. ", "관리받은 지 {날수}일이 지났어. " })
+        {
+            ReactionRequest fadedAsk = builder.Build(Owner(5, NpcInputs.AskStatus, "FADED", 9)).Request;
+            string fadedPlanned = PromptAssembler.Starter(fadedAsk);
+            fadedAsk.RecentLines = new List<string> { lead + fadedPlanned + " 닦아 줄래?" };
+            starterBackend.Reply = Out("answer_status", "player", "괜찮으면 닦아 줄래?");
+            Ask(new NpcRequestManager(starterSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5) }, fadedAsk);
+            string fadedGot = starterOf(starterBackend.LastPrompt);
+            Check(fadedPlanned != null && fadedGot != null && fadedGot != fadedPlanned,
+                    "흐려진 안부: 최근 대사 '" + lead + fadedPlanned + " …'의 말머리를 피함 ← " + fadedGot);
+        }
+        Check(PromptAssembler.StripAnyAskPrefix("몸이 흐려지다 못해 봉인됐어. 조심조심 깨워 줘.") == "조심조심 깨워 줘."
+                && PromptAssembler.StripAnyAskPrefix("몸이 흐려졌어? 살살") == "몸이 흐려졌어? 살살" && PromptAssembler.StripAnyAskPrefix("살살 닦아 줘.") == "살살 닦아 줘.",
+                "앞 문장은 코드가 붙이는 꼴만 뗌");
+        // ④ 첫 낱말이 없는 요청(지난 대화 꺼내기)은 번호를 바꾸지 않는다
+        ReactionRequest recallAsk = Request(8, InteractionMode.Owner, NpcInputs.AskStatus, NpcActions.RecallTalk);
+        recallAsk.Variation = 5;
+        Ask(new NpcRequestManager(starterSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5) }, recallAsk);
+        Check(PromptAssembler.Starter(recallAsk) == null && recallAsk.Variation == 5, "첫 낱말이 없는 요청은 곁들일 거리 번호를 그대로 둠 ← " + recallAsk.Variation);
+
+        // 2026-11-23 적중 개선: 최근 띄운 대사와 겹쳐 꺼낼 때 버릴 대사는 '쓸 수 있는 수'에 넣지 않는다
+        // (예전에는 파일에서 읽은 대사가 최근 대사와 겹쳐도 "찼다"고 보고 새로 만들지 않아, 요청 때 그 대사를 버리고 빗나갔다)
+        var pruneCache = new NpcLineCache();
+        ReactionRequest pruneTap = tapWith("도윤");
+        pruneCache.AddTemplate(pruneTap, ReactionResult.Success("p1", "greet", NpcTargets.Player, "도윤, 어서 와 줘서 고마워!", ReactionSource.Slm, null));
+        pruneCache.AddTemplate(pruneTap, ReactionResult.Success("p2", "greet", NpcTargets.Player, "왔구나, 순찰 중이었어!", ReactionSource.Slm, null));
+        Check(pruneCache.UsableTemplateCount(pruneTap, 40) == 2 && pruneCache.UsableTemplateCount(pruneTap, 40, new[] { "도윤, 어서 와 줘서 고마워!" }) == 1
+                && pruneCache.TemplateCount(pruneTap) == 1,
+                "최근 대사와 겹치는 보관 대사는 버리고 셈 (최근 대사를 주지 않으면 예전처럼 셈)");
+        var pruneKeyCache = new NpcLineCache();
+        pruneKeyCache.Add(pruneTap, ReactionResult.Success("k1", "greet", NpcTargets.Player, "왔구나, 순찰 중이었어!", ReactionSource.Slm, null));
+        Check(pruneKeyCache.Count(pruneTap, new[] { "왔구나, 순찰 중이었어!" }) == 0 && pruneKeyCache.Count(pruneTap) == 0, "서버 값 열쇠의 보관함도 최근 대사와 겹치는 것은 버리고 셈");
+        // 미리 만들기: 보관한 대사가 모두 최근 대사와 겹치면 새로 만든다
+        var pruneBackend = new FakeBackend();
+        var pruneSlm = new SlmReactionGenerator(pruneBackend, assembler, validator);
+        pruneSlm.LoadAsync(CancellationToken.None).Wait();
+        var pruneManager = new NpcRequestManager(pruneSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), PrefetchIdleDelay = TimeSpan.Zero };
+        pruneManager.Cache.AddTemplate(pruneTap, ReactionResult.Success("m1", "greet", NpcTargets.Player, "왔구나, 순찰 중이었어!", ReactionSource.Slm, null));
+        pruneBackend.Reply = Out("greet", "player", "드디어 왔구나, 기다렸어!");
+        ReactionRequest pruneTemplate = tapWith("도윤");
+        pruneTemplate.RecentLines = new List<string> { "왔구나, 순찰 중이었어!" };   // 앞서 띄운 대사 (앱을 다시 켜 파일에서 되살린 최근 대사와 같다)
+        pruneManager.PrefetchTemplate(pruneTemplate, 1);
+        ReactionResult pruneTaken = pruneManager.PrefetchCompletion.Wait(5000) ? pruneManager.Cache.TryTakeTemplate(pruneTap, pruneTemplate.RecentLines) : null;
+        Check(pruneBackend.Calls == 1 && pruneTaken != null && pruneTaken.Line == "드디어 왔구나, 기다렸어!",
+                "보관한 대사가 최근 대사와 겹치면 '찼다'고 보지 않고 새로 만들어, 요청이 새 대사로 적중함 ← 모델 " + pruneBackend.Calls + "번, " + (pruneTaken != null ? pruneTaken.Line : "(빗나감)"));
+
+        // ⑤ LLMUnity seed: 정하면 그 값, 없으면 생성마다 새 무작위 값 (0 은 늘 같은 대사가 나왔다)
+        Check(new LlmUnityOptions { Seed = 42 }.SeedForCall() == 42, "Seed 를 정하면 그 값을 씀 (재현용)");
+        var unseeded = new LlmUnityOptions();
+        var seeds = Enumerable.Range(0, 20).Select(i => unseeded.SeedForCall()).ToList();
+        Check(seeds.All(s => s >= 1) && seeds.Distinct().Count() > 1, "Seed 가 없으면 생성마다 1 이상의 다른 seed ← " + string.Join(",", seeds.Take(5).Select(s => s.ToString()).ToArray()));
     }
 
     // 메모리 안의 저장소 (파일 대신)
@@ -3005,7 +3376,7 @@ public static class Program
         var backend = new FakeBackend();
         var slm = new SlmReactionGenerator(backend, assembler, validator);
         slm.LoadAsync(CancellationToken.None).Wait();
-        var manager = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(5) };
+        var manager = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), PrefetchIdleDelay = TimeSpan.Zero };
         backend.Replies.Enqueue(Out("greet", "player", "낮 일찍 왔구나!"));                       // 시간대 뒤에 조사가 없어 보관하지 않고 다시 만든다
         backend.Replies.Enqueue(Out("greet", "player", "낮에 찾아와 줘서 고마워, 발굴자!"));
         backend.Replies.Enqueue(Out("greet", "player", "낮에 날 불러줘서 반가워!"));
@@ -3690,7 +4061,8 @@ public static class Program
         Console.WriteLine("--- 판 1: 처음 설치 (파일 없음) ---");
         var first = new NpcRequestManager(slm, rule)
         {
-            SlmTimeout = TimeSpan.FromSeconds(60), PrefetchTimeout = TimeSpan.FromSeconds(60), RefillAfterUse = true   // PC 시험용 시간. 게임의 값은 실기기로 정한다
+            SlmTimeout = TimeSpan.FromSeconds(60), PrefetchTimeout = TimeSpan.FromSeconds(60), RefillAfterUse = true,   // PC 시험용 시간. 게임의 값은 실기기로 정한다
+            PrefetchIdleDelay = TimeSpan.Zero   // 요청마다 다시 만들기가 끝나기를 기다리므로 쉬는 시간은 두지 않는다
         };
         Console.WriteLine("파일에서 읽은 칸 있는 대사 " + first.LoadStore(new NpcLineFileStore(storePath), version) + "개 (" + storePath + ")");
         int callsBefore = backend.Calls;
@@ -3729,7 +4101,7 @@ public static class Program
         // 따로 센다(Cache.TakenFromStore) — 새로 만든 대사의 적중과 섞지 않는다 (CodeRabbit 리뷰). 다시 만들기를 끄면 같은 열쇠를 쓰는 장면(말발굽 탭 인사 넷)이
         // 파일에 남은 수(탭 2개)만큼만 적중해 게임과 다르게 낮게 나온다 (2026-11-19: 18/19 → 12/19)
         Console.WriteLine("--- 판 2: 앱을 다시 켬 (판 1 의 파일을 읽음) ---");
-        var second = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(60), PrefetchTimeout = TimeSpan.FromSeconds(60), RefillAfterUse = true };
+        var second = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(60), PrefetchTimeout = TimeSpan.FromSeconds(60), RefillAfterUse = true, PrefetchIdleDelay = TimeSpan.Zero };
         Stopwatch loadingFile = Stopwatch.StartNew();
         int loaded = second.LoadStore(new NpcLineFileStore(storePath), version);
         Console.WriteLine("파일에서 읽은 칸 있는 대사 " + loaded + "개, " + loadingFile.ElapsedMilliseconds + "ms");
@@ -4843,6 +5215,40 @@ public static class Program
             Check(parsed[i].CreateRequest() != got, id + " 돌릴 때마다 새 요청");
         }
         Console.WriteLine("같은 요청·프롬프트: " + same + "/" + scenes.Count);
+
+        // 기억 장면(S14)을 게임처럼: 반복 1은 장면과 같은 지난 대화, 반복 2부터는 평소 안부 (기억이 하나라 꺼낼 것이 남지 않음)
+        List<NpcTestScene> memoryScenes = parsed.Where(NpcTestMemory.Handles).ToList();
+        Check(memoryScenes.Count == 1 && memoryScenes[0].Id == "S14", "기억 장면은 S14 ← " + string.Join(",", memoryScenes.Select(sc => sc.Id).ToArray()));
+        if (memoryScenes.Count > 0)
+        {
+            NpcTestScene memoryScene = memoryScenes[0];
+            var testMemory = new NpcTestMemory(personas, Today);
+            ReactionRequest sceneRequest = memoryScene.CreateRequest();
+            var promptAssembler = new PromptAssembler(personas, actions, new PromptOptions { DescribeFormat = true });
+            List<ReactionRequest> follow = testMemory.PrefetchRequests(memoryScene);
+            Check(follow.Count == 2 && NpcLineCache.TemplateKeyOf(follow[0]) == NpcLineCache.TemplateKeyOf(sceneRequest)
+                    && follow[1].Candidates[0].ActionId == NpcActions.AnswerStatus, "기억 장면의 미리 만들기: 장면과 같은 지난 대화 + 그다음 평소 안부");
+            var kinds = new List<string>();
+            for (int rep = 1; rep <= 4; rep++)
+            {
+                NpcContext context = testMemory.Build(memoryScene);
+                if (rep == 1)
+                {
+                    NpcPrompt built = promptAssembler.Build(context.Request);
+                    NpcPrompt scene = promptAssembler.Build(sceneRequest);
+                    Check(NpcLineCache.TemplateKeyOf(context.Request) == NpcLineCache.TemplateKeyOf(sceneRequest) && NpcLineCache.KeyOf(context.Request) == NpcLineCache.KeyOf(sceneRequest)
+                            && built.System == scene.System && built.User == scene.User, "기억 장면 반복 1은 장면의 요청·프롬프트와 같음 (미리 만든 대사를 쓴다)");
+                }
+                if (rep == 2)
+                {
+                    Check(NpcLineCache.TemplateKeyOf(context.Request) == NpcLineCache.TemplateKeyOf(follow[1]), "기억 장면 반복 2는 미리 만든 평소 안부와 같은 열쇠");
+                }
+                kinds.Add(context.Request.Candidates[0].ActionId + "/" + testMemory.Finish(memoryScene, context, Show()));
+            }
+            Check(kinds[0].StartsWith("recall_talk/기억: 지난 대화 꺼냄 (꺼냈음 표시)", StringComparison.Ordinal)
+                    && kinds[1] == "answer_status/기억: 평소 안부 (꺼낸 뒤 한 번 쉼 표시)" && kinds[2] == "answer_status/기억: 평소 안부" && kinds[3] == kinds[2],
+                    "기억 장면 반복: 지난 대화 → 평소(쉼) → 평소 → 평소 ← " + string.Join(" | ", kinds.ToArray()));
+        }
     }
 
     private static string Join(IEnumerable<string> values)
@@ -4954,14 +5360,15 @@ public static class Program
 
         // ③ 지난 대화
         var told = new MemoryEntry(3, NpcActions.TellStory, "주인에게 옻칠 자개 이야기를 들려줬다");
-        NpcContext recall = builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, new MemoryEntry(6, NpcActions.TellStory, "주인에게 해외 소장 이야기를 들려줬다"), told));
+        NpcContext recall = builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, told));
         Check(recall.KeyFact == "recall" && Acts(recall) == "recall_talk"
                 && recall.Request.Situation == "주인이 안부를 물었다. 너는 3일 전 주인에게 옻칠 자개 이야기를 들려줬던 일이 떠올랐다."
                 && recall.Request.Facts.Count == 0 && recall.Request.Memory.Count == 1 && recall.Request.Memory[0] == told,
-                "안부·지난 대화: 가장 최근 기억 하나, 상관없는 상태는 뺌 ← " + recall.Request.Situation);
+                "안부·지난 대화: 기억 하나, 상관없는 상태는 뺌 ← " + recall.Request.Situation);
         Check(recall.MemoryToSave != null && recall.MemoryToSave.ActionId == NpcActions.RecallTalk, "꺼낸 뒤 '지난 대화를 꺼냈다'를 기억에 남김");
         NpcContext again = builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, told, recall.MemoryToSave));
         Check(again.KeyFact == "none" && Acts(again) == "answer_status", "바로 전에 지난 대화를 꺼냈으면 이번에는 평소 안부");
+        CheckRecallQueue(builder);
         Check(builder.Build(Owner(6, NpcInputs.AskStatus, "CLEAR", 5, new MemoryEntry(8, NpcActions.TellStory, "오래된 이야기"))).KeyFact == "none",
                 "7일 넘은 기억은 꺼내지 않음");
 

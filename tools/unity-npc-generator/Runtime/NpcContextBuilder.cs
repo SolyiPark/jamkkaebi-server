@@ -72,6 +72,14 @@ namespace Jamkkaebi.Npc
         /// <summary>반응을 띄운 뒤 대화 기억에 남길 것. 없으면 null.</summary>
         public MemoryEntry MemoryToSave { get; internal set; }
 
+        /// <summary>
+        /// 반응을 띄우면 꺼냈음(<see cref="MemoryEntry.Recalled"/>)을 true 로 바꿀 기억 — 입력(NpcContextInput.Memory)에 있던 그 기억이다. 없으면 null.
+        /// 지난 대화를 꺼낸 안부는 그 기억, 지난 대화를 꺼낸 다음 안부는 그때 남긴 "지난 일을 다시 이야기했다" 기억이다.
+        /// <see cref="Finish"/> 가 띄웠으면 이 객체의 값을 true 로 바꾸고, 못 띄웠으면 이 값을 null 로 비운다.
+        /// 그래서 게임은 Finish 뒤에 이 값이 null 이 아니면 저장소의 같은 기억에 Recalled = true 를 저장하면 된다.
+        /// </summary>
+        public MemoryEntry MemoryToMark { get; internal set; }
+
         private StoryRotation rotation;
         private StoryTicket story;
         private int finished;
@@ -85,7 +93,7 @@ namespace Jamkkaebi.Npc
         /// <summary>
         /// 요청 관리자의 결과로 마무리한다. 요청 하나에 한 번 부른다.
         /// <list type="bullet">
-        /// <item>반응을 띄웠으면 대화 기억에 남길 것을 돌려준다.</item>
+        /// <item>반응을 띄웠으면 대화 기억에 남길 것을 돌려주고, <see cref="MemoryToMark"/> 의 꺼냈음 표시를 true 로 바꾼다.</item>
         /// <item>띄우지 못했으면 이 요청에 고른 실화를 "안 들려줌"으로 되돌리고 null.</item>
         /// </list>
         /// 두 번째부터는 아무것도 하지 않고 null 을 돌려준다.
@@ -102,7 +110,12 @@ namespace Jamkkaebi.Npc
                 {
                     rotation.Return(story);
                 }
+                MemoryToMark = null;   // 못 띄웠으면 표시하지 않는다 — 게임이 이 값을 보고 저장하지 않게
                 return null;
+            }
+            if (MemoryToMark != null)
+            {
+                MemoryToMark.Recalled = true;
             }
             return MemoryToSave;
         }
@@ -291,6 +304,7 @@ namespace Jamkkaebi.Npc
         /// 만든 대사에서 견본 값에 달린 말은 칸으로 남고(NpcLineSlots), 서버 값이 온 뒤의 요청이 그 칸에 실제 값을 넣어 완성한다.
         /// 주인 장면은 탭 인사, 선명도(state.Clarity)를 알면 안부 묻기·관리하기도. 손님 장면은 손님 관람. 선명도·마지막 관리·기억은 어떤 말을 할지 정하므로 견본이 아니라 state 의 값을 쓴다.
         /// 단 관리하기(정화)는 다음 정화 때 쓸 대사라 선명·흐려짐·재봉인 세 상태를 모두 만든다(ClaritySamples) — 주인 장면은 탭 인사·안부·정화 셋으로 5개.
+        /// 안부가 지난 대화 꺼내기면 그다음 안부(꺼낸 뒤 한 번 쉬는 평소 안부)도 만든다 — 그때는 6개.
         /// </summary>
         public List<ReactionRequest> PrefetchTemplates(NpcContextInput state)
         {
@@ -338,10 +352,22 @@ namespace Jamkkaebi.Npc
                         VisitDates = visits,
                         Memory = state.Memory != null ? new List<MemoryEntry>(state.Memory) : new List<MemoryEntry>()
                     };
-                    ReactionRequest request = Build(copy).Request;
+                    NpcContext built = Build(copy);
+                    ReactionRequest request = built.Request;
                     if (request.Candidates.Count > 0 && !NpcActions.SkipsModel(request.Candidates))
                     {
                         requests.Add(request);
+                    }
+                    if (built.KeyFact == "recall")
+                    {
+                        // 지난 대화를 꺼낸 다음 안부는 평소 안부다(꺼낸 뒤 한 번 쉰다). 기억을 꺼내는 대사는 쓴 뒤 다시 만들지 않으므로
+                        // 그다음 안부의 대사도 미리 만들어 둔다 — 기억이 없을 때와 같은 요청이다
+                        copy.Memory = new List<MemoryEntry>();
+                        ReactionRequest next = Build(copy).Request;
+                        if (next.Candidates.Count > 0 && !NpcActions.SkipsModel(next.Candidates))
+                        {
+                            requests.Add(next);
+                        }
                     }
                 }
             }
@@ -374,6 +400,10 @@ namespace Jamkkaebi.Npc
             string clarity = Upper(input.Clarity);
             int? days = DaysSince(input.LastPurifiedAt, input.Today);
             string situation = "주인이 안부를 물었다.";
+            // 지난 대화를 꺼낸 뒤 아직 안부를 평소대로 한 적이 없으면(가장 최근 recall_talk 에 표시가 없으면) 이번 안부는 평소대로 하고,
+            // 띄운 뒤 그 recall_talk 에 표시해 한 번 쉰 것을 남긴다 — 안부마다 기억만 꺼내지 않고 선명도·관리 이야기도 하게 (①②④ 모두 쉰 것으로 친다)
+            MemoryEntry rest = PendingRest(input.Memory);
+            context.MemoryToMark = rest;
 
             if (clarity == "FADED" || clarity == "RESEALED")
             {
@@ -407,13 +437,14 @@ namespace Jamkkaebi.Npc
                 Candidates(request, NpcActions.AnswerStatus);
                 return;
             }
-            MemoryEntry recall = RecallTarget(input.Memory);
+            MemoryEntry recall = rest == null ? RecallTarget(input.Memory) : null;
             if (recall != null)
             {
-                // ③ 지난 대화: 게임이 꺼내기로 정한다. 그 기억 하나만 주고, 상관없는 상태(선명도)는 뺀다
+                // ③ 지난 대화: 게임이 꺼내기로 정한다. 그 기억 하나만 주고, 상관없는 상태(선명도)는 뺀다. 띄우면 그 기억에 꺼냈음을 표시한다
                 request.Situation = situation + " " + RecallSentence(recall);
                 request.Memory.Add(recall);
                 context.KeyFact = "recall";
+                context.MemoryToMark = recall;
                 context.MemoryToSave = new MemoryEntry(0, NpcActions.RecallTalk, "주인과 지난 일을 다시 이야기했다");
                 Candidates(request, NpcActions.RecallTalk);
                 return;
@@ -616,20 +647,33 @@ namespace Jamkkaebi.Npc
 
         // ---------- 지난 대화 ----------
 
-        // 꺼낼 기억: 7일 안, 요약이 있고 지난 대화 꺼내기 자신이 아닌 것 중 가장 최근 것.
-        // 바로 전에 지난 대화를 꺼냈으면(가장 최근 기억이 recall_talk) 이번에는 꺼내지 않는다 — 안부마다 같은 이야기를 하지 않게
+        // 꺼낼 기억: 7일 안, 요약이 있고, 지난 대화 꺼내기 자신이 아니고, 아직 꺼내지 않은(Recalled false) 것 중 <b>가장 오래된 것</b>.
+        // 먼저 들어온 기억부터 차례로 꺼낸다(Queue) — 새 이야기를 들려줘도 앞의 기억이 7일을 넘겨 빠지기 전에 차례가 온다.
+        // 예전에는 꺼낸 기억을 표시하지 않아 늘 가장 최근 것만 골랐고, 같은 것을 다시 고르지 않으려고 꺼낸 뒤에는 새 이야기가 올 때까지 꺼내지 않았다
         private static MemoryEntry RecallTarget(List<MemoryEntry> memory)
         {
             List<MemoryEntry> recent = Recent(memory);
-            if (recent.Count == 0 || recent[0].ActionId == NpcActions.RecallTalk)
+            for (int i = recent.Count - 1; i >= 0; i--)
             {
-                return null;
-            }
-            foreach (MemoryEntry entry in recent)
-            {
-                if (entry.ActionId != NpcActions.RecallTalk && !string.IsNullOrEmpty(entry.Summary))
+                MemoryEntry entry = recent[i];
+                if (entry.ActionId != NpcActions.RecallTalk && !entry.Recalled && !string.IsNullOrEmpty(entry.Summary))
                 {
                     return entry;
+                }
+            }
+            return null;
+        }
+
+        // 가장 최근에 지난 대화를 꺼낸 뒤 아직 한 번도 쉬지 않았으면 그때 남긴 recall_talk 기억, 아니면 null.
+        // 가장 최근 기억만 보지 않는다 — 꺼낸 뒤 이야기를 들려줘 그 기억이 앞에 와도, 다음 안부는 쉬어야 한다.
+        // 가장 최근 recall_talk 하나만 본다 — 표시 없이 저장된 옛 recall_talk 가 여럿이어도 한 번만 쉰다
+        private static MemoryEntry PendingRest(List<MemoryEntry> memory)
+        {
+            foreach (MemoryEntry entry in Recent(memory))
+            {
+                if (entry.ActionId == NpcActions.RecallTalk)
+                {
+                    return entry.Recalled ? null : entry;
                 }
             }
             return null;

@@ -181,6 +181,21 @@ namespace Jamkkaebi.Npc
             return list[(((request.Variation + request.RelicId) % list.Length) + list.Length) % list.Length];
         }
 
+        /// <summary>곁들일 거리 번호를 variation 으로 두었을 때의 첫 낱말 (request 는 그대로 둔다). 요청 관리자가 최근에 쓴 첫 낱말을 피해 번호를 고를 때 쓴다.</summary>
+        public static string StarterAt(ReactionRequest request, int variation)
+        {
+            int saved = request.Variation;
+            try
+            {
+                request.Variation = variation;
+                return Starter(request);
+            }
+            finally
+            {
+                request.Variation = saved;
+            }
+        }
+
         // 작은 모델은 예시 대사와 사용자 메시지의 페르소나 칸·상황 문장을 그대로 옮겨, 같은 상황마다 같은 대사를 냈다
         public const string RuleExamples = "- 예시와 자료는 참고만 하고, 지금 상황에 맞게 새로 말한다.";
 
@@ -529,6 +544,20 @@ namespace Jamkkaebi.Npc
             list.Add("몸이 흐려지다 못해 봉인됐어.");
             list.Add("다시 봉인될 만큼 흐려졌어.");
             return list;
+        }
+
+        // 흐려진 안부의 '이미 한 말' 꼴 전부 — 날 수는 어느 값이든(다른 날 띄운 최근 대사), 칸('{날수}')이어도 맞는다. LinePrefix·AskPrefixes 와 같은 문장이다
+        private static readonly Regex AnyAskPrefix = new Regex(
+                "^(?:마지막 관리가 (?:[0-9]+|\\{날수\\})일 전이었어\\.|관리받은 지 (?:[0-9]+|\\{날수\\})일이 지났어\\.|몸이 흐려졌어\\.|몸이 많이 흐려졌어\\.|몸이 흐려지다 못해 봉인됐어\\.|다시 봉인될 만큼 흐려졌어\\.)\\s*",
+                RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 대사 앞의 '이미 한 말'(흐려진 안부의 상태·며칠 전 문장)을 날 수와 상관없이 뗀다. 없으면 그대로. 요청 관리자가 첫 낱말을 고를 때
+        /// 최근 대사의 부탁 말머리("몸이 흐려졌어. 살살 닦아 줄래?"의 '살살')를 보려고 쓴다.
+        /// </summary>
+        public static string StripAnyAskPrefix(string line)
+        {
+            return string.IsNullOrEmpty(line) ? line : AnyAskPrefix.Replace(line, "", 1);
         }
 
         /// <summary>대사 앞의 '이미 한 말'을 뗀다. 없으면 그대로.</summary>

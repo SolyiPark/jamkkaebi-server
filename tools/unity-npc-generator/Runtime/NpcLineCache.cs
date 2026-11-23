@@ -328,6 +328,16 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public int UsableTemplateCount(ReactionRequest request, int maxLength)
         {
+            return UsableTemplateCount(request, maxLength, null);
+        }
+
+        /// <summary>
+        /// recent(그 시나리오의 최근 띄운 대사)를 주면, 칸을 채운 뒤 그것과 90% 이상 겹치는 대사는 <b>버리고</b> 세지 않는다 — 꺼낼 때(TryTakeTemplate) 어차피 버릴 대사다.
+        /// 예전에는 세기만 해서, 파일에서 읽은 대사·앞서 만든 대사가 다른 장면에서 띄운 대사와 겹쳐 쓸 수 없게 되어도 "찼다"고 보고 새로 만들지 않았고,
+        /// 요청 때 그 대사를 버리면서 빗나갔다 (2026-11-23 기기 시험: 미리 만들기를 하고도 반복 1의 적중이 13건 → 8건).
+        /// </summary>
+        public int UsableTemplateCount(ReactionRequest request, int maxLength, IEnumerable<string> recent)
+        {
             if (request == null)
             {
                 return 0;
@@ -336,9 +346,21 @@ namespace Jamkkaebi.Npc
             lock (gate)
             {
                 int usable = 0;
-                foreach (Entry entry in Live(TemplateKeyOf(request)))
+                List<Entry> live = Live(TemplateKeyOf(request));
+                for (int i = 0; i < live.Count; i++)
                 {
-                    usable += FilledIfUsable(entry.Result, request, actual, maxLength) != null ? 1 : 0;
+                    string filled = FilledIfUsable(live[i].Result, request, actual, maxLength);
+                    if (filled == null)
+                    {
+                        continue; // 이 요청에는 못 쓰지만 다른 요청(짧은 닉네임 등)은 쓸 수 있어 둔다
+                    }
+                    if (recent != null && NpcLineChecks.FindSimilar(filled, recent).HasValue)
+                    {
+                        live.RemoveAt(i);
+                        i--;
+                        continue;
+                    }
+                    usable++;
                 }
                 return usable;
             }
@@ -362,9 +384,20 @@ namespace Jamkkaebi.Npc
         /// <summary>그 상황으로 보관된 대사 수 (오래된 것은 먼저 버린다).</summary>
         public int Count(ReactionRequest request)
         {
+            return Count(request, null);
+        }
+
+        /// <summary>recent 와 90% 이상 겹치는 대사는 버리고 센다 (꺼낼 때 TryTake 가 어차피 버린다 — UsableTemplateCount 참고).</summary>
+        public int Count(ReactionRequest request, IEnumerable<string> recent)
+        {
             lock (gate)
             {
-                return Live(KeyOf(request)).Count;
+                List<Entry> live = Live(KeyOf(request));
+                if (recent != null)
+                {
+                    live.RemoveAll(entry => NpcLineChecks.FindSimilar(entry.Result.Line, recent).HasValue);
+                }
+                return live.Count;
             }
         }
 

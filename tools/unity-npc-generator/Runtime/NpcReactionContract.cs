@@ -240,6 +240,16 @@ namespace Jamkkaebi.Npc
         public string ActionId;
         public string Summary;
 
+        /// <summary>
+        /// 꺼냈음 표시 (T/F). 게임이 기억과 함께 저장한다 — 안부를 띄운 뒤 <see cref="NpcContext.MemoryToMark"/> 의 이 값이 true 로 바뀐다.
+        /// <list type="bullet">
+        /// <item>보통 기억(들려준 실화 등): 안부에서 지난 대화로 꺼냈다. 다시 꺼내지 않는다.</item>
+        /// <item>"지난 일을 다시 이야기했다"(recall_talk) 기억: 그 뒤 안부를 한 번 평소대로(선명도·관리 이야기) 했다. 다음 안부부터 다음 기억을 꺼낸다.</item>
+        /// </list>
+        /// 예전에 저장한 기억은 false 로 읽힌다 — 그 가운데 이미 꺼낸 것이 7일 안에 있으면 한 번 더 꺼낼 수 있다.
+        /// </summary>
+        public bool Recalled;
+
         public MemoryEntry()
         {
         }

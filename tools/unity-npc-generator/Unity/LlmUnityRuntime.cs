@@ -144,7 +144,7 @@ namespace Jamkkaebi.Npc
                 agent.grammar = string.IsNullOrEmpty(grammar) ? "" : grammar; // 빈 문자열 = 형식 제약 없음
                 agent.temperature = options.Temperature;
                 agent.numPredict = maxTokens;
-                agent.seed = options.Seed.HasValue ? options.Seed.Value : 0; // 0 = 무작위
+                agent.seed = options.SeedForCall(); // 생성마다 새 seed — 0 은 '무작위'가 아니라 늘 같은 seed 라 같은 프롬프트에 같은 대사가 나온다
                 // 대화 기록을 남기지 않는다. 지난 요청의 대사가 다음 프롬프트에 섞이면 안 된다 (기억은 프롬프트의 요약으로 준다)
                 await agent.ClearHistory();
                 bool first = true;
