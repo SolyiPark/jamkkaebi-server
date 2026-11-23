@@ -89,6 +89,14 @@ namespace Jamkkaebi.Npc
         [Tooltip("대사를 띄운 뒤 그 상황의 칸 있는 대사를 쓴 만큼 뒤에서 다시 만든다 (NpcRequestManager.RefillAfterUse)")]
         public bool refillAfterUse = true;
 
+        [Tooltip("요청·미리 읽기가 끝난 뒤 이만큼(초) 아무 일이 없어야 뒤에서 미리 만들기·다시 만들기를 새로 시작한다 (NpcRequestManager.PrefetchIdleDelay, 게임 기본 10초). "
+            + "0 이면 요청이 끝나자마자 만든다 — 그러면 다음 장면의 미리 읽기가 그 생성 뒤에 줄을 선다 (2026-11-23 시험)")]
+        public float prefetchIdleSeconds = 10f;
+
+        [Tooltip("장면 사이에 쉬는 시간(초). 플레이어가 잠깐 쉬는 것처럼 둔다. 0 이면 쉬지 않고 이어 가서 다시 만들기가 돌 틈이 없다 — "
+            + "다시 만들기의 적중을 재려면 Prefetch Idle Seconds + 대사 하나 만드는 시간(기기에서 10~20초)보다 길게 둔다. 쉬는 시간은 CSV 의 시간에 넣지 않는다")]
+        public float sceneGapSeconds = 0f;
+
         public bool autoStart = true;
 
         [Header("데이터 (비우면 Resources/Npc/ 에서 읽는다)")]
@@ -227,8 +235,10 @@ namespace Jamkkaebi.Npc
             // await 뒤에 필드를 다시 읽으면 NullReferenceException 으로 '중단됨' 대신 '오류'가 남는다
             var run = new NpcRequestManager(slm, rule)
             {
-                SlmTimeout = TimeSpan.FromSeconds(slmTimeoutSeconds), PrefetchTimeout = TimeSpan.FromSeconds(prefetchTimeoutSeconds), RefillAfterUse = refillAfterUse
+                SlmTimeout = TimeSpan.FromSeconds(slmTimeoutSeconds), PrefetchTimeout = TimeSpan.FromSeconds(prefetchTimeoutSeconds), RefillAfterUse = refillAfterUse,
+                PrefetchIdleDelay = TimeSpan.FromSeconds(Math.Max(0f, prefetchIdleSeconds))
             };
+            Say("뒤에서 만들기 전 쉬는 시간 " + Math.Max(0f, prefetchIdleSeconds) + "초, 장면 사이 쉬는 시간 " + Math.Max(0f, sceneGapSeconds) + "초");
             manager = run;
             if (useLineStore)
             {
@@ -249,6 +259,9 @@ namespace Jamkkaebi.Npc
             Say("CSV: " + path + " (장면마다 이어 쓴다)");
 
             // 미리 만들기: 장면마다 대사를 칸 있는 대사로 만들어 둔 뒤 요청한다 (게임이 서버 값을 받기 전에 한가할 때 만들어 두는 것과 같다)
+            // 기억을 꺼내는 장면(S14)은 게임처럼 돌린다: 반복마다 기억을 남기고 꺼냈음을 표시해, 같은 기억을 연달아 꺼내지 않는다 (NpcTestMemory)
+            var testMemory = new NpcTestMemory(personaCatalog, DateTime.Today);
+            var memoryScenes = new HashSet<string>(sceneList.Where(NpcTestMemory.Handles).Select(sc => sc.Id));
             int prefetchHits = 0;
             if (prefetchFirst && slm != null && slm.IsReady)
             {
@@ -257,6 +270,14 @@ namespace Jamkkaebi.Npc
                 foreach (NpcTestScene scene in sceneList)
                 {
                     run.PrefetchTemplate(scene.CreateRequest(), Math.Max(1, prefetchPerScene));
+                    if (memoryScenes.Contains(scene.Id))
+                    {
+                        // 게임의 PrefetchTemplates 처럼 지난 대화 다음의 평소 안부도 미리 만든다
+                        foreach (ReactionRequest follow in testMemory.PrefetchRequests(scene))
+                        {
+                            run.PrefetchTemplate(follow, Math.Max(1, prefetchPerScene));
+                        }
+                    }
                 }
                 while (preparing.Elapsed.TotalSeconds < prefetchWaitSeconds)
                 {
@@ -290,7 +311,8 @@ namespace Jamkkaebi.Npc
                     ct.ThrowIfCancellationRequested();
                     total++;
                     status = scene.Id + " #" + rep + " (" + total + "/" + sceneList.Count * Math.Max(1, repeat) + ")";
-                    ReactionRequest request = scene.CreateRequest();
+                    NpcContext memoryContext = memoryScenes.Contains(scene.Id) ? testMemory.Build(scene) : null;
+                    ReactionRequest request = memoryContext != null ? memoryContext.Request : scene.CreateRequest();
                     // 게임처럼 반복마다 곁들일 거리를 바꾼다 (run.py 와 같게 1번째 반복 = 0번째)
                     request.Variation = rep - 1;
                     string retargeted = requestWithOtherServerValues ? Retarget(request) : "";
@@ -367,7 +389,12 @@ namespace Jamkkaebi.Npc
                     string source = !response.ShouldShow ? "없음" : (prefetched ? "미리" : (fromSlm ? "SLM" : (isSilent ? "대사없음" : (isFixed ? "정해진" : "기본"))));
                     string action = response.ShouldShow ? response.Reaction.ActionId : "";
                     string line = response.ShouldShow ? response.Reaction.Line : "";
-                    bool expected = scene.Expected.Contains(action);
+                    // 기억 장면은 반복마다 요청이 달라진다(지난 대화 → 평소 안부) — 그 요청의 후보면 맞은 것으로 본다
+                    bool expected = scene.Expected.Contains(action) || (memoryContext != null && request.Candidates.Any(c => c.ActionId == action));
+                    if (memoryContext != null)
+                    {
+                        retargeted += (retargeted.Length > 0 ? ", " : "") + testMemory.Finish(scene, memoryContext, response);
+                    }
                     long firstToken = fromSlm && !prefetched ? FirstTokenMs() : -1;
                     if (isFixed)
                     {
@@ -414,6 +441,12 @@ namespace Jamkkaebi.Npc
                         .Append(Csv(prefetched && response.Reaction != null ? response.Reaction.Note : "")).Append(',').Append(Csv(retargeted)).Append(',')
                         .Append(prepareTimedOutMs >= 0 ? prepareTimedOutMs.ToString(CultureInfo.InvariantCulture) : "").Append('\n');
                     AppendCsv(path, row.ToString());
+
+                    // 플레이어가 잠깐 쉬는 틈 — 다시 만들기는 이 사이에 돈다. 시간에는 넣지 않는다 (다음 장면의 미리 읽기부터 잰다)
+                    if (sceneGapSeconds > 0f)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(sceneGapSeconds), ct);
+                    }
                 }
             }
 

@@ -57,8 +57,27 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public int MaxTokens { get; set; }
 
-        /// <summary>정하면 결과가 재현된다. 없으면 무작위.</summary>
+        /// <summary>정하면 결과가 재현된다. 없으면 생성마다 새 무작위 seed 를 준다 (<see cref="SeedForCall"/>).</summary>
         public int? Seed { get; set; }
+
+        private static readonly Random SeedSource = new Random();
+
+        /// <summary>
+        /// 이번 생성에 줄 seed. Seed 를 정했으면 그 값, 아니면 1 이상의 무작위 값.
+        /// LLMUnity 3.0.3 은 seed 0 을 "0 = random"이라 적지만, 0 을 넘긴 기기 시험 두 판(2026-11-18, 온도 0.7)의 대사가 100줄 모두 글자 하나 다르지 않았다 —
+        /// llama.cpp 는 0 을 정해진 seed 로 쓰는 것으로 보인다. 같은 프롬프트에 늘 같은 대사가 나와, 같은 상황을 다시 만들면 최근 대사와 같아 '반복'으로 버려졌다 (2026-11-23).
+        /// </summary>
+        public int SeedForCall()
+        {
+            if (Seed.HasValue)
+            {
+                return Seed.Value;
+            }
+            lock (SeedSource)
+            {
+                return SeedSource.Next(1, int.MaxValue);
+            }
+        }
 
         public LlmUnityGrammar Grammar { get; set; }
 

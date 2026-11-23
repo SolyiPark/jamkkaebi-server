@@ -181,6 +181,21 @@ namespace Jamkkaebi.Npc
             return list[(((request.Variation + request.RelicId) % list.Length) + list.Length) % list.Length];
         }
 
+        /// <summary>곁들일 거리 번호를 variation 으로 두었을 때의 첫 낱말 (request 는 그대로 둔다). 요청 관리자가 최근에 쓴 첫 낱말을 피해 번호를 고를 때 쓴다.</summary>
+        public static string StarterAt(ReactionRequest request, int variation)
+        {
+            int saved = request.Variation;
+            try
+            {
+                request.Variation = variation;
+                return Starter(request);
+            }
+            finally
+            {
+                request.Variation = saved;
+            }
+        }
+
         // 작은 모델은 예시 대사와 사용자 메시지의 페르소나 칸·상황 문장을 그대로 옮겨, 같은 상황마다 같은 대사를 냈다
         public const string RuleExamples = "- 예시와 자료는 참고만 하고, 지금 상황에 맞게 새로 말한다.";
 
