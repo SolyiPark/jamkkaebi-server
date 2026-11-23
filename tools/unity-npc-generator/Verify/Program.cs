@@ -3874,7 +3874,7 @@ public static class Program
             LlmUnityModelBackend backend = unity.Run(() => new LlmUnityModelBackend(runtime, options));
 
             Check(!backend.IsLoaded, "IsLoaded: 처음에는 false");
-            Check(Error(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None))) == "InvalidOperationException",
+            Check(ErrorWithin(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)), 3000) == "InvalidOperationException",
                     "올리기 전에 생성하면 InvalidOperationException");
 
             Finish(Task.Run(() => backend.LoadAsync(CancellationToken.None)));
@@ -3916,9 +3916,11 @@ public static class Program
             Finish(Task.Run(() => backend.PrepareAsync("기억할 시스템 메시지 A", CancellationToken.None)));
             Check(first.Calls.Count == beforeState + 1 && first.Saved.Count == 1 && backend.StateSaves == 1 && !backend.LastPrepareRestored,
                     "기억 저장: 처음 읽은 시스템 메시지는 읽은 뒤 기억을 저장");
-            Check(first.Saved[0] == backend.StateKey("기억할 시스템 메시지 A") && first.Saved[0] != backend.StateKey("기억할 시스템 메시지 B")
-                    && first.Saved[0] == backend.StateKey("기억할 시스템 메시지 A") && first.Saved[0].StartsWith("npc-kv-"),
-                    "기억 이름: 시스템 메시지마다 다르고 같은 글이면 같음 (" + first.Saved[0] + ")");
+            // 저장이 안 됐으면(앞 검사가 틀림) 여기서 예외로 시험 전체가 멈추지 않고 이 검사도 틀렸다고 적는다
+            string savedKey = first.Saved.Count > 0 ? first.Saved[0] : null;
+            Check(savedKey != null && savedKey == backend.StateKey("기억할 시스템 메시지 A") && savedKey != backend.StateKey("기억할 시스템 메시지 B")
+                    && savedKey.StartsWith("npc-kv-"),
+                    "기억 이름: 시스템 메시지마다 다르고 같은 글이면 같음 (" + (savedKey ?? "저장 안 됨") + ")");
             Finish(Task.Run(() => backend.PrepareAsync("기억할 시스템 메시지 B", CancellationToken.None)));
             Finish(Task.Run(() => backend.PrepareAsync("기억할 시스템 메시지 A", CancellationToken.None)));
             Check(first.Calls.Count == beforeState + 2 && first.Loaded.Count == 1 && backend.StateLoads == 1 && backend.LastPrepareRestored
@@ -3972,7 +3974,7 @@ public static class Program
             Task<string> afterReading = Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None));
             Check(!WaitQuietly(afterReading, 200) && first.Cancels == cancels, "읽기가 끝나기 전에는 다음 요청을 모델에 보내지 않고 멈추라고도 하지 않음");
             readGate.Set(); // 읽기가 끝나 첫 글자가 나온다 → 미뤄 둔 취소가 나가야 붙잡아 둔 생성이 끝난다
-            bool returned = WaitQuietly(afterReading, 3000) && afterReading.Status == TaskStatus.RanToCompletion && afterReading.Result == reply;
+            bool returned = Ok(afterReading, 3000) && afterReading.Result == reply;
             Check(returned && first.Cancels == cancels + 1 && first.EarlyCancels == 0 && !first.Stranded && ReleaseIfHeld(first),
                     "미뤄 둔 취소는 첫 글자가 나오면 보내고, 모델이 묶이지 않아 다음 요청도 돌아옴 ← 멈추라고 한 횟수 "
                     + (first.Cancels - cancels) + ", 읽는 중 " + first.EarlyCancels);
@@ -4118,7 +4120,7 @@ public static class Program
             Task reloading = Task.Run(() => backend.LoadAsync(CancellationToken.None));
             Check(!WaitQuietly(reloading, 200) && runtime.Starts == 1 && !first.Destroying, "앞 모델의 생성이 끝나기 전에는 지우지도, 새로 올리지도 않음 ← 올린 횟수 " + runtime.Starts);
             unloadGate.Set(); // 읽기가 끝난다 → 생성이 끝난다 → 지운다 → 다시 올린다
-            Check(WaitQuietly(reloading, 4000) && reloading.Status == TaskStatus.RanToCompletion && first.Destroyed && first.EarlyCancels == 0
+            Check(Ok(reloading, 4000) && first.Destroyed && first.EarlyCancels == 0
                     && !first.Stranded && !first.DestroyedWhileActive && runtime.StartsWhileDestroying == 0,
                     "생성이 끝나고 모델이 실제로 지워진 뒤 다시 올림, 읽는 중에 멈추라고 하지 않음 ← 읽는 중 " + first.EarlyCancels
                     + ", 지워지는 중에 올림 " + runtime.StartsWhileDestroying);
@@ -4149,7 +4151,7 @@ public static class Program
                 mainBlocked.Set();
                 mainBusy.Wait(); // 메인 스레드가 다른 일로 바쁘다
             }, null);
-            mainBlocked.Wait(2000);
+            Check(mainBlocked.Wait(2000), "보내기 전 Unload 시험: 메인 스레드를 붙잡음");
             int callsBeforeDispatch = dispatched.Calls.Count;
             Task<string> queuedForMain = Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None));
             Check(WaitUntil(() => unity.Pending > 0, 2000), "보내기 전 Unload 시험: 생성이 메인 스레드 줄에 섬");
@@ -4172,7 +4174,7 @@ public static class Program
                 blockedAgain.Set();
                 busyAgain.Wait();
             }, null);
-            blockedAgain.Wait(2000);
+            Check(blockedAgain.Wait(2000), "보내기 전 취소 시험: 메인 스레드를 붙잡음");
             int callsBeforeCancel = cancelledBeforeDispatch.Calls.Count;
             var cancelBeforeDispatch = new CancellationTokenSource();
             Task<string> queuedCancelled = Task.Run(() => backend.CompleteAsync(prompt, cancelBeforeDispatch.Token));
@@ -4305,18 +4307,19 @@ public static class Program
     {
         var options = new LlmUnityOptions { Model = "gemma.gguf", Grammar = mode, WarmUp = false };
         LlmUnityModelBackend backend = unity.Run(() => new LlmUnityModelBackend(runtime, options));
-        if (!Task.Run(() => backend.LoadAsync(CancellationToken.None)).Wait(3000))
+        // 성공해야 하는 호출이라 Finish 로 기다린다 (막힘·예외·취소면 그 자리에서 실패로 적는다 — Task.Wait 처럼 시험 전체를 멈추지 않는다)
+        if (!Finish(Task.Run(() => backend.LoadAsync(CancellationToken.None))))
         {
             return TimedOut;
         }
         FakeLlmSession session = runtime.Last;
         session.Delay = TimeSpan.FromMilliseconds(10);
-        string grammar = Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)).Wait(3000)
+        string grammar = Finish(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)))
                 ? session.Calls[session.Calls.Count - 1].Grammar
                 : TimedOut;
         backend.Unload();
         // 다음 백엔드는 이 백엔드의 지우기를 기다리지 않으니, 다 지워진 뒤에 돌아간다
-        WaitUntil(() => session.Destroyed, 2000);
+        Check(WaitUntil(() => session.Destroyed, 2000), "형식 제약 시험(" + mode + "): 내린 모델을 다 지움");
         return grammar;
     }
 
@@ -4339,26 +4342,30 @@ public static class Program
         return false;
     }
 
-    // 보통 호출을 기다린다. 5초 안에 안 끝나면(백엔드가 막혔다) 막히지 않고 그 자리에서 실패로 적고 다음으로 간다
+    // 성공해야 하는 보통 호출을 기다린다. 5초 안에 성공으로 끝나지 않으면(막힘·예외·취소) 막히지 않고 그 자리에서 실패로 적고 다음으로 간다 —
+    // 끝나기만 보면 뜻밖의 백엔드 예외를 놓치고, 뒤의 호출 수 검사만 맞아 통과할 수 있다
     private const int CallTimeoutMs = 5000;
 
     private static bool Finish(Task task)
     {
-        bool done = WaitQuietly(task, CallTimeoutMs);
-        if (!done)
+        if (!WaitQuietly(task, CallTimeoutMs))
         {
             Check(false, "백엔드 호출이 " + CallTimeoutMs + "ms 안에 끝나지 않음 (막힘)");
+            return false;
         }
-        return done;
+        if (task.Status != TaskStatus.RanToCompletion)
+        {
+            Exception cause = task.Exception != null ? task.Exception.GetBaseException() : null;
+            Check(false, "백엔드 호출이 성공하지 않음 ← " + (cause != null ? cause.GetType().Name + ": " + cause.Message : "취소됨"));
+            return false;
+        }
+        return true;
     }
 
+    // Finish 처럼 기다리고(성공이 아니면 실패로 적음) 결과를 돌려준다. 성공이 아니면 default
     private static T Within<T>(Task<T> task)
     {
-        if (!Finish(task) || task.Status != TaskStatus.RanToCompletion)
-        {
-            return default(T);
-        }
-        return task.Result;
+        return Finish(task) ? task.Result : default(T);
     }
 
     // 일부러 멈춰 둔 호출을 기다릴 때 쓴다. 기한 안에 안 끝나면 막히지 않고 "(시간 초과)" 를 돌려줘, 시험이 어느 검사에서 틀렸는지 알리고 다음으로 간다
