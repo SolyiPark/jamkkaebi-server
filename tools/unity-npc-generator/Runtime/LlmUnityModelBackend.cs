@@ -530,9 +530,10 @@ namespace Jamkkaebi.Npc
         }
 
         // 모델에 일을 맡긴다(메인 스레드에서). 끝날 때까지 그 세션을 지우지 않는다 — Unload 는 이 일이 끝나기를 기다렸다가 지운다.
-        // 그 세션을 이미 내렸으면 모델에 보내지 않고 OperationCanceledException. 메인 스레드가 실제로 일을 시작할 때 한 번 더 본다 —
-        // 맡긴 뒤 메인 스레드가 꺼내기 전에 Unload 되면, 아직 시작도 안 한 생성이 내린 모델에서 시작돼 지우기를 프롬프트 읽기 하나만큼 늦춘다
-        private Task<T> OnModel<T>(ILlmUnitySession owner, Func<Task<T>> work)
+        // 그 세션을 이미 내렸거나 요청이 취소됐으면(token) 모델에 보내지 않고 OperationCanceledException. 메인 스레드가 실제로 일을 시작할 때
+        // 한 번 더 본다 — 맡긴 뒤 메인 스레드가 꺼내기 전에 Unload·취소되면, 아직 시작도 안 한 생성이 시작돼 모델을 프롬프트 읽기 하나만큼
+        // 붙잡는다 (취소는 첫 글자가 나온 뒤에야 보내므로). 이미 시작한 일은 끝날 때까지 그대로 센다
+        private Task<T> OnModel<T>(ILlmUnitySession owner, Func<Task<T>> work, CancellationToken token = default(CancellationToken))
         {
             var done = new TaskCompletionSource<bool>();
             var entry = new ModelWork(owner, done.Task);
@@ -542,6 +543,7 @@ namespace Jamkkaebi.Npc
                 {
                     throw new OperationCanceledException("모델을 내렸다");
                 }
+                token.ThrowIfCancellationRequested();
                 working.Add(entry);
             }
             Task<T> task = OnUnity(() =>
@@ -552,6 +554,10 @@ namespace Jamkkaebi.Npc
                     {
                         throw new OperationCanceledException("모델을 내렸다 (모델에 보내기 전)");
                     }
+                }
+                if (token.IsCancellationRequested)
+                {
+                    throw new OperationCanceledException("요청이 취소되었다 (모델에 보내기 전)", token);
                 }
                 return work();
             });
@@ -624,7 +630,7 @@ namespace Jamkkaebi.Npc
                     Stopwatch watch = Stopwatch.StartNew();
                     ILlmUnityStateStore store = prepare && options.SaveSystemState ? current as ILlmUnityStateStore : null;
                     string stateKey = store != null ? StateKey(system) : null;
-                    Task<bool> restoring = store != null ? RestoreState(current, store, stateKey) : Task.FromResult(false);
+                    Task<bool> restoring = store != null ? RestoreState(current, store, stateKey, token) : Task.FromResult(false);
                     // 기억 복원도 모델 안의 일이라 취소를 듣지 않는다. 취소되면 기다리지 않고 돌려주되, 끝날 때까지 줄은 붙잡는다 (생성 취소와 같다)
                     if (!await FinishedBefore(restoring, token).ConfigureAwait(false))
                     {
@@ -654,7 +660,8 @@ namespace Jamkkaebi.Npc
                             SendCancel(current, chat); // 프롬프트를 읽는 동안 미뤄 둔 취소
                         }
                     };
-                    chat = OnModel(current, () => current.ChatOnceAsync(system, user, grammar, maxTokens, options, onFirstToken));
+                    // 메인 스레드가 꺼내기 전에 취소되면 생성을 시작하지 않는다 (token)
+                    chat = OnModel(current, () => current.ChatOnceAsync(system, user, grammar, maxTokens, options, onFirstToken), token);
 
                     var cancelled = new TaskCompletionSource<bool>();
                     using (token.Register(() => cancelled.TrySetResult(true)))
@@ -695,7 +702,7 @@ namespace Jamkkaebi.Npc
                         if (store != null)
                         {
                             // 기억 저장도 취소를 듣지 않는다. 취소되면 기다리지 않고 돌려주되, 끝날 때까지 줄은 붙잡는다
-                            Task persisting = PersistState(current, store, stateKey);
+                            Task persisting = PersistState(current, store, stateKey, token);
                             if (!await FinishedBefore(persisting, token).ConfigureAwait(false))
                             {
                                 releaseLater = true;
@@ -833,11 +840,12 @@ namespace Jamkkaebi.Npc
         }
 
         // 저장해 둔 기억 되살리기. 실패(없음·깨짐·예외)는 읽기로 대신하면 되므로 false
-        private async Task<bool> RestoreState(ILlmUnitySession owner, ILlmUnityStateStore store, string key)
+        // 메인 스레드가 꺼내기 전에 취소되면(token) 되살리지 않는다 (false — 뒤의 생성도 같은 token 으로 시작하지 않는다)
+        private async Task<bool> RestoreState(ILlmUnitySession owner, ILlmUnityStateStore store, string key, CancellationToken token)
         {
             try
             {
-                bool ok = await OnModel(owner, () => store.LoadStateAsync(key)).ConfigureAwait(false);
+                bool ok = await OnModel(owner, () => store.LoadStateAsync(key), token).ConfigureAwait(false);
                 if (ok)
                 {
                     Interlocked.Increment(ref stateLoads);
@@ -851,11 +859,12 @@ namespace Jamkkaebi.Npc
         }
 
         // 방금 읽은 시스템 메시지의 기억을 저장. 실패해도 생성에는 영향이 없다
-        private async Task PersistState(ILlmUnitySession owner, ILlmUnityStateStore store, string key)
+        // 메인 스레드가 꺼내기 전에 취소되면(token) 저장하지 않는다 (다음에 다시 읽을 뿐이다)
+        private async Task PersistState(ILlmUnitySession owner, ILlmUnityStateStore store, string key, CancellationToken token)
         {
             try
             {
-                if (await OnModel(owner, () => store.SaveStateAsync(key)).ConfigureAwait(false))
+                if (await OnModel(owner, () => store.SaveStateAsync(key), token).ConfigureAwait(false))
                 {
                     Interlocked.Increment(ref stateSaves);
                 }

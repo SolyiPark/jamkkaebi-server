@@ -125,6 +125,9 @@ namespace Jamkkaebi.Npc
 
         private sealed class Session : ILlmUnitySession, ILlmUnityStateStore
         {
+            // DestroyAsync 가 오브젝트가 지워지기를 기다리는 최대 시간. 보통 다음 프레임에 지워진다 (모델 서비스를 지우는 데 1초 안팎)
+            private const float DestroyWaitSeconds = 10f;
+
             private readonly GameObject holder;
             private readonly LLMAgent agent;
 
@@ -235,9 +238,15 @@ namespace Jamkkaebi.Npc
                 Object.Destroy(holder); // LLM 의 OnDestroy 가 모델 서비스를 멈추고 정리한다
                 // Object.Destroy 는 이 프레임 끝에 지운다. 그 전에 끝내면 다음 StartAsync 가 같은 프레임에 새 LLM 을 만들어
                 // 앞 모델이 메모리에 남은 채로 하나를 더 올리고, 앞 모델의 OnDestroy 가 새 모델을 올리는 동안 LLMUnity 의 잠금을 기다리며
-                // 메인 스레드를 멈춘다. 지워질 때까지(Unity 의 == null) 프레임을 넘기며 기다린다
+                // 메인 스레드를 멈춘다. 지워질 때까지(Unity 의 == null) 프레임을 넘기며 기다린다.
+                // 끝없이 기다리지는 않는다 — 안 지워지면 실패로 알려, 백엔드가 다시 올리지 않고 '지우지 못했다'고 알리게 한다
+                float giveUpAt = Time.realtimeSinceStartup + DestroyWaitSeconds;
                 while (holder != null)
                 {
+                    if (Time.realtimeSinceStartup > giveUpAt)
+                    {
+                        throw new InvalidOperationException("LLM 오브젝트가 " + DestroyWaitSeconds + "초 안에 지워지지 않았다");
+                    }
                     await Task.Yield();
                 }
             }

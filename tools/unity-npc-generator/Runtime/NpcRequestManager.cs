@@ -149,7 +149,9 @@ namespace Jamkkaebi.Npc
             get { return SlmStatus == NpcModelStatus.Stalled; }
         }
 
-        // SLM 모델 상태를 한 번에 읽는다. SLM 생성기가 아니면 IsReady 로 Ready·NotLoaded 만 (SLM 이 없으면 NotLoaded)
+        // SLM 모델 상태를 한 번에 읽는다. SLM 생성기가 아니면 IsReady 로 Ready·NotLoaded 만 (SLM 이 없으면 NotLoaded).
+        // 읽다가 예외가 나면(직접 만든 생성기 등 — 인터페이스가 막지 않는다) 준비되지 않은 것으로 본다: 요청은 기본 대사로, 미리 읽기는
+        // 아무것도 하지 않고 끝난다. 요청 관리자는 예외를 던지지 않는다
         private NpcModelStatus SlmStatus
         {
             get
@@ -158,12 +160,19 @@ namespace Jamkkaebi.Npc
                 {
                     return NpcModelStatus.NotLoaded;
                 }
-                SlmReactionGenerator generator = slm as SlmReactionGenerator;
-                if (generator != null)
+                try
                 {
-                    return generator.ModelStatus;
+                    SlmReactionGenerator generator = slm as SlmReactionGenerator;
+                    if (generator != null)
+                    {
+                        return generator.ModelStatus;
+                    }
+                    return slm.IsReady ? NpcModelStatus.Ready : NpcModelStatus.NotLoaded;
                 }
-                return slm.IsReady ? NpcModelStatus.Ready : NpcModelStatus.NotLoaded;
+                catch (Exception)
+                {
+                    return NpcModelStatus.NotLoaded;
+                }
             }
         }
 
@@ -511,9 +520,9 @@ namespace Jamkkaebi.Npc
                 // 1) SLM
                 ReactionResult slmAttempt = null;
                 string fallbackNote;
-                // 모델 상태는 한 번만 읽고 그 값으로 판단과 메모를 함께 정한다. 준비 여부와 멈춤을 따로 읽으면, 그 사이 멈춘 생성이 끝나
-                // 멈춘 모델이 '아직 준비되지 않음'으로 적힌다
-                NpcModelStatus slmStatus = SlmStatus;
+                // 모델 상태는 SLM 을 쓸 요청에서만(정해진 대사·대사 없음·SLM 꺼짐 다음에) 한 번 읽고, 그 값으로 판단과 메모를 함께 정한다.
+                // 준비 여부와 멈춤을 따로 읽으면 그 사이 멈춘 생성이 끝나 멈춘 모델이 '아직 준비되지 않음'으로 적힌다
+                NpcModelStatus slmStatus = NpcModelStatus.NotLoaded;
                 if (NpcActions.OnlyFixedLines(request.Candidates))
                 {
                     fallbackNote = FixedLinesNote;
@@ -526,7 +535,7 @@ namespace Jamkkaebi.Npc
                 {
                     fallbackNote = "SLM 꺼짐(기기 사양 또는 모델 없는 빌드) → 기본 대사";
                 }
-                else if (slmStatus != NpcModelStatus.Ready)
+                else if ((slmStatus = SlmStatus) != NpcModelStatus.Ready) // 여기서 처음 읽는다
                 {
                     fallbackNote = slmStatus == NpcModelStatus.Stalled ? StalledNote : "모델이 아직 준비되지 않음 → 기본 대사";
                 }
@@ -930,7 +939,7 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public async Task PrepareAsync(int relicId, CancellationToken ct = default(CancellationToken))
         {
-            if (!SlmEnabled || slm == null || !slm.IsReady)
+            if (!SlmEnabled || SlmStatus != NpcModelStatus.Ready) // 예외를 던지지 않는다 (SlmStatus 가 삼킨다)
             {
                 return;
             }
