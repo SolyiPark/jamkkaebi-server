@@ -64,6 +64,9 @@ namespace Jamkkaebi.Npc
         [Tooltip("요청 전에 그 도깨비의 시스템 프롬프트를 미리 읽힌다 (게임에서 탭해 확대할 때처럼). 끄면 요청 시간에 시스템 프롬프트 읽기가 섞인다")]
         public bool prepareSystemPrompt = true;
 
+        [Tooltip("시스템 프롬프트 미리 읽기를 기다리는 최대 시간(초). 넘으면 멈추고 그대로 요청한다 (모델이 묶여도 시험이 그 장면에서 멈추지 않게). 느린 기기는 길게")]
+        public float prepareTimeoutSeconds = 180f;
+
         [Header("미리 만들기 (칸 있는 대사)")]
         [Tooltip("요청 전에 장면마다 대사를 미리 만들어 둔다. 서버 값(시간대·호칭·방문 횟수)에 달린 말은 칸으로 남겨 두고, 요청 때 실제 값을 넣어 모델 없이 바로 완성한다. 끝난 뒤 요청해 적중률과 시간을 잰다")]
         public bool prefetchFirst = true;
@@ -220,10 +223,13 @@ namespace Jamkkaebi.Npc
                 }
             }
 
-            manager = new NpcRequestManager(slm, rule)
+            // 이 판의 관리자는 지역 변수로 잡아 쓴다. OnDestroy(화면을 닫음)가 ct 를 취소하고 필드(manager)를 null 로 비우므로,
+            // await 뒤에 필드를 다시 읽으면 NullReferenceException 으로 '중단됨' 대신 '오류'가 남는다
+            var run = new NpcRequestManager(slm, rule)
             {
                 SlmTimeout = TimeSpan.FromSeconds(slmTimeoutSeconds), PrefetchTimeout = TimeSpan.FromSeconds(prefetchTimeoutSeconds), RefillAfterUse = refillAfterUse
             };
+            manager = run;
             if (useLineStore)
             {
                 // 게임은 로딩 화면에서 이렇게 읽는다. 버전(콘텐츠·모델)이 바뀌면 칸 있는 대사는 버리고 새로 만든다
@@ -231,13 +237,14 @@ namespace Jamkkaebi.Npc
                 string version = NpcLineStoreFormat.VersionOf(personaCatalog.contentVersion, actionCatalog.contentVersion, lineCatalog.contentVersion,
                         forbiddenCatalog.contentVersion, backend.ToString(), backend == BackendKind.LmStudio ? lmStudioModel : modelFile);
                 Stopwatch loadingLines = Stopwatch.StartNew();
-                int loadedLines = manager.LoadStore(lineStore, version);
+                int loadedLines = run.LoadStore(lineStore, version);
                 Say("미리 만든 대사 파일: " + loadedLines + "개 읽음, " + loadingLines.ElapsedMilliseconds + "ms (" + lineStore.Path + ")");
             }
             // CSV 는 장면 하나가 끝날 때마다 이어 쓴다. 끝에서 한 번에 저장하면 중간에 실패하거나 앱이 꺼졌을 때 지금까지의 기록이 모두 사라진다
             string path = Path.Combine(Application.persistentDataPath,
                     "npc_device_test_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".csv");
-            File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값\n", new UTF8Encoding(true)); // BOM: 엑셀에서 한글이 안 깨진다
+            // 미리읽기ms 는 끝난 미리 읽기만 (시간 초과면 -1), 시간 초과는 미리읽기초과ms 에 기다린 시간을 따로 적는다
+            File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값,미리읽기초과ms\n", new UTF8Encoding(true)); // BOM: 엑셀에서 한글이 안 깨진다
             csvPath = path;
             Say("CSV: " + path + " (장면마다 이어 쓴다)");
 
@@ -249,19 +256,19 @@ namespace Jamkkaebi.Npc
                 Stopwatch preparing = Stopwatch.StartNew();
                 foreach (NpcTestScene scene in sceneList)
                 {
-                    manager.PrefetchTemplate(scene.CreateRequest(), Math.Max(1, prefetchPerScene));
+                    run.PrefetchTemplate(scene.CreateRequest(), Math.Max(1, prefetchPerScene));
                 }
                 while (preparing.Elapsed.TotalSeconds < prefetchWaitSeconds)
                 {
                     ct.ThrowIfCancellationRequested();
-                    Task working = manager.PrefetchCompletion;
+                    Task working = run.PrefetchCompletion;
                     if (working == null || working.IsCompleted)
                     {
                         break;
                     }
                     await Task.Delay(500, ct);
                 }
-                Say("미리 만들기: " + preparing.ElapsedMilliseconds + "ms, 보관한 칸 있는 대사 " + manager.Cache.TotalCount + "개 (장면 " + sceneList.Count + "개 × 상황당 최대 " + prefetchPerScene + "개)");
+                Say("미리 만들기: " + preparing.ElapsedMilliseconds + "ms, 보관한 칸 있는 대사 " + run.Cache.TotalCount + "개 (장면 " + sceneList.Count + "개 × 상황당 최대 " + prefetchPerScene + "개)");
             }
             var slmTimes = new List<long>();
             var firstTokens = new List<long>();
@@ -273,6 +280,7 @@ namespace Jamkkaebi.Npc
             int trimmed = 0;
             int speechFixed = 0;
             int expectedOk = 0;
+            int prepareTimeouts = 0;
             long peak = 0;
 
             for (int rep = 1; rep <= Math.Max(1, repeat); rep++)
@@ -288,17 +296,66 @@ namespace Jamkkaebi.Npc
                     string retargeted = requestWithOtherServerValues ? Retarget(request) : "";
 
                     // 게임에서 탭해 확대할 때처럼 시스템 프롬프트를 먼저 읽힌다. 같은 도깨비가 이어지면 바로 끝난다
-                    long prepareMs = -1;
+                    long prepareMs = -1;        // 끝난 미리 읽기의 시간. 시간 초과·안 함이면 -1 (통계에 넣지 않는다)
+                    long prepareTimedOutMs = -1; // 시간 초과면 기다린 시간
                     if (prepareSystemPrompt && slm != null && slm.IsReady && !NpcActions.SkipsModel(request.Candidates))
                     {
                         Stopwatch preparing = Stopwatch.StartNew();
-                        await manager.PrepareAsync(scene.RelicId, ct);
-                        prepareMs = preparing.ElapsedMilliseconds;
-                        prepareTimes.Add(prepareMs);
+                        // 기한과 경주시킨다. 취소 타이머만 걸면, 취소를 듣지 않는 일(기억 저장·복원 등)에서 미리 읽기가 끝나지 않을 때 시험이 이 장면에서 멈춘다.
+                        // 기한이 먼저면 미리 읽기를 취소하고 기다리지 않고 넘어간다 (백엔드는 그 일이 끝날 때까지 모델 줄을 붙잡으니, 다음 요청은 그 뒤에 선다).
+                        // 미리 읽기는 실패해도 요청이 처음부터 읽을 뿐이다
+                        var prepareCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        // 미리 읽기가 끝나고, 아래 기한 분기(Cancel 포함)도 끝난 뒤에만 버린다. 미리 읽기가 Cancel 도중에 끝나
+                        // 그 자리에서 버리면 Cancel 이 버린 것을 건드린다
+                        int ctsHolders = 2;
+                        Action releaseCts = () =>
+                        {
+                            if (Interlocked.Decrement(ref ctsHolders) == 0)
+                            {
+                                prepareCts.Dispose();
+                            }
+                        };
+                        Task prepareTask = run.PrepareAsync(scene.RelicId, prepareCts.Token);
+                        prepareTask.ContinueWith(t =>
+                        {
+                            if (t.IsFaulted)
+                            {
+                                t.Exception.Handle(e => true);
+                            }
+                            releaseCts();
+                        }, TaskContinuationOptions.ExecuteSynchronously);
+                        Task deadline = Task.Delay(TimeSpan.FromSeconds(Math.Max(1f, prepareTimeoutSeconds)));
+                        bool prepared;
+                        try
+                        {
+                            // 시간 초과는 경주 결과로만 정한다 — 메인 스레드가 늦게 이어 받아도 이미 끝난 미리 읽기를 시간 초과로 치지 않는다
+                            prepared = await Task.WhenAny(prepareTask, deadline) == prepareTask;
+                            if (!prepared)
+                            {
+                                prepareCts.Cancel();
+                            }
+                        }
+                        finally
+                        {
+                            releaseCts();
+                        }
+                        // 화면을 닫는 중이면(OnDestroy 가 ct 를 취소) 다른 것을 건드리기 전에 멈춘다
+                        ct.ThrowIfCancellationRequested();
+                        if (prepared)
+                        {
+                            prepareMs = preparing.ElapsedMilliseconds;
+                            prepareTimes.Add(prepareMs);
+                        }
+                        else
+                        {
+                            prepareTimedOutMs = preparing.ElapsedMilliseconds;
+                            prepareTimeouts++;
+                            Say(scene.Id + " 미리 읽기 시간 초과(" + prepareTimeoutSeconds + "초) → 기다리지 않고 요청" + (run.SlmStalled ? " (모델이 멈춤)" : ""));
+                        }
                     }
 
                     Stopwatch watch = Stopwatch.StartNew();
-                    NpcResponse response = await manager.RequestAsync(request, ct);
+                    NpcResponse response = await run.RequestAsync(request, ct);
                     watch.Stop();
 
                     long memory = MemoryMb();
@@ -346,6 +403,7 @@ namespace Jamkkaebi.Npc
 
                     Say(scene.Id + " " + source + " " + action + " " + line + "  (" + watch.ElapsedMilliseconds + "ms"
                         + (prepareMs >= 0 ? ", 미리 읽기 " + prepareMs + "ms" : "")
+                        + (prepareTimedOutMs >= 0 ? ", 미리 읽기 시간 초과(" + prepareTimedOutMs + "ms 기다림)" : "")
                         + (firstToken >= 0 ? ", 첫 응답 " + firstToken + "ms" : "") + ")"
                         + (fromSlm && response.Reaction.Note == null ? "" : "  ← " + response.Note));
                     var row = new StringBuilder();
@@ -353,7 +411,8 @@ namespace Jamkkaebi.Npc
                         .Append(expected ? "O" : "X").Append(',').Append(Csv(line)).Append(',').Append(line.Length).Append(',')
                         .Append(prepareMs).Append(',').Append(firstToken).Append(',').Append(watch.ElapsedMilliseconds).Append(',')
                         .Append(memory).Append(',').Append(Csv(response.Note)).Append(',').Append(prefetched ? "O" : "X").Append(',')
-                        .Append(Csv(prefetched && response.Reaction != null ? response.Reaction.Note : "")).Append(',').Append(Csv(retargeted)).Append('\n');
+                        .Append(Csv(prefetched && response.Reaction != null ? response.Reaction.Note : "")).Append(',').Append(Csv(retargeted)).Append(',')
+                        .Append(prepareTimedOutMs >= 0 ? prepareTimedOutMs.ToString(CultureInfo.InvariantCulture) : "").Append('\n');
                     AppendCsv(path, row.ToString());
                 }
             }
@@ -365,7 +424,15 @@ namespace Jamkkaebi.Npc
             if (prepareTimes.Count > 0)
             {
                 Say("시스템 프롬프트 미리 읽기: 중앙값 " + Percentile(prepareTimes, 0.5) + "ms, 최대 " + prepareTimes.Max() + "ms"
-                    + " (같은 도깨비가 이어지면 0 에 가깝다)");
+                    + " (같은 도깨비가 이어지면 0 에 가깝다, 끝난 " + prepareTimes.Count + "건만)");
+            }
+            if (prepareTimeouts > 0)
+            {
+                Say("시스템 프롬프트 미리 읽기 시간 초과 " + prepareTimeouts + "건 (" + prepareTimeoutSeconds + "초, 위 통계에서 뺌 — CSV 의 미리읽기초과ms)");
+            }
+            if (run.SlmStalled)
+            {
+                Say("모델이 멈춰 있다 (취소한 생성이 CancelHold 가 지나도 끝나지 않음) — 프롬프트 읽기 중 취소 버그가 다시 난 것일 수 있다. 로그를 남겨 둔다");
             }
             foreach (KeyValuePair<string, int> reason in reasons.OrderByDescending(r => r.Value))
             {
@@ -387,7 +454,7 @@ namespace Jamkkaebi.Npc
             }
             if (useLineStore)
             {
-                Say("미리 만든 대사 파일에 씀: " + (manager.SaveStore() ? "보관한 칸 있는 대사 " + manager.Cache.TotalCount + "개" : "실패"));
+                Say("미리 만든 대사 파일에 씀: " + (run.SaveStore() ? "보관한 칸 있는 대사 " + run.Cache.TotalCount + "개" : "실패"));
             }
             Say("메모리 최대 " + peak + "MB" + MemoryNote());
 
@@ -436,6 +503,10 @@ namespace Jamkkaebi.Npc
             if (note.Contains("시간 초과"))
             {
                 return "시간 초과";
+            }
+            if (note == NpcRequestManager.StalledNote)
+            {
+                return "모델이 멈춤";
             }
             int cut = note.IndexOf(':');
             string head = cut > 0 ? note.Substring(0, cut) : note;
