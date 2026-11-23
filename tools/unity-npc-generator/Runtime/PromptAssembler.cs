@@ -546,6 +546,20 @@ namespace Jamkkaebi.Npc
             return list;
         }
 
+        // 흐려진 안부의 '이미 한 말' 꼴 전부 — 날 수는 어느 값이든(다른 날 띄운 최근 대사), 칸('{날수}')이어도 맞는다. LinePrefix·AskPrefixes 와 같은 문장이다
+        private static readonly Regex AnyAskPrefix = new Regex(
+                "^(?:마지막 관리가 (?:[0-9]+|\\{날수\\})일 전이었어\\.|관리받은 지 (?:[0-9]+|\\{날수\\})일이 지났어\\.|몸이 흐려졌어\\.|몸이 많이 흐려졌어\\.|몸이 흐려지다 못해 봉인됐어\\.|다시 봉인될 만큼 흐려졌어\\.)\\s*",
+                RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 대사 앞의 '이미 한 말'(흐려진 안부의 상태·며칠 전 문장)을 날 수와 상관없이 뗀다. 없으면 그대로. 요청 관리자가 첫 낱말을 고를 때
+        /// 최근 대사의 부탁 말머리("몸이 흐려졌어. 살살 닦아 줄래?"의 '살살')를 보려고 쓴다.
+        /// </summary>
+        public static string StripAnyAskPrefix(string line)
+        {
+            return string.IsNullOrEmpty(line) ? line : AnyAskPrefix.Replace(line, "", 1);
+        }
+
         /// <summary>대사 앞의 '이미 한 말'을 뗀다. 없으면 그대로.</summary>
         public static string StripAskPrefix(string line, List<string> prefixes)
         {

@@ -3224,6 +3224,21 @@ public static class Program
         starters3.PrefetchCompletion.Wait(5000);
         string prefetchStarter = starterOf(starterBackend.LastPrompt);
         Check(prefetchStarter != null && prefetchStarter != prefetchPlanned, "미리 만들기는 보관한 대사의 첫 낱말('" + prefetchPlanned + "')을 피함 ← " + prefetchStarter);
+        // ⑤ 흐려진 안부는 코드가 붙인 앞 문장을 떼고 부탁의 말머리를 견준다 — 다른 날(다른 날 수)의 최근 대사도 (CodeRabbit 리뷰)
+        foreach (string lead in new[] { "몸이 흐려졌어. ", "마지막 관리가 30일 전이었어. ", "관리받은 지 {날수}일이 지났어. " })
+        {
+            ReactionRequest fadedAsk = builder.Build(Owner(5, NpcInputs.AskStatus, "FADED", 9)).Request;
+            string fadedPlanned = PromptAssembler.Starter(fadedAsk);
+            fadedAsk.RecentLines = new List<string> { lead + fadedPlanned + " 닦아 줄래?" };
+            starterBackend.Reply = Out("answer_status", "player", "괜찮으면 닦아 줄래?");
+            Ask(new NpcRequestManager(starterSlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5) }, fadedAsk);
+            string fadedGot = starterOf(starterBackend.LastPrompt);
+            Check(fadedPlanned != null && fadedGot != null && fadedGot != fadedPlanned,
+                    "흐려진 안부: 최근 대사 '" + lead + fadedPlanned + " …'의 말머리를 피함 ← " + fadedGot);
+        }
+        Check(PromptAssembler.StripAnyAskPrefix("몸이 흐려지다 못해 봉인됐어. 조심조심 깨워 줘.") == "조심조심 깨워 줘."
+                && PromptAssembler.StripAnyAskPrefix("몸이 흐려졌어? 살살") == "몸이 흐려졌어? 살살" && PromptAssembler.StripAnyAskPrefix("살살 닦아 줘.") == "살살 닦아 줘.",
+                "앞 문장은 코드가 붙이는 꼴만 뗌");
         // ④ 첫 낱말이 없는 요청(지난 대화 꺼내기)은 번호를 바꾸지 않는다
         ReactionRequest recallAsk = Request(8, InteractionMode.Owner, NpcInputs.AskStatus, NpcActions.RecallTalk);
         recallAsk.Variation = 5;

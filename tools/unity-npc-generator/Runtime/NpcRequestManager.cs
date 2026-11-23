@@ -987,6 +987,9 @@ namespace Jamkkaebi.Npc
             {
                 tried = triedStarters.TryGetValue(key, out tried) ? new List<string>(tried) : new List<string>();
             }
+            // 흐려진 안부 대사는 코드가 붙인 앞 문장("몸이 흐려졌어.")으로 시작한다 — 그 문장을 떼고 부탁의 말머리('살살')를 견준다 (CodeRabbit 리뷰).
+            // 그렇지 않으면 그 첫 낱말이 최근 3번(triedStarters)에서 빠지는 순간, 최근 대사에 남아 있는데도 다시 고른다
+            bool askPrefix = NpcLineChecks.NeedsAsk(request);
             int start = request.Variation;
             int best = start;
             int bestScore = int.MaxValue;
@@ -1004,7 +1007,7 @@ namespace Jamkkaebi.Npc
                 {
                     distinct.Add(starter);
                 }
-                int score = (StartsAnyWith(avoidLines, starter) ? 2 : 0) + (tried.Contains(starter) ? 1 : 0);
+                int score = (StartsAnyWith(avoidLines, starter, askPrefix) ? 2 : 0) + (tried.Contains(starter) ? 1 : 0);
                 if (score < bestScore) // 같으면 앞 번호(게임이 준 번호에 가까운 것)
                 {
                     best = variation;
@@ -1036,8 +1039,8 @@ namespace Jamkkaebi.Npc
             }
         }
 
-        // 대사가 그 첫 낱말로 시작하는지. 앞의 말줄임·따옴표·띄어쓰기는 건너뛴다
-        private static bool StartsAnyWith(List<string> lines, string starter)
+        // 대사가 그 첫 낱말로 시작하는지. 앞의 말줄임·따옴표·띄어쓰기는 건너뛴다. askPrefix 면 흐려진 안부의 앞 문장을 먼저 뗀다 (다른 요청은 그대로 견준다)
+        private static bool StartsAnyWith(List<string> lines, string starter, bool askPrefix)
         {
             if (lines == null || string.IsNullOrEmpty(starter))
             {
@@ -1049,7 +1052,7 @@ namespace Jamkkaebi.Npc
                 {
                     continue;
                 }
-                string head = line.TrimStart(' ', '…', '.', '"', '\'', '“', '‘', '~', '-');
+                string head = (askPrefix ? PromptAssembler.StripAnyAskPrefix(line) : line).TrimStart(' ', '…', '.', '"', '\'', '“', '‘', '~', '-');
                 if (head.StartsWith(starter, StringComparison.Ordinal))
                 {
                     return true;
