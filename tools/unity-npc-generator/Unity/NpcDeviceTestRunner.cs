@@ -296,16 +296,34 @@ namespace Jamkkaebi.Npc
                     if (prepareSystemPrompt && slm != null && slm.IsReady && !NpcActions.SkipsModel(request.Candidates))
                     {
                         Stopwatch preparing = Stopwatch.StartNew();
-                        using (var prepareCts = CancellationTokenSource.CreateLinkedTokenSource(ct))
+                        // 기한과 경주시킨다. 취소 타이머만 걸면, 취소를 듣지 않는 일(기억 저장·복원 등)에서 미리 읽기가 끝나지 않을 때 시험이 이 장면에서 멈춘다.
+                        // 기한이 먼저면 미리 읽기를 취소하고 기다리지 않고 넘어간다 (백엔드는 그 일이 끝날 때까지 모델 줄을 붙잡으니, 다음 요청은 그 뒤에 선다).
+                        // 미리 읽기는 실패해도 요청이 처음부터 읽을 뿐이다
+                        var prepareCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        Task prepareTask = manager.PrepareAsync(scene.RelicId, prepareCts.Token);
+                        // 다 끝난 뒤에 버린다 (도는 중에 버리면 그 토큰을 쓰는 쪽이 ObjectDisposedException)
+                        prepareTask.ContinueWith(t =>
                         {
-                            // 시간 제한이 없으면 모델이 묶였을 때 시험 전체가 이 장면에서 멈춘다. 미리 읽기는 실패해도 요청이 처음부터 읽을 뿐이다
-                            prepareCts.CancelAfter(TimeSpan.FromSeconds(Math.Max(1f, prepareTimeoutSeconds)));
-                            await manager.PrepareAsync(scene.RelicId, prepareCts.Token);
-                            if (prepareCts.IsCancellationRequested && !ct.IsCancellationRequested)
+                            if (t.IsFaulted)
                             {
-                                prepareTimeouts++;
-                                Say(scene.Id + " 미리 읽기 시간 초과(" + prepareTimeoutSeconds + "초) → 그대로 요청" + (manager.SlmStalled ? " (모델이 멈춤)" : ""));
+                                t.Exception.Handle(e => true);
                             }
+                            prepareCts.Dispose();
+                        }, TaskContinuationOptions.ExecuteSynchronously);
+                        Task deadline = Task.Delay(TimeSpan.FromSeconds(Math.Max(1f, prepareTimeoutSeconds)));
+                        // 시간 초과는 경주 결과로만 센다 — 메인 스레드가 늦게 이어 받아도 이미 끝난 미리 읽기를 시간 초과로 치지 않는다
+                        if (await Task.WhenAny(prepareTask, deadline) != prepareTask)
+                        {
+                            try
+                            {
+                                prepareCts.Cancel();
+                            }
+                            catch (ObjectDisposedException)
+                            {
+                                // 그 사이 끝났다
+                            }
+                            prepareTimeouts++;
+                            Say(scene.Id + " 미리 읽기 시간 초과(" + prepareTimeoutSeconds + "초) → 기다리지 않고 요청" + (manager.SlmStalled ? " (모델이 멈춤)" : ""));
                         }
                         ct.ThrowIfCancellationRequested();
                         prepareMs = preparing.ElapsedMilliseconds;

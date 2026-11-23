@@ -41,8 +41,16 @@ namespace Jamkkaebi.Npc
     /// </summary>
     public interface INpcModelHealth
     {
-        /// <summary>취소한 생성이 끝나지 않아 모델을 쓰지 않는 중인지.</summary>
-        bool IsStalled { get; }
+        /// <summary>올라옴·안 올라옴·멈춤(취소한 생성이 끝나지 않아 모델을 쓰지 않는 중)을 한 번에 읽는다.</summary>
+        NpcModelStatus Status { get; }
+    }
+
+    /// <summary>모델 상태. 한 번 읽은 값으로 판단과 메모를 함께 정한다 (두 번 읽으면 그 사이에 바뀔 수 있다).</summary>
+    public enum NpcModelStatus
+    {
+        NotLoaded,
+        Ready,
+        Stalled
     }
 
     /// <summary>
@@ -153,14 +161,27 @@ namespace Jamkkaebi.Npc
             get { return backend.IsLoaded; }
         }
 
-        /// <summary>모델이 멈췄는지 (<see cref="INpcModelHealth"/>). 그동안 IsReady 도 false 다. 멈춤을 알려 주지 않는 백엔드면 늘 false.</summary>
-        public bool IsStalled
+        /// <summary>
+        /// 모델 상태를 한 번에 읽는다 (<see cref="INpcModelHealth"/>). 멈춤을 알려 주지 않는 백엔드면 IsLoaded 로 Ready·NotLoaded 만 준다.
+        /// 판단과 메모를 함께 정할 때는 IsReady·IsStalled 를 따로 읽지 말고 이것을 한 번 읽는다.
+        /// </summary>
+        public NpcModelStatus ModelStatus
         {
             get
             {
                 var health = backend as INpcModelHealth;
-                return health != null && health.IsStalled;
+                if (health != null)
+                {
+                    return health.Status;
+                }
+                return backend.IsLoaded ? NpcModelStatus.Ready : NpcModelStatus.NotLoaded;
             }
+        }
+
+        /// <summary>모델이 멈췄는지 (<see cref="INpcModelHealth"/>). 그동안 IsReady 도 false 다. 멈춤을 알려 주지 않는 백엔드면 늘 false.</summary>
+        public bool IsStalled
+        {
+            get { return ModelStatus == NpcModelStatus.Stalled; }
         }
 
         public Task LoadAsync(CancellationToken ct)

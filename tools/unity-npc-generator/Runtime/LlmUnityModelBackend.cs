@@ -253,6 +253,18 @@ namespace Jamkkaebi.Npc
             }
         }
 
+        /// <summary>올라옴·안 올라옴·멈춤을 한 번에 읽는다 (IsLoaded 와 IsStalled 를 따로 읽으면 그 사이에 바뀔 수 있다).</summary>
+        public NpcModelStatus Status
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return session == null ? NpcModelStatus.NotLoaded : (stalled == session ? NpcModelStatus.Stalled : NpcModelStatus.Ready);
+                }
+            }
+        }
+
         /// <summary>마지막 생성 호출의 측정값. 아직 없으면 null.</summary>
         public LlmUnityCall LastCall
         {
@@ -333,6 +345,13 @@ namespace Jamkkaebi.Npc
                             throw new OperationCanceledException("모델을 올리는 도중에 Unload 되었다");
                         }
                     }
+                }
+                // 이미 끝났더라도 결과를 본다. 지우기가 실패했으면 앞 모델이 메모리에 남아 있을 수 있어 새로 올리지 않는다
+                if (previous.IsFaulted || previous.IsCanceled)
+                {
+                    Exception cause = previous.Exception != null ? previous.Exception.GetBaseException() : null;
+                    throw new InvalidOperationException((cause != null ? cause.Message : "앞서 내린 모델을 지우지 못했다")
+                            + ". 메모리에 남아 있을 수 있어 새로 올리지 않는다. 앱을 다시 켠다", cause);
                 }
 
                 ILlmUnitySession fresh = await OnUnity(() => runtime.StartAsync(options)).ConfigureAwait(false);
@@ -420,10 +439,12 @@ namespace Jamkkaebi.Npc
         }
 
         // gate 안에서 부른다. 지우기 하나를 retired 에 더하고, 지우기가 끝나면 끝낼 것을 돌려준다
+        // 앞의 지우기가 실패했으면 그 실패를 잃지 않게 이어 붙인다 (성공으로 끝난 것만 새것으로 바꾼다)
         private TaskCompletionSource<bool> AddRetired()
         {
             var destroyed = new TaskCompletionSource<bool>();
-            retired = retired.IsCompleted ? (Task)destroyed.Task : Task.WhenAll(retired, destroyed.Task);
+            retired = retired.Status == TaskStatus.RanToCompletion ? (Task)destroyed.Task : Task.WhenAll(retired, destroyed.Task);
+            Observe(retired); // 다시 올리지 않으면 아무도 보지 않는다 — 처리되지 않은 예외로 남지 않게
             return destroyed;
         }
 
@@ -452,11 +473,15 @@ namespace Jamkkaebi.Npc
                 Task<bool> gone = OnUnity(() => Done(old.DestroyAsync()));
                 gone.ContinueWith(t =>
                 {
-                    if (t.IsFaulted)
+                    if (t.Status == TaskStatus.RanToCompletion)
                     {
-                        t.Exception.Handle(e => true); // 지우기 실패는 삼킨다 (이미 지워진 모델 등). 기다리던 LoadAsync 는 풀어 준다
+                        destroyed.TrySetResult(true);
+                        return;
                     }
-                    destroyed.TrySetResult(true);
+                    // 지웠는지 모른다(실패·취소). 성공으로 치면 다음 LoadAsync 가 앞 모델이 남은 채로 하나를 더 올린다 — 실패로 남겨 LoadAsync 가 알린다
+                    Exception cause = t.Exception != null ? t.Exception.GetBaseException() : null;
+                    destroyed.TrySetException(new InvalidOperationException("앞서 내린 모델을 지우지 못했다"
+                            + (cause != null ? " (" + cause.Message + ")" : " (지우기가 취소됨)"), cause));
                 }, TaskContinuationOptions.ExecuteSynchronously);
             };
             if (busy.Count == 0)
@@ -469,6 +494,7 @@ namespace Jamkkaebi.Npc
             }
         }
 
+        // Task → Task<bool>. 실패·취소는 그대로 실패로 넘긴다 (취소를 성공으로 치지 않는다)
         private static Task<bool> Done(Task task)
         {
             if (task == null)
@@ -480,6 +506,10 @@ namespace Jamkkaebi.Npc
                 if (t.IsFaulted)
                 {
                     throw t.Exception.GetBaseException();
+                }
+                if (t.IsCanceled)
+                {
+                    throw new InvalidOperationException("모델 지우기가 취소되었다");
                 }
                 return true;
             }, TaskContinuationOptions.ExecuteSynchronously);
@@ -500,7 +530,8 @@ namespace Jamkkaebi.Npc
         }
 
         // 모델에 일을 맡긴다(메인 스레드에서). 끝날 때까지 그 세션을 지우지 않는다 — Unload 는 이 일이 끝나기를 기다렸다가 지운다.
-        // 그 세션을 이미 내렸으면 모델에 보내지 않고 OperationCanceledException
+        // 그 세션을 이미 내렸으면 모델에 보내지 않고 OperationCanceledException. 메인 스레드가 실제로 일을 시작할 때 한 번 더 본다 —
+        // 맡긴 뒤 메인 스레드가 꺼내기 전에 Unload 되면, 아직 시작도 안 한 생성이 내린 모델에서 시작돼 지우기를 프롬프트 읽기 하나만큼 늦춘다
         private Task<T> OnModel<T>(ILlmUnitySession owner, Func<Task<T>> work)
         {
             var done = new TaskCompletionSource<bool>();
@@ -513,7 +544,17 @@ namespace Jamkkaebi.Npc
                 }
                 working.Add(entry);
             }
-            Task<T> task = OnUnity(work);
+            Task<T> task = OnUnity(() =>
+            {
+                lock (gate)
+                {
+                    if (session != owner)
+                    {
+                        throw new OperationCanceledException("모델을 내렸다 (모델에 보내기 전)");
+                    }
+                }
+                return work();
+            });
             task.ContinueWith(_ =>
             {
                 lock (gate)
@@ -583,7 +624,15 @@ namespace Jamkkaebi.Npc
                     Stopwatch watch = Stopwatch.StartNew();
                     ILlmUnityStateStore store = prepare && options.SaveSystemState ? current as ILlmUnityStateStore : null;
                     string stateKey = store != null ? StateKey(system) : null;
-                    if (store != null && await RestoreState(current, store, stateKey).ConfigureAwait(false))
+                    Task<bool> restoring = store != null ? RestoreState(current, store, stateKey) : Task.FromResult(false);
+                    // 기억 복원도 모델 안의 일이라 취소를 듣지 않는다. 취소되면 기다리지 않고 돌려주되, 끝날 때까지 줄은 붙잡는다 (생성 취소와 같다)
+                    if (!await FinishedBefore(restoring, token).ConfigureAwait(false))
+                    {
+                        releaseLater = true;
+                        ReleaseWhenDone(restoring, alive, current);
+                        throw new OperationCanceledException(token);
+                    }
+                    if (restoring.Result)
                     {
                         token.ThrowIfCancellationRequested();
                         watch.Stop();
@@ -645,7 +694,14 @@ namespace Jamkkaebi.Npc
                         lastPrepareRestored = false;
                         if (store != null)
                         {
-                            await PersistState(current, store, stateKey).ConfigureAwait(false);
+                            // 기억 저장도 취소를 듣지 않는다. 취소되면 기다리지 않고 돌려주되, 끝날 때까지 줄은 붙잡는다
+                            Task persisting = PersistState(current, store, stateKey);
+                            if (!await FinishedBefore(persisting, token).ConfigureAwait(false))
+                            {
+                                releaseLater = true;
+                                ReleaseWhenDone(persisting, alive, current);
+                                throw new OperationCanceledException(token);
+                            }
                         }
                     }
                     else
@@ -759,6 +815,20 @@ namespace Jamkkaebi.Npc
             {
                 int was = Interlocked.CompareExchange(ref state, Deferred, Reading);
                 return was == Generating && Interlocked.CompareExchange(ref state, Sent, Generating) == Generating;
+            }
+        }
+
+        // op 가 취소보다 먼저 끝났으면 true. 취소되면 op 를 기다리지 않고 false (op 는 계속 돈다 — 부른 쪽이 줄을 붙잡는다)
+        private static async Task<bool> FinishedBefore(Task op, CancellationToken token)
+        {
+            if (op.IsCompleted)
+            {
+                return true;
+            }
+            var stop = new TaskCompletionSource<bool>();
+            using (token.Register(() => stop.TrySetResult(true)))
+            {
+                return await Task.WhenAny(op, stop.Task).ConfigureAwait(false) == op;
             }
         }
 

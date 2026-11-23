@@ -146,10 +146,24 @@ namespace Jamkkaebi.Npc
         /// <summary>SLM 의 모델이 멈췄는지 (SlmReactionGenerator.IsStalled). 다른 생성기는 멈추지 않는 것으로 본다.</summary>
         public bool SlmStalled
         {
+            get { return SlmStatus == NpcModelStatus.Stalled; }
+        }
+
+        // SLM 모델 상태를 한 번에 읽는다. SLM 생성기가 아니면 IsReady 로 Ready·NotLoaded 만 (SLM 이 없으면 NotLoaded)
+        private NpcModelStatus SlmStatus
+        {
             get
             {
+                if (slm == null)
+                {
+                    return NpcModelStatus.NotLoaded;
+                }
                 SlmReactionGenerator generator = slm as SlmReactionGenerator;
-                return generator != null && generator.IsStalled;
+                if (generator != null)
+                {
+                    return generator.ModelStatus;
+                }
+                return slm.IsReady ? NpcModelStatus.Ready : NpcModelStatus.NotLoaded;
             }
         }
 
@@ -497,6 +511,9 @@ namespace Jamkkaebi.Npc
                 // 1) SLM
                 ReactionResult slmAttempt = null;
                 string fallbackNote;
+                // 모델 상태는 한 번만 읽고 그 값으로 판단과 메모를 함께 정한다. 준비 여부와 멈춤을 따로 읽으면, 그 사이 멈춘 생성이 끝나
+                // 멈춘 모델이 '아직 준비되지 않음'으로 적힌다
+                NpcModelStatus slmStatus = SlmStatus;
                 if (NpcActions.OnlyFixedLines(request.Candidates))
                 {
                     fallbackNote = FixedLinesNote;
@@ -509,9 +526,9 @@ namespace Jamkkaebi.Npc
                 {
                     fallbackNote = "SLM 꺼짐(기기 사양 또는 모델 없는 빌드) → 기본 대사";
                 }
-                else if (!slm.IsReady)
+                else if (slmStatus != NpcModelStatus.Ready)
                 {
-                    fallbackNote = SlmStalled ? StalledNote : "모델이 아직 준비되지 않음 → 기본 대사";
+                    fallbackNote = slmStatus == NpcModelStatus.Stalled ? StalledNote : "모델이 아직 준비되지 않음 → 기본 대사";
                 }
                 else
                 {
@@ -665,8 +682,8 @@ namespace Jamkkaebi.Npc
                         }
                         job = prefetchJobs.Peek();
                     }
-                    // 요청이 진행 중이거나 모델이 아직 안 올라왔으면 기다린다
-                    while (Volatile.Read(ref activeRequests) > 0 || slm == null || !slm.IsReady)
+                    // 요청이 진행 중이거나 모델이 아직 안 올라왔으면 기다린다 (SLM 이 없으면 SlmStatus 가 NotLoaded 라 아래에서 끝낸다)
+                    while (Volatile.Read(ref activeRequests) > 0 || SlmStatus != NpcModelStatus.Ready)
                     {
                         if (!SlmEnabled || slm == null)
                         {
@@ -685,7 +702,9 @@ namespace Jamkkaebi.Npc
                                 return;
                             }
                         }
-                        int poll = Volatile.Read(ref activeRequests) > 0 ? RequestPollMs : (SlmStalled ? StalledPollMs : NotReadyPollMs);
+                        // 간격은 지금 상태 하나로 정한다 (몇 ms 의 차이라 위 조건과 따로 읽어도 결과가 틀어지지 않는다)
+                        int poll = Volatile.Read(ref activeRequests) > 0 ? RequestPollMs
+                                : (SlmStatus == NpcModelStatus.Stalled ? StalledPollMs : NotReadyPollMs);
                         await Task.Delay(poll).ConfigureAwait(false);
                     }
                     bool finished = await RunPrefetchJob(job).ConfigureAwait(false);
