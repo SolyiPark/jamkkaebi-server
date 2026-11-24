@@ -65,22 +65,20 @@ public class UserRelic extends BaseTimeEntity {
     @Column(name = "current_phase", nullable = false, length = 20)
     private Phase currentPhase;
 
-    // 마지막으로 선명도가 회복된 시각.
+    /**
+     * 마지막으로 정화에 성공한 시각. 성공한 판마다 갱신한다. "마지막 정화로부터 n일째" 같은 이력 표시에만 쓰고,
+     * 선명도는 {@link #clarityAnchorAt} 으로 계산한다.
+     */
     @Column(name = "last_purified_at")
     private LocalDateTime lastPurifiedAt;
 
-    // 이번 복구 순서에서 마지막으로 클리어한 페이즈. 복구 중이 아니면 null
-    @Enumerated(EnumType.STRING)
-    @Column(name = "restore_phase", length = 20)
-    private Phase restorePhase;
-
     /**
-     * 이번 복구를 시작할 때의 선명도. {@link #restorePhase} 와 함께 있거나 함께 {@code null} 이고,
-     * {@link Clarity#CLEAR} 일 수 없다. 지금 선명도와 다르면 저장된 복구 진행을 인정하지 않는다.
+     * 선명도 기준 시각. 선명도는 이 시각부터 흐른 시간으로 계산한다({@code ClarityPolicy}).
+     * 선명이 되면 그 순간, 흐려짐이 되면 그 순간에서 흐려짐 기간을 뺀 시각이다.
+     * 오염 관리를 마치기 전에는 {@code null}.
      */
-    @Enumerated(EnumType.STRING)
-    @Column(name = "restore_clarity", length = 20)
-    private Clarity restoreClarity;
+    @Column(name = "clarity_anchor_at")
+    private LocalDateTime clarityAnchorAt;
 
     // 관리 플레이 성공 횟수(난이도 무관, 최초 정화는 세지 않는다). 친밀도 계산에 쓴다.
     @ColumnDefault("0")
@@ -138,7 +136,7 @@ public class UserRelic extends BaseTimeEntity {
         return RevealLevel.of(status, currentPhase);
     }
 
-    // 최초 정화 한 판 성공. 마지막 페이즈였으면 완료한다.
+    // 최초 정화 한 판 성공. 마지막 페이즈였으면 완료하고 선명에서 시작한다.
     public void clearFirstPlay(LocalDateTime now) {
         if (isCompleted()) {
             return;
@@ -149,46 +147,28 @@ public class UserRelic extends BaseTimeEntity {
             return;
         }
         status = RelicStatus.COMPLETED;
-        refresh(now);
-    }
-
-    /**
-     * 관리 플레이 한 판 성공으로 한 페이즈 복구한다. 순서의 마지막 페이즈면 선명도를 회복한다.
-     *
-     * @param phase   이 판의 페이즈 (세션 시작 때 정한 값)
-     * @param clarity 이 판을 정산하는 순간의 선명도. 플레이 도중 떨어졌으면 떨어진 값
-     */
-    public void clearCarePlay(Phase phase, Clarity clarity, LocalDateTime now) {
-        careCount++;
-        if (phase.isLast() || clarity == Clarity.CLEAR) {
-            refresh(now);
-            return;
-        }
-        restorePhase = phase;
-        restoreClarity = clarity;
-    }
-
-    // 관리 플레이 한 판 성공으로 바로 선명까지 복구한다. (어려움)
-    public void restoreFully(LocalDateTime now) {
-        careCount++;
-        refresh(now);
-    }
-
-    /**
-     * 지금 선명도로 복구할 때 이미 클리어했다고 인정하는 마지막 페이즈. 인정할 진행이 없으면 {@code null}.
-     *
-     * <p>복구를 시작한 선명도와 지금 선명도가 같을 때만 저장된 진행을 이어 간다. 다르면(복구 도중 더 흐려졌거나
-     * 재봉인된 경우) 지난 진행을 버리고 지금 선명도가 정한 순서의 처음부터 한다.
-     */
-    public Phase restorePhaseFor(Clarity current) {
-        return current != null && current == restoreClarity ? restorePhase : null;
-    }
-
-    // 선명도 회복: 마지막 정화 시각 갱신, 복구 진행 비우기
-    private void refresh(LocalDateTime now) {
         lastPurifiedAt = now;
-        restorePhase = null;
-        restoreClarity = null;
+        clarityAnchorAt = now;
+    }
+
+    /**
+     * 관리 플레이 한 판 성공. 돌봄 횟수를 올리고 마지막 정화 시각과 선명도 기준 시각을 새로 정한다.
+     * 몇 칸 오를지(기준 시각)는 정산이 난이도와 계획 선명도로 정해 넘긴다.
+     *
+     * @param clarityAnchorAt 이번 판으로 정해진 선명도 기준 시각 ({@code ClarityPolicy.anchorFor})
+     * @throws IllegalStateException    오염 관리를 마치지 않은 유물
+     * @throws IllegalArgumentException 기준 시각이 지금보다 늦은 경우
+     */
+    public void clearCarePlay(LocalDateTime clarityAnchorAt, LocalDateTime now) {
+        if (!isCompleted()) {
+            throw new IllegalStateException("오염 관리를 마치지 않은 유물은 관리 플레이를 할 수 없습니다.");
+        }
+        if (clarityAnchorAt.isAfter(now)) {
+            throw new IllegalArgumentException("선명도 기준 시각은 지금보다 늦을 수 없습니다.");
+        }
+        careCount++;
+        lastPurifiedAt = now;
+        this.clarityAnchorAt = clarityAnchorAt;
     }
 
     public void recordPerfect(boolean perfect) {

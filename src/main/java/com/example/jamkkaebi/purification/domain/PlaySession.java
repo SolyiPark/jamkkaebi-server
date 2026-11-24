@@ -73,8 +73,8 @@ public class PlaySession extends BaseTimeEntity {
     private EntryRoute entryRoute;
 
     /**
-     * 관리 플레이를 시작할 때의 선명도. 최초 정화면 {@code null}. 기록·분석용이다.
-     * 정산은 {@link #phase} 와 정산 순간의 선명도로 한다 ({@code PurificationService.settleCare}).
+     * 관리 플레이를 시작할 때의 선명도. 최초 정화면 {@code null}.
+     * 정산은 이 선명도에서 한 칸(어려움·쉬움은 바로 선명) 올린다 ({@code PurificationService.reachedClarity}).
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "plan_clarity", length = 20)

@@ -95,7 +95,8 @@ public class WorkbenchService {
                 .map(userRelic -> SpiritView.of(
                         masters.get(userRelic.getRelicId()),
                         userRelic,
-                        clarityPolicy.clarityOf(userRelic, now)))
+                        clarityPolicy.clarityOf(userRelic, now),
+                        clarityPolicy.nextChangeAt(userRelic, now)))
                 .toList();
 
         return new WorkbenchResponse(
@@ -123,8 +124,8 @@ public class WorkbenchService {
                 completed ? null : userRelic.getCurrentPhase(),
                 completed ? userRelic.getCareCount() : null,
                 clarity,
-                userRelic.getLastPurifiedAt(),
-                userRelic.restorePhaseFor(clarity),
+                completed ? userRelic.getLastPurifiedAt() : null,
+                clarityPolicy.nextChangeAt(userRelic, now),
                 clarityPolicy.resealAt(userRelic, now),
                 userRelic.isDisplayed(),
                 userRelic.isHidden(),

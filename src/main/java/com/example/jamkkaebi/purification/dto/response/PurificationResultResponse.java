@@ -10,6 +10,7 @@ import com.example.jamkkaebi.relic.dto.response.BuildingView;
 import com.example.jamkkaebi.relic.dto.response.RelicCard;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -17,8 +18,10 @@ import java.util.List;
  *
  * @param perfectStreak    이 도깨비의 연속 완벽 정화 수. 최초 정화면 {@code null}
  * @param revealed         이번 판에서 <b>새로</b> 도달한 공개 단계
- * @param lastClearedPhase 갱신된 복구 진행도 (지금 선명도에서 인정되는 값)
  * @param careCount        관리 플레이 성공 횟수. 완료 전이면 {@code null}
+ * @param clarity          정산 뒤 지금 선명도. 완료 전이면 {@code null}
+ * @param lastPurifiedAt   마지막으로 정화에 성공한 시각. 완료 전이면 {@code null}
+ * @param clarityChangesAt 이대로 두면 선명도가 한 칸 떨어지는 시각. 완료 전이거나 재봉인이면 {@code null}
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record PurificationResultResponse(
@@ -30,9 +33,10 @@ public record PurificationResultResponse(
         RelicStatus status,
         RevealLevel revealed,
         NextStep next,
-        Phase lastClearedPhase,
         Integer careCount,
         Clarity clarity,
+        LocalDateTime lastPurifiedAt,
+        LocalDateTime clarityChangesAt,
         BuildingView buildingAwarded,
         List<String> badgesEarned
 ) {
@@ -47,7 +51,7 @@ public record PurificationResultResponse(
      * 결과 화면의 주 버튼.
      *
      * @param phase           이어서 할 페이즈. 끝났거나 실패면 {@code null}
-     * @param remainingPhases 남은 복구 순서. 끝났거나 실패면 {@code null}
+     * @param remainingPhases 선명까지 남은 복구 순서. 끝났거나 실패면 {@code null}
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public record NextStep(NextAction action, Phase phase, List<Phase> remainingPhases) {

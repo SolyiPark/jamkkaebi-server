@@ -15,9 +15,11 @@ import java.time.LocalDateTime;
  *
  * @param currentPhase     최초 정화 진행도. 이미 완료했으면 {@code null}
  * @param careCount        관리 플레이 성공 횟수. 완료 전이면 {@code null}
- * @param lastClearedPhase 이번 복구 순서에서 마지막으로 클리어한 페이즈. 복구 중이 아니거나
- *                         복구 도중 선명도가 바뀌어 진행이 초기화됐으면 {@code null}
- * @param resealAt         이대로 두면 재봉인되는 시각. 이미 재봉인됐으면 {@code null}
+ * @param clarity          지금 선명도. 완료 전이면 {@code null}
+ * @param lastPurifiedAt   마지막으로 정화에 성공한 시각("마지막 정화로부터 n일째"). 완료 전이면 {@code null}
+ * @param clarityChangesAt 이대로 두면 선명도가 한 칸 떨어지는 시각(선명 → 흐려짐, 흐려짐 → 재봉인).
+ *                         완료 전이거나 이미 재봉인됐으면 {@code null}
+ * @param resealAt         이대로 두면 재봉인되는 시각. 완료 전이거나 이미 재봉인됐으면 {@code null}
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record RelicDetailResponse(
@@ -27,7 +29,7 @@ public record RelicDetailResponse(
         Integer careCount,
         Clarity clarity,
         LocalDateTime lastPurifiedAt,
-        Phase lastClearedPhase,
+        LocalDateTime clarityChangesAt,
         LocalDateTime resealAt,
         boolean displayed,
         boolean hidden,

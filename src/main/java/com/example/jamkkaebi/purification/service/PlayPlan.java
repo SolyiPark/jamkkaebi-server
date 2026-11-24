@@ -12,9 +12,9 @@ import java.util.List;
  *
  * @param entryRoute      최초 정화 또는 관리 플레이
  * @param phase           이번에 할 페이즈
- * @param remainingPhases 이번 것을 포함해 남은 순서
+ * @param remainingPhases 이번 것을 포함해 선명까지 남은 순서(보통으로 한 판씩 깰 때). 선명이면 {@code [GUARD]}
  * @param difficulties    고를 수 있는 난이도. 쉬운 순. 하나뿐이면 그 난이도로 고정
- * @param clarity         관리 플레이를 계획한 시점의 선명도. 최초 정화면 {@code null}
+ * @param clarity         관리 플레이를 계획한 시점의 선명도. 정산은 이 선명도에서 한 칸 올린다. 최초 정화면 {@code null}
  */
 public record PlayPlan(
         EntryRoute entryRoute,
