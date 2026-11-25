@@ -27,8 +27,19 @@ namespace Jamkkaebi.Npc
         /// <summary>spirits[].awakeningStage (AWAKENED · AWAKENED_PLUS · FULLY_AWAKENED).</summary>
         public string AwakeningStage { get; set; }
 
-        /// <summary>마지막 플레이(관리) 시각</summary>
+        /// <summary>
+        /// 마지막으로 정화(관리 플레이 포함)에 성공한 시각 — 내 전시관 spirits[].lastPurifiedAt. 관리하기면 이번 관리 <b>전</b> 값이다.
+        /// 서버는 판을 깰 때마다 이 값을 바꾸고 선명도는 따로 둔 기준 시각으로 센다. 그래서 재봉인에서 보통 난이도로 한 판 깨 흐려짐이 된 정령은
+        /// 흐려짐이면서 이 값이 최근이다(7일 안). 흐려짐·재봉인이라고 늘 오래 방치된 것이 아니다.
+        /// </summary>
         public DateTime? LastPurifiedAt { get; set; }
+
+        /// <summary>
+        /// 관리하기에서만 쓴다: 이번 관리 <b>뒤</b> 선명도. 정산 결과 응답(PurificationResultResponse)의 clarity 를 그대로 넘긴다.
+        /// 보통 난이도는 한 칸만 오른다(재봉인 → 흐려짐 → 선명), 어려움·쉬움은 선명. 페이즈가 남은 중간 판은 서버(UserRelic.clearCarePlay)가
+        /// 선명도·lastPurifiedAt 을 그대로 둬 관리 전과 같은 값(재봉인 → 재봉인, 흐려짐 → 흐려짐)이 온다. 비우면 선명으로 본다.
+        /// </summary>
+        public string ClarityAfterCare { get; set; }
 
         /// <summary>
         /// 주인이 이 도깨비를 관리한(관리 플레이 성공) 누적 횟수. 작업대·정화 응답의 careCount 를 그대로 넘긴다. 모르면 null.
@@ -160,7 +171,10 @@ namespace Jamkkaebi.Npc
         /// <summary>관리 전 이만큼 지났으면 "오랜만에" 관리한 것이다. 서버에서 7일이 지나면 흐려진다.</summary>
         public const int LongGapDays = 7;
 
-        /// <summary>서버에서 마지막 정화 뒤 이만큼 지나면 재봉인된다 (ClarityPolicy.resealedAfter 기본 14일). 7일(LongGapDays)이 지나면 흐려진다.</summary>
+        /// <summary>
+        /// 서버에서 선명도 기준 시각 뒤 이만큼 지나면 재봉인된다 (ClarityPolicy.resealedAfter 기본 14일). 7일(LongGapDays)이 지나면 흐려진다.
+        /// 기준 시각은 마지막 정화 시각과 다르다 — 재봉인에서 한 칸 올라 흐려짐이 되면 기준 시각은 "지금 - 7일"이라, 마지막 정화 뒤 7일이면 다시 재봉인된다.
+        /// </summary>
         public const int ResealedAfterDays = 14;
 
         /// <summary>이 일수 안의 대화 기억만 꺼낸다.</summary>
@@ -292,6 +306,7 @@ namespace Jamkkaebi.Npc
                 var copy = new NpcContextInput
                 {
                     RelicId = state.RelicId, Mode = state.Mode, Input = input, Today = state.Today, Clarity = state.Clarity,
+                    ClarityAfterCare = input == NpcInputs.Care ? StepUp(state.Clarity) : null,   // 보통 난이도로 한 판 깬 뒤
                     AwakeningStage = state.AwakeningStage, LastPurifiedAt = state.LastPurifiedAt, RecentVisitDays = state.RecentVisitDays,
                     CareCount = state.CareCount, Now = state.Now, Nickname = state.Nickname, VisitDates = state.VisitDates, RealStory = state.RealStory,
                     Memory = state.Memory != null ? new List<MemoryEntry>(state.Memory) : new List<MemoryEntry>()
@@ -310,8 +325,9 @@ namespace Jamkkaebi.Npc
         /// 시간대는 낮(state.Now 가 없으면 Today 13시), 호칭은 '발굴자'(닉네임 없음), 손님 방문은 처음 온 친구(1번)와 단골(3번) 두 가지.
         /// 만든 대사에서 견본 값에 달린 말은 칸으로 남고(NpcLineSlots), 서버 값이 온 뒤의 요청이 그 칸에 실제 값을 넣어 완성한다.
         /// 주인 장면은 탭 인사, 선명도(state.Clarity)를 알면 안부 묻기·관리하기도. 손님 장면은 손님 관람. 선명도·마지막 관리·기억은 어떤 말을 할지 정하므로 견본이 아니라 state 의 값을 쓴다.
-        /// 단 관리하기(정화)는 다음 정화 때 쓸 대사라 선명·흐려짐·재봉인 세 상태를 모두 만든다(ClaritySamples) — 주인 장면은 탭 인사·안부·정화 셋으로 5개.
-        /// 안부가 지난 대화 꺼내기면 그다음 안부(꺼낸 뒤 한 번 쉬는 평소 안부)도 만든다 — 그때는 6개.
+        /// 단 관리하기(정화)는 다음 정화 때 쓸 대사라 선명·흐려짐·재봉인 세 상태를 모두 만든다(CareSamples) — 주인 장면은 탭 인사·안부·정화 셋으로 5개.
+        /// 지금 재봉인이거나 한 칸 올라 흐려짐이면, 마저 닦아 선명이 되는 정화도 만든다 — 6개.
+        /// 안부가 지난 대화 꺼내기면 그다음 안부(꺼낸 뒤 한 번 쉬는 평소 안부)도 만든다 — 하나 더.
         /// </summary>
         public List<ReactionRequest> PrefetchTemplates(NpcContextInput state)
         {
@@ -347,13 +363,14 @@ namespace Jamkkaebi.Npc
             }
             foreach (string input in inputs)
             {
-                foreach (KeyValuePair<string, DateTime?> clarity in ClaritySamples(input, state))
+                foreach (ClaritySample clarity in CareSamples(input, state))
                 foreach (List<DateTime> visits in visitSamples)
                 {
                     var copy = new NpcContextInput
                     {
-                        RelicId = state.RelicId, Mode = state.Mode, Input = input, Today = state.Today, Clarity = clarity.Key,
-                        AwakeningStage = state.AwakeningStage, LastPurifiedAt = clarity.Value, RealStory = state.RealStory,
+                        RelicId = state.RelicId, Mode = state.Mode, Input = input, Today = state.Today, Clarity = clarity.Before,
+                        ClarityAfterCare = clarity.After,
+                        AwakeningStage = state.AwakeningStage, LastPurifiedAt = clarity.LastPurifiedAt, RealStory = state.RealStory,
                         Now = state.Now.HasValue ? state.Now : state.Today.Date.AddHours(13),
                         Nickname = null,
                         VisitDates = visits,
@@ -381,22 +398,66 @@ namespace Jamkkaebi.Npc
             return requests;
         }
 
-        // 정화(관리)는 지금 상태가 아니라 <b>다음 정화 때의 상태</b>로 쓸 대사다. 다음 정화가 언제일지 모르므로 세 상태(선명·흐려짐·재봉인)를 모두 견본으로 만든다.
-        // 선명도는 마지막 정화 뒤 날 수로만 정해져서(7일 흐려짐, 14일 재봉인) 이 셋뿐이다. 날 수는 견본(1·9·16일)이고 대사에서는 {날수} 칸으로 남는다.
-        // 다른 선택지는 지금 상태 하나만 쓴다
-        private static List<KeyValuePair<string, DateTime?>> ClaritySamples(string input, NpcContextInput state)
+        // 견본 하나: 관리 전 선명도, 마지막 정화 시각, 관리 뒤 선명도(관리하기만, 아니면 null)
+        private sealed class ClaritySample
         {
-            var samples = new List<KeyValuePair<string, DateTime?>>();
+            public ClaritySample(string before, DateTime? lastPurifiedAt, string after)
+            {
+                Before = before;
+                LastPurifiedAt = lastPurifiedAt;
+                After = after;
+            }
+
+            public string Before { get; private set; }
+
+            public DateTime? LastPurifiedAt { get; private set; }
+
+            public string After { get; private set; }
+        }
+
+        // 정화(관리)는 지금 상태가 아니라 <b>다음 정화 때의 상태</b>로 쓸 대사다. 다음 정화가 언제일지 모르므로 세 상태(선명·흐려짐·재봉인)를 모두 견본으로 만든다.
+        // 날 수는 견본(1·9·16일)이고 대사에서는 {날수} 칸으로 남는다. 관리 뒤 선명도는 보통 난이도로 한 판 깬 값이다(재봉인 → 흐려짐, 흐려짐 → 선명) —
+        // 어려움으로 재봉인에서 바로 선명이 되면 견본과 달라 그 자리에서 만든다.
+        // 지금 재봉인이거나 한 칸 올라 흐려짐이면(PartlyRestored) 마저 닦는 정화(최근에 관리받은 흐려짐 → 선명)가 곧 온다 — 그 견본도 만든다.
+        // 다른 선택지는 지금 상태 하나만 쓴다
+        private static List<ClaritySample> CareSamples(string input, NpcContextInput state)
+        {
+            var samples = new List<ClaritySample>();
             if (input != NpcInputs.Care)
             {
-                samples.Add(new KeyValuePair<string, DateTime?>(state.Clarity, state.LastPurifiedAt));
+                samples.Add(new ClaritySample(state.Clarity, state.LastPurifiedAt, null));
                 return samples;
             }
             DateTime today = state.Today.Date;
-            samples.Add(new KeyValuePair<string, DateTime?>("CLEAR", today.AddDays(-1)));
-            samples.Add(new KeyValuePair<string, DateTime?>("FADED", today.AddDays(-(LongGapDays + 2))));
-            samples.Add(new KeyValuePair<string, DateTime?>("RESEALED", today.AddDays(-(ResealedAfterDays + 2))));
+            samples.Add(new ClaritySample("CLEAR", today.AddDays(-1), "CLEAR"));
+            samples.Add(new ClaritySample("FADED", today.AddDays(-(LongGapDays + 2)), "CLEAR"));
+            samples.Add(new ClaritySample("RESEALED", today.AddDays(-(ResealedAfterDays + 2)), "FADED"));
+            string now = Upper(state.Clarity);
+            if (now == "RESEALED" || PartlyRestored(now, DaysSince(state.LastPurifiedAt, state.Today)))
+            {
+                samples.Add(new ClaritySample("FADED", today, "CLEAR"));
+            }
             return samples;
+        }
+
+        /// <summary>
+        /// 흐려짐인데 마지막 정화가 7일(LongGapDays) 안인지: 재봉인에서 보통 난이도로 한 칸 올라 흐려짐이 된 정령이다.
+        /// 오래 방치한 것이 아니라 아직 덜 나은 것이다 (방치해서 흐려지려면 마지막 정화 뒤 7일이 지나야 한다).
+        /// </summary>
+        public static bool PartlyRestored(string clarity, int? daysSinceCare)
+        {
+            return Upper(clarity) == "FADED" && daysSinceCare.HasValue && daysSinceCare.Value < LongGapDays;
+        }
+
+        // 보통 난이도로 한 판 깬 뒤의 선명도: 재봉인 → 흐려짐, 그 밖은 선명. 모르면 null(선명으로 본다)
+        private static string StepUp(string clarity)
+        {
+            string value = Upper(clarity);
+            if (string.IsNullOrEmpty(value))
+            {
+                return null;
+            }
+            return value == "RESEALED" ? "FADED" : "CLEAR";
         }
 
         // ---------- 선택지별 ----------
@@ -422,9 +483,18 @@ namespace Jamkkaebi.Npc
                 // Kanana 의 부탁이 40자를 한 글자 넘겨 잘렸다(S03 0/3, 2026-11-11). 부탁을 이유보다 앞에 두는 것도 해 봤지만
                 // Kanana 는 그래도 흐려진 이야기부터 했다. 작은 모델은 상황 문장을 그대로 옮기므로 '~서'로 잇지 않고 짧은 문장
                 // 둘로 쓴다 ("~해 흐려져서, ~" 를 옮겨 "닦아 주셔서 선명해져서"처럼 '~서'가 겹쳤다)
-                request.Situation = situation + " 너는 오래 관리를 받지 못해 "
-                        + (resealed ? "흐려지다 못해 다시 봉인되었다. 주인에게 깨워 달라고 부탁한다."
-                                    : "흐려졌다. 주인에게 닦아 달라고 부탁한다.");
+                // 재봉인에서 한 칸 올라 흐려짐이 된 정령(PartlyRestored)은 방금 관리받았다 — "오래 관리를 받지 못해"가 아니라 아직 덜 나은 것으로 적는다.
+                // 날짜는 적지 않는다(상황 문장은 미리 만든 대사의 열쇠라, 날짜가 들어가면 날마다 다른 열쇠가 된다. 날 수는 사실 칸에 있다)
+                if (!resealed && PartlyRestored(clarity, days))
+                {
+                    request.Situation = situation + " 너는 최근에 관리를 받아 다시 깨어났지만 아직 흐리다. 주인에게 마저 닦아 달라고 부탁한다.";
+                }
+                else
+                {
+                    request.Situation = situation + " 너는 오래 관리를 받지 못해 "
+                            + (resealed ? "흐려지다 못해 다시 봉인되었다. 주인에게 깨워 달라고 부탁한다."
+                                        : "흐려졌다. 주인에게 닦아 달라고 부탁한다.");
+                }
                 context.KeyFact = resealed ? "resealed" : "faded";
                 AddClarity(input, request);
                 AddLastCare(days, request);
@@ -467,13 +537,33 @@ namespace Jamkkaebi.Npc
         {
             ReactionRequest request = context.Request;
             string before = Upper(input.Clarity);
+            string after = string.IsNullOrEmpty(input.ClarityAfterCare) ? "CLEAR" : Upper(input.ClarityAfterCare);
             int? days = DaysSince(input.LastPurifiedAt, input.Today);
-            bool longGap = (days.HasValue && days.Value >= LongGapDays) || before == "FADED" || before == "RESEALED";
+            bool partly = PartlyRestored(before, days);
+            // 흐려짐·재봉인이어도 한 칸 올라 흐려짐이 된 정령(partly)은 며칠 전에 관리받았다 — "오랜만에"가 아니다
+            bool longGap = (days.HasValue && days.Value >= LongGapDays) || ((before == "FADED" || before == "RESEALED") && !partly);
 
-            request.Situation = longGap
+            string situation = longGap
                     ? "주인이 오랜만에 너를 관리해 주었다."
                     : "주인이 너를 관리해 주었다.";
-            string result = string.IsNullOrEmpty(before) ? "선명" : ClarityLabel(before) + "→선명";
+            // 관리 결과 사실은 프롬프트에 싣지 않으므로(HiddenFactKeys) 다 낫지 않았으면 상황 문장에 적는다 — 적지 않으면 재봉인에서 흐려짐까지만 올랐는데
+            // 다 나은 것처럼 고마워한다. 한 칸 올라 흐려짐이던 정령이 마저 선명해졌으면 그것도 적는다(선명 → 선명과 같은 프롬프트가 되지 않게)
+            if (after == "RESEALED")
+            {
+                // 페이즈가 남은 중간 판: 서버가 재봉인 그대로 돌려준다 — 깨어났다고 적으면 정산 결과와 어긋난다 (Copilot 리뷰)
+                situation += " 너는 아직 봉인되어 있다.";
+            }
+            else if (after != "CLEAR")
+            {
+                // "다시 깨어났지만"은 재봉인 → 흐려짐에서만. 흐려짐 그대로(중간 판)면 아직 흐리다고만 적는다
+                situation += before == "RESEALED" ? " 너는 다시 깨어났지만 아직 흐리다." : " 너는 아직 흐리다.";
+            }
+            else if (partly)
+            {
+                situation += " 너는 다시 맑아졌다.";
+            }
+            request.Situation = situation;
+            string result = string.IsNullOrEmpty(before) ? ClarityLabel(after) : ClarityLabel(before) + "→" + ClarityLabel(after);
             request.Facts.Add(new Fact(NpcFactKeys.CareResult, result));
             if (longGap)
             {

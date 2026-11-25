@@ -25,6 +25,7 @@ namespace Jamkkaebi.Npc
     /// <item>이야기 듣기(늘 이 생성기가 맡는다 — SLM 은 이야기를 만들지 않는다): 페르소나 도깨비는 실화를 담은 이야기 대사(stories) 중 요청의 story_index 번째를 쓰고, 번호가 없으면
     /// StoryRotation 으로 돌려 가며 고른다 — 다 들려줄 때까지 같은 이야기를 반복하지 않는다. 페르소나 없는 도깨비는
     /// 자료 문장(verified_story)을 바꾸지 않고 그대로 싣고 앞뒤에 말투를 붙인다.</item>
+    /// <item>관리하기 감사: 관리 뒤가 아직 선명이 아니면(재봉인 → 흐려짐) 덜 나은 감사 대사(partial)만 쓴다 — 일반 감사 대사에는 다 나았다는 말이 있다.</item>
     /// <item>끌려갈 때(struggle_protest · struggle_play)는 대사가 없다 — 행동만 고르고 Line 은 빈 글이다.</item>
     /// <item>같은 도깨비·같은 행동에서 바로 앞과 같은 대사는 피한다.</item>
     /// </list>
@@ -36,6 +37,9 @@ namespace Jamkkaebi.Npc
 
         /// <summary>최근 30일에 이만큼 이상 온 손님은 단골로 알아본다.</summary>
         public const int RegularVisitorDays = 2;
+
+        /// <summary>관리 뒤에도 아직 선명이 아닐 때의 감사 대사 변형 (default_lines.json 의 thank_calm·thank_joyful "partial").</summary>
+        public const string PartialCareVariant = "partial";
 
         private const string VerifiedPrefix = "검수된 사실:";
 
@@ -198,11 +202,14 @@ namespace Jamkkaebi.Npc
                 }
             }
 
-            string variant = actionId == NpcActions.AnswerStatus ? StatusVariant(request) : "";
-            List<string> lines = spirit.FindLines(actionId, variant)
-                    ?? spirit.FindLines(actionId, "")
-                    ?? catalog.fallback.FindLines(actionId, variant)
-                    ?? catalog.fallback.FindLines(actionId, "");
+            string variant = actionId == NpcActions.AnswerStatus ? StatusVariant(request) : CareVariant(request, actionId);
+            List<string> lines = variant == PartialCareVariant
+                    // 덜 나았을 때는 일반 감사 풀("약속대로 깨끗해졌네")로 내려가지 않는다 — 다 나은 것처럼 말하게 된다
+                    ? spirit.FindLines(actionId, variant) ?? catalog.fallback.FindLines(actionId, variant)
+                    : spirit.FindLines(actionId, variant)
+                            ?? spirit.FindLines(actionId, "")
+                            ?? catalog.fallback.FindLines(actionId, variant)
+                            ?? catalog.fallback.FindLines(actionId, "");
             if (lines == null)
             {
                 return null;
@@ -247,6 +254,26 @@ namespace Jamkkaebi.Npc
                 return null;
             }
             return (spirit.storyPrefix ?? "") + body + "." + (spirit.storyTail ?? "");
+        }
+
+        /// <summary>
+        /// 관리하기 감사 대사의 변형. 관리 결과(care_result "관리 전→관리 뒤")의 관리 뒤가 선명이 아니면(보통 난이도로 재봉인 → 흐려짐)
+        /// partial — 아직 덜 나은 감사 대사만 쓴다. 그 밖(선명, 결과 모름)은 일반 감사 대사.
+        /// </summary>
+        public static string CareVariant(ReactionRequest request, string actionId)
+        {
+            if (actionId != NpcActions.ThankCalm && actionId != NpcActions.ThankJoyful)
+            {
+                return "";
+            }
+            string result = request.FindFact(NpcFactKeys.CareResult);
+            if (string.IsNullOrEmpty(result))
+            {
+                return "";
+            }
+            int arrow = result.LastIndexOf('→');
+            string after = (arrow >= 0 ? result.Substring(arrow + 1) : result).Trim();
+            return after.Length == 0 || after == "선명" || after.Equals("CLEAR", StringComparison.OrdinalIgnoreCase) ? "" : PartialCareVariant;
         }
 
         private static string StatusVariant(ReactionRequest request)

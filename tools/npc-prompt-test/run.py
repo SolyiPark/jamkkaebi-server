@@ -402,15 +402,30 @@ def is_fixed(scene):
     return all(c["action"] in FIXED_ACTIONS or c["action"] in SILENT_ACTIONS for c in scene["candidates"])
 
 
+def shared_system_head(with_examples):
+    """시스템 메시지의 앞부분: 모든 도깨비에 똑같은 소개와 규칙. C# PromptAssembler.SharedSystemHead 와 같다.
+
+    llama.cpp 는 앞 프롬프트와 글자 하나까지 같은 앞부분을 다시 읽지 않는다. 도깨비마다 다른 것(정체·성격·말투·예시)을 뒤에 두면
+    다른 도깨비로 넘어가도 이 부분은 다시 읽지 않는다 (2026-11-24 기기 시험: 도깨비가 바뀔 때마다 시스템 메시지를 처음부터 읽는 데 15~20초).
+    """
+    rules = [RULE_BOND, RULE_FACTS, RULE_ROLE, RULE_LINE, RULE_SPEECH, RULE_ORDER, RULE_VARY]
+    if with_examples:
+        rules.append(RULE_EXAMPLES)
+    return "\n".join(["너는 모바일 게임 '잠깨비'의 도깨비다.", "", "규칙:", *rules])
+
+
 def system_block(p, with_examples):
     """도깨비마다 고정한 시스템 메시지. 상대·선택지·상황에 따라 바뀌는 것은 넣지 않는다.
 
     llama.cpp 는 프롬프트 앞부분이 글자 하나까지 같으면 이미 읽은 것을 다시 쓴다. 같은 도깨비와 이어 말할 때
     시스템 메시지를 다시 읽지 않도록, 바뀌는 것(상대 태도, 행동에 맞는 칸, 대사 길이, 기억 규칙)은 사용자 메시지에 둔다.
+    모든 도깨비에 같은 규칙은 맨 앞(shared_system_head)에 두어, 다른 도깨비로 넘어갈 때도 그 부분은 다시 읽지 않게 한다.
     """
     lines = [
+        shared_system_head(with_examples),
+        "",
         # 이름은 싣지 않는다: 이름을 읽은 모델이 "훨씬 선명해진 향산이,"·"향산이가 인사해"처럼 자기 이름을 말했다 (자기 이름은 검사가 지운다). 성격·말씨로 도깨비가 갈린다. C# PromptAssembler.SystemFor 와 같다
-        f"너는 모바일 게임 '잠깨비'의 도깨비다. {p['origin']}에 깃든 정령이다.",
+        f"너는 {p['origin']}에 깃든 정령이다.",
         f"성격: {p['traits']}",
     ]
     # '감정 표현' 줄은 싣지 않는다 (2026-11-17 21:45 시험): "기쁘면 말 앞에 '어흠'을 붙인다"를 읽은 모델이 "다시 와 줘서 어흠, 고마워!"·"오늘 또 보니 어흠."처럼 말 가운데에 끼웠고,
@@ -419,10 +434,7 @@ def system_block(p, with_examples):
     if with_examples and p.get("examples"):
         lines.append("대사 예시:")
         lines += [f"- {e}" for e in p["examples"][:PROMPT_EXAMPLES]]
-    rules = [RULE_BOND, RULE_FACTS, RULE_ROLE, RULE_LINE, RULE_SPEECH, RULE_ORDER, RULE_VARY]
-    if with_examples:
-        rules.append(RULE_EXAMPLES)
-    return "\n".join(lines + ["", "규칙:", *rules])
+    return "\n".join(lines)
 
 
 STRANGER = "발굴자"  # 친밀하지 않은 상대를 부르는 호칭 (C# NpcAddress.Stranger)
@@ -565,6 +577,7 @@ ASK_PREFIXES = {
     "days": ("마지막 관리가 {n}일 전이었어.", "관리받은 지 {n}일이 지났어."),
     "faded": ("몸이 흐려졌어.", "몸이 많이 흐려졌어."),
     "resealed": ("몸이 흐려지다 못해 봉인됐어.", "다시 봉인될 만큼 흐려졌어."),
+    "partly": ("아직 몸이 좀 흐려.", "아직 다 맑아지지 않았어."),  # 재봉인에서 한 칸 올라 흐려짐 (partly_restored_ask)
 }
 ASK_LINE_CHARS = 12  # 모델이 쓰는 부탁 문장의 글자 수 목표
 
@@ -586,7 +599,33 @@ def ask_prefix(scene, variation):
     pick = (variation // 2) % 2
     if variant == "days":
         return ASK_PREFIXES["days"][pick].format(n=fact_of(scene, "last_care_days_ago"))
+    if partly_restored_ask(scene):
+        return ASK_PREFIXES["partly"][pick]
     return ASK_PREFIXES["resealed" if fact_of(scene, "clarity") in ("재봉인", "RESEALED") else "faded"][pick]
+
+
+LONG_GAP_DAYS = 7  # C# NpcContextBuilder.LongGapDays
+
+
+def partly_restored_ask(scene):
+    """재봉인에서 한 칸 올라 흐려짐이 된 정령의 안부인지 (사실 칸이 흐려짐이고 마지막 관리가 7일 안). 방금 관리받았으므로 아직 덜 나았다고 말한다.
+    C# PromptAssembler.PartlyRestoredAsk 와 같다."""
+    if not needs_ask(scene) or fact_of(scene, "clarity") not in ("흐려짐", "FADED"):
+        return False
+    days = parse_int(fact_of(scene, "last_care_days_ago"))
+    return days is not None and 0 <= days < LONG_GAP_DAYS
+
+
+def parse_int(text):
+    """C# int.TryParse(기본 NumberStyles.Integer)처럼 읽는다: 앞뒤 공백과 부호 하나를 허용하고 0-9 숫자만. 못 읽으면 None.
+    str.isdigit() 는 " 2 " 를 못 읽고, int() 는 "1_0"·전각 숫자까지 읽어서 C# 과 갈린다."""
+    if text is None:
+        return None
+    match = re.fullmatch(r"[ \t\n\v\f\r]*([+-]?[0-9]+)[ \t\n\v\f\r]*", text)
+    if not match:
+        return None
+    value = int(match.group(1))
+    return value if -2**31 <= value < 2**31 else None
 
 
 def ask_prefix_candidates(scene):
@@ -597,7 +636,7 @@ def ask_prefix_candidates(scene):
     n = fact_of(scene, "last_care_days_ago")
     if n is not None:
         out += [t.format(n=n) for t in ASK_PREFIXES["days"]]
-    out += list(ASK_PREFIXES["faded"]) + list(ASK_PREFIXES["resealed"])
+    out += list(ASK_PREFIXES["faded"]) + list(ASK_PREFIXES["resealed"]) + list(ASK_PREFIXES["partly"])
     return out
 
 
@@ -608,11 +647,43 @@ def strip_ask_prefix(line, prefixes):
     return line
 
 
+# 흐려진 안부의 '이미 한 말' 꼴 전부 — 날 수는 어느 값이든, 칸('{날수}')이어도 맞는다. C# PromptAssembler.AnyAskPrefix 와 같다
+ANY_ASK_PREFIX_RE = re.compile(r"^(?:마지막 관리가 (?:[0-9]+|\{날수\})일 전이었어\.|관리받은 지 (?:[0-9]+|\{날수\})일이 지났어\.|몸이 흐려졌어\.|몸이 많이 흐려졌어\."
+                               r"|몸이 흐려지다 못해 봉인됐어\.|다시 봉인될 만큼 흐려졌어\."
+                               r"|아직 몸이 좀 흐려\.|아직 다 맑아지지 않았어\.)\s*")
+ASK_DAYS_RE = re.compile(r"(?:[0-9]+|\{날수\})일")
+
+
+def ask_prefix_shape(line):
+    """흐려진 안부 대사의 (앞 문장 꼴, 뒤의 부탁 부분). 날 수는 '{날수}일'로 바꿔 꼴을 견준다. 앞 문장이 없으면 (None, 대사). C# PromptAssembler.AskPrefixShape 와 같다."""
+    m = ANY_ASK_PREFIX_RE.match(line or "")
+    if not m:
+        return None, line
+    return ASK_DAYS_RE.sub("{날수}일", m.group(0).strip()), line[m.end():]
+
+
+def similar_line(a, b):
+    """두 대사가 같은 대사인지. 흐려진 안부 대사는 앞 문장까지 포함한 전체 대사로 본다: 앞 문장 꼴이 같으면 부탁 부분끼리,
+    다르거나 한쪽에만 있으면 전체끼리 견준다 (2026-11-24). C# PromptAssembler.SimilarLine 과 같다."""
+    shape_a, rest_a = ask_prefix_shape(a)
+    shape_b, rest_b = ask_prefix_shape(b)
+    return similar(rest_a, rest_b) if shape_a is not None and shape_a == shape_b else similar(a, b)
+
+
+def find_repeat(line, recent):
+    """최근 대사 중 같은 대사(similar_line)가 있으면 (그 대사, 이유), 없으면 None. C# PromptAssembler.FindRepeat 와 같다."""
+    for other in recent or []:
+        why = similar_line(line, other)
+        if why:
+            return other, why
+    return None
+
+
 def ask_task(scene, variation):
     """흐려진 안부의 '할 일' 줄. 재봉인은 깨워 달라고, 흐려짐은 닦아 달라고 이어 부탁한다."""
     if ask_variant(scene, variation) is None:
         return None
-    verb = "깨워" if fact_of(scene, "clarity") in ("재봉인", "RESEALED") else "닦아"
+    verb = "깨워" if fact_of(scene, "clarity") in ("재봉인", "RESEALED") else "마저 닦아" if partly_restored_ask(scene) else "닦아"
     return f"이어서 {verb} 달라고 부탁하는 말을 한다"
 
 
@@ -627,7 +698,8 @@ def ask_variant(scene, variation):
     """흐려진 안부 요청이 말할 사실: "state"(몸이 흐려졌다) · "days"(마지막 관리가 N일 전). 흐려진 안부가 아니면 None."""
     if not needs_ask(scene):
         return None
-    return "days" if variation % 2 == 1 and fact_of(scene, "last_care_days_ago") is not None else "state"
+    # 한 칸 올라 흐려짐이 된 정령은 며칠 전 문장을 쓰지 않는다 ("마지막 관리가 0일 전이었어"는 방치된 것처럼 들린다)
+    return "days" if variation % 2 == 1 and fact_of(scene, "last_care_days_ago") is not None and not partly_restored_ask(scene) else "state"
 
 
 def situation_lines(scene, content, facts_as_sentence, with_memory, variation=0):
@@ -1521,17 +1593,34 @@ NO_RECORD_GREETINGS = ("반가워", "기다렸어", "보고 싶었어", "기뻐"
 LONG_ABSENCE_RE = re.compile("오(?:랜|래간)만")
 
 
+def fix_absence_clause(line, replacement):
+    """'오랜만'이 서술어·마디인 꼴을 고친다 (fix_no_record·fix_long_absence 가 함께 쓴다): "오랜만이야·오랜만이네요·오랜만이구나·오랜만인걸"과 말끝의 "(정말) 오랜만!"은
+    replacement 로 바꾸고, "오랜만이라(서)·오랜만인데·오랜만이니까"로 시작하는 마디는 마디째 지운다. 뒤에 글자가 붙은 꼴("오랜만이라고")은 둔다.
+    2026-11-24 기기 시험: "오랜만이야"만 고쳐, 문장 안에 남은 다른 꼴을 출력 검사가 기록과 어긋남으로 걸렀다. C# NpcLineChecks.FixAbsenceClause 와 같다."""
+    if not line:
+        return line
+    line = line.replace("오랫만", "오랜만")  # 철자 고치기(fix_typos)는 이보다 뒤에 돈다
+    line = re.sub("오(?:랜|래간)만(?:이(?:네요|구나|군요|군|잖아)|인걸)", replacement, line)
+    line = re.sub("오(?:랜|래간)만이(?:야|네|다|에요)", replacement, line)
+    # 마디 뒤에 이어 주는 말("그런지·그래서·그런가·그런데")이 오면 함께 지운다 — "오랜만이라 그런지 반가워!"에서 '그런지'만 남지 않게
+    line = re.sub("오(?:랜|래간)만(?:이(?:라서|라|어서|니까|던데|라도)|인데)(?![가-힣]),? ?(?:(?:그런지|그래서|그런가|그런데)(?![가-힣]),? ?)?", "", line)
+    return re.sub("(?:(?:정말|진짜|참|너무|되게) )?오(?:랜|래간)만(?=[!?.~…]|$)", replacement, line)
+
+
 def fix_no_record(line, variant=0):
     greeting = NO_RECORD_GREETINGS[variant % len(NO_RECORD_GREETINGS)]
-    line = re.sub("오(?:랜|래간)만이(?:야|네|다|에요)", greeting, line or "")
+    line = fix_absence_clause(line or "", greeting)
     # '오랜만에'는 뒤가 혼자 문장이 되는 움직임말(왔·와·찾아·오·들렀·돌아…)일 때만 지운다. "오랜만에 보네"를 지우면 목적어 없는 "보네"가 남는다(2026-11-17 21:45 시험 S23 #1 "어서 와! 보네, 도윤아").
-    # 못 고치는 것은 그대로 두어 출력 검사가 기록과 어긋남으로 거른다
     # "오랜만에 보네"는 지우지 않고 뜻이 같은 말로 바꾼다 (22:07 시험: 남겨 두자 기록과 어긋남으로 거르고 다시 만들어 시도가 늘었다)
     # "오랜만에 보자"도 같다 (22:16 시험 S22 #3: 못 고쳐 기록과 어긋남으로 걸렸다)
-    line = re.sub("오(?:랜|래간)만에 ?(?:보는구나|보네|보는걸|보자(?![가-힣])|만났네|만났구나|마주쳤네)", greeting, line)
+    line = re.sub("오(?:랜|래간)만에 ?(?:보는구나|보네|보는걸|보는군|보자(?![가-힣])|봤네|봤구나|봐(?![가-힣])|만났네|만났구나|마주쳤네)", greeting, line)
     line = re.sub("오(?:랜|래간)만에 ?보니", "만나니", line)
     line = re.sub("오(?:랜|래간)만에 ?봐서", "만나서", line)
     line = re.sub("오(?:랜|래간)만에 ?(?=(?:왔|와|오|찾아|들렀|돌아|방문|놀러|만나|만났|마주))", "", line)
+    # 문장 안의 그 밖의 '오랜만에'도 꾸밈말이라 지워도 말이 된다 ("드디어 오랜만에 하늘이 나를 찾았네" → "드디어 하늘이 나를 찾았네") (2026-11-24).
+    # 목적어 없이 '보다'만 남는 꼴("오랜만에 보러")은 그대로 두어 출력 검사가 거른다.
+    # 뒤에 띄어쓰기·쉼표·끝이 올 때만 지운다 — "오랜만에야 왔구나"의 '오랜만에'를 지우면 "야 왔구나" 토막이 남는다
+    line = re.sub("(?:(?:정말|진짜|참|너무|되게) )?오(?:랜|래간)만에(?=[ ,]|$)(?!,? ?[보봐봤]),? ?", "", line)
     return re.sub("(?<![가-힣])(?:또|다시) ?(?=왔)", "", line)
 
 
@@ -1543,7 +1632,7 @@ def fix_long_absence(line, visit_days):
     if visit_days.strip() == "오늘":
         # 처음 온 친구: "오랜만이야"는 "반가워", "오랜만에 와 줘서"는 "와 줘서" (지난 만남을 지어내지 않는다). "오랜만에 보니"는 "만나니" — 지우면 "보니"만 남는다
         line = re.sub("오(?:랜|래간)만에 ?보니", "만나니", line)
-        line = re.sub("오(?:랜|래간)만이(?:야|네|다|에요)", "반가워", line)
+        line = fix_absence_clause(line, "반가워")
         return re.sub("오(?:랜|래간)만에 ?", "", line)
     gaps = [d for _, d in day_refs(visit_days, True) if d > 0]
     if not gaps or min(gaps) >= 7:
@@ -1552,7 +1641,7 @@ def fix_long_absence(line, visit_days):
     again = "또 왔네" if not re.search("(?<![가-힣])또(?![가-힣])", line) else "반가워"
     # "또 왔구나! 오랜만에 보니 반가워"의 '오랜만에'를 지우면 "또 왔구나! 보니 반가워"처럼 '보니'만 남는다 (2026-11-18 --live-store) → "다시 보니"
     line = re.sub("오(?:랜|래간)만에 ?보니", "다시 보니", line)
-    line = re.sub("오(?:랜|래간)만이(?:야|네|다|에요)", again, line)
+    line = fix_absence_clause(line, again)
     if re.search("(?<![가-힣])또(?![가-힣])", line):
         line = re.sub("오(?:랜|래간)만에 ?", "", line)  # 이미 "또 왔네"라고 했으면 "또 왔네, 또 와서"처럼 겹치지 않게 지운다 (2026-11-17 22:27 시험 S06 #1)
     else:
@@ -2515,7 +2604,9 @@ def scene_visits(scene):
 # 인사(탭·손님 맞이)에 붙은 지어낸 사정·캐묻기 (2026-11-17 22:27 시험): "뭘 찾으러 왔어?"·"무슨 일인지 궁금하네"·"오늘은 좀 일찍 왔구나"·"향로랑 친구들 보고 싶었어?"는
 # 도깨비가 모르는 사정을 지어낸 것이다. 인사는 반가움만 말하면 되므로, 이런 마디는 지우고 반가움 마디만 남긴다. 다 지워 남는 말이 없으면 거른다. C# NpcLineChecks.FixGreetingTail·GreetingProbe 와 같다
 GREETING_ACTIONS = ("greet", "wander_greet", "wander_recall")
-PROBE_RE = re.compile("무슨|뭘|뭐 |뭐하|왜|궁금|길래|일찍|늦게|찾으러|하러|급하게|보고 ?싶었|오늘은 좀|처음 온 친구야|어떤 일")
+# '찾으러'는 "뭘 찾으러 왔어?"만 거른다. "날 찾으러 왔구나"·"나를 찾으러 왔네"는 반가움이라 둔다 (2026-11-25). C# NpcLineChecks.Probe 와 같다
+# 날·나를은 따로 선 낱말일 때만 뺀다 (앞이 글의 처음이거나 한글이 아님) — "전날 찾으러"·"하나를 찾으러"는 거른다
+PROBE_RE = re.compile("무슨|뭘|뭐 |뭐하|왜|궁금|길래|일찍|늦게|(?<![^가-힣]날 )(?<!^날 )(?<![^가-힣]날)(?<!^날)(?<![^가-힣]나를 )(?<!^나를 )(?<![^가-힣]나를)(?<!^나를)찾으러|하러|급하게|보고 ?싶었|오늘은 좀|처음 온 친구야|어떤 일")
 CLAUSE_END = ",，.!?…~"
 
 
@@ -2539,11 +2630,11 @@ def clauses_of(line):
 
 def fix_greeting_tail(line):
     parts = clauses_of(line or "")
-    keep = [p for p in parts if not PROBE_RE.search(p)]
+    keep = [p for p in parts if find_probe(p) is None]
     if keep and len(keep) < len(parts) and len(PUNCT_RE.sub("", "".join(keep))) >= 3:
         text = re.sub("[,，]+$", "", " ".join(keep))
         line = text if re.search("[.!?…~]$", text) else text + "."
-    if line and re.search(r"\?+$", line) and not PROBE_RE.search(line) and re.search("반가|환영|어서|안녕|왔", line):
+    if line and re.search(r"\?+$", line) and find_probe(line) is None and re.search("반가|환영|어서|안녕|왔", line):
         line = re.sub(r"\?+$", "!", line)  # "안녕, 반가워?"는 묻는 말이 아니라 인사다
     return line
 
@@ -2552,15 +2643,21 @@ def greeting_probe(line, action):
     """인사 행동의 대사에 지어낸 사정·캐묻기가 남았으면 그 말 (남은 것이 없으면 None)."""
     if action not in GREETING_ACTIONS or not line:
         return None
-    found = PROBE_RE.search(line)
-    if found:
-        return found.group(0)
-    return None
+    return find_probe(line)
 
 
-def game_problem(row, persona, recent, scene=None):
+def find_probe(text):
+    """지어낸 사정·캐묻기 말 (없으면 None). 가로 띄어쓰기가 여럿 이어지면 하나로 보고 찾는다 ("나를  찾으러"도 반가움). C# NpcLineChecks.FindProbe 와 같다."""
+    if not text:
+        return None
+    found = PROBE_RE.search(re.sub(r"[ \t]+", " ", text))
+    return found.group(0) if found else None
+
+
+def game_problem(row, persona, recent, scene=None, variation=0, max_len=None, reevaluate=None):
     """게임의 출력 검사(NpcOutputValidator, 페르소나를 받은 것)에 걸리는 이유. 통과하면 None. 검사 순서도 같다.
-    recent 는 그 도깨비가 최근에 띄운 대사다 (게임의 ReactionRequest.RecentLines)."""
+    recent 는 그 도깨비가 최근에 띄운 대사다 (게임의 ReactionRequest.RecentLines). variation 은 그 요청의 번호(게임의 ReactionRequest.Variation)다.
+    흐려진 안부의 부탁 부분이 최근 대사와 같으면 row["line"] 을 겹치지 않는 코드의 부탁 문장으로 바꾸고(row["ask_filled"]) 통과시킨다 — C# 출력 검사도 대사를 바꿔 돌려준다."""
     if not row.get("json_ok"):
         return "JSON 아님"
     if not row.get("action_ok"):
@@ -2641,11 +2738,47 @@ def game_problem(row, persona, recent, scene=None):
     repeated_word = inner_repeat(line)
     if repeated_word:
         return f"한 대사 안의 반복 '{repeated_word}'"
-    prefixes = ask_prefix_candidates(scene) if scene is not None else []
-    same = find_similar(strip_ask_prefix(line, prefixes), [strip_ask_prefix(r, prefixes) for r in recent or []]) if prefixes else find_similar(line, recent)
+    # 흐려진 안부는 앞 문장까지 포함한 전체 대사로 견준다 (앞 문장이 같으면 부탁 부분끼리, 다르면 전체끼리). C# NpcOutputValidator 와 같다
+    same = find_repeat(line, recent)
+    if same and scene is not None and needs_ask(scene):
+        # 흐려진 안부의 부탁 부분이 최근 대사와 같으면 거르지 않고, 코드의 부탁 문장 중 겹치지 않는 것으로 바꾼다 (2026-11-25). C# NpcOutputValidator 와 같다.
+        # 바꾼 대사는 모델이 쓴 것처럼 다시 평가해(reevaluate) 모든 검사를 거친 뒤 통과한 첫 것만 쓰고, 대사에 매긴 칸(길이·호칭·…)도 그 대사의 것으로 바꾼다.
+        # 모델 출력(raw)·토큰 지표는 그대로 둔다. reevaluate 가 없으면 바꾸지 않는다
+        shape, rest = ask_prefix_shape(line)
+        if shape is not None and reevaluate is not None:
+            prefix = line[:len(line) - len(rest)].strip()
+            for ask in ask_fallback_candidates(scene, variation, prefix, recent, max_len):
+                replaced = dict(row)
+                replaced.update(reevaluate(ask))
+                # 토큰 한도에 끊겼는지는 모델 출력의 지표다 — 바꿔 넣은 부탁(끊기지 않은 것으로 평가)의 값으로 덮지 않는다
+                replaced["truncated"] = row.get("truncated", False)
+                if game_problem(replaced, persona, recent, scene, variation, max_len, None) is None:
+                    row.update(replaced)
+                    row["ask_filled"] = True
+                    return None
     if same:
         return f"반복 '{same[0]}' ({same[1]})"
     return None
+
+
+def ask_fallback_avoiding(scene, variation, prefix, recent, max_len=None):
+    """코드의 부탁 문장 중 앞 문장을 붙인 전체 대사가 최근 대사와 겹치지 않고 max_len 안에 드는 첫 것 (요청 번호에서부터 돌린다). 다 겹치거나 길면 None.
+    C# PromptAssembler.AskFallbackAvoiding 과 같다 (max_len 은 출력 검사의 길이 제한 = 대사 글자 수 + LENGTH_TOLERANCE)."""
+    candidates = ask_fallback_candidates(scene, variation, prefix, recent, max_len)
+    return candidates[0] if candidates else None
+
+
+def ask_fallback_candidates(scene, variation, prefix, recent, max_len=None):
+    """ask_fallback_avoiding 이 고를 수 있는 부탁 문장 전부 (고르는 차례대로). C# PromptAssembler.AskFallbackCandidates 와 같다."""
+    verb = "깨워" if fact_of(scene, "clarity") in ("재봉인", "RESEALED") else "닦아"
+    start = (variation + scene["relicId"]) % len(ASK_FALLBACKS)
+    out = []
+    for k in range(len(ASK_FALLBACKS)):
+        ask = ASK_FALLBACKS[(start + k) % len(ASK_FALLBACKS)].format(v=verb)
+        full = prefix + " " + ask
+        if (max_len is None or len(full) <= max_len) and find_repeat(full, recent) is None:
+            out.append(ask)
+    return out
 
 
 def speech_fixed(said, action, scene, persona, no_record_variant=0):
@@ -2841,6 +2974,14 @@ def fact_of(scene, key):
     return next((str(f["value"]) for f in scene["facts"] if f["key"] == key), None)
 
 
+def care_partial(result):
+    """관리 결과("관리 전→관리 뒤")의 관리 뒤가 선명이 아닌지 (보통 난이도로 재봉인 → 흐려짐). 결과를 모르면 False. C# RuleBasedReactionGenerator.CareVariant 와 같다."""
+    if not result:
+        return False
+    after = result.rsplit("→", 1)[-1].strip()
+    return after not in ("", "선명") and after.upper() != "CLEAR"
+
+
 def pick_fallback(content, scene, recent):
     """기본 대사로 대신할 때 게임이 띄울 대사 (RuleBasedReactionGenerator 를 흉내 낸다). 기본 대사 파일이 없으면 None.
     후보 고르기(손님 방문 횟수 → preferredActions → 첫 후보)·안부 변형·최근 대사 피하기·바로 앞 대사 피하기가 같다. 고르기는 무작위다."""
@@ -2864,7 +3005,11 @@ def pick_fallback(content, scene, recent):
     def find(lines_of, variant_name):
         return next((p["lines"] for p in lines_of.get("pools", [])
                      if p["actionId"] == action and p["variant"] == variant_name), None)
-    lines = find(spirit, kind) or find(spirit, "") or find(data["fallback"], kind) or find(data["fallback"], "")
+    if action in ("thank_calm", "thank_joyful") and care_partial(fact_of(scene, "care_result")):
+        # 관리 뒤에도 아직 선명이 아니면 덜 나은 감사 대사만 — 일반 감사 풀로 내려가지 않는다 (C# RuleBasedReactionGenerator.CareVariant 와 같다)
+        lines = find(spirit, "partial") or find(data["fallback"], "partial")
+    else:
+        lines = find(spirit, kind) or find(spirit, "") or find(data["fallback"], kind) or find(data["fallback"], "")
     if not lines:
         return None
     key = f"{scene['relicId']}:{action}:{kind}"
@@ -2895,7 +3040,13 @@ def run_enforced(args, content, model, variant, scene, persona, rep, seed, recen
             total = add_metrics(total, metrics) if total else metrics
         row = make_row(args, content, run_at, model, variant, scene, persona, rep, obj, raw, metrics, pure, error,
                        truncated, rep - 1 + attempt - 1, recent)
-        problem = f"오류 {error[:60]}" if error else game_problem(row, persona, recent, scene)
+        variation = rep - 1 + attempt - 1
+        # 흐려진 안부의 부탁을 바꿔 넣을 때, 그 대사를 모델이 쓴 것처럼 다시 평가한다 (대사에 매긴 칸만 — 모델 출력·토큰 지표는 그대로)
+        reevaluate = (lambda ask, _row=row, _variation=variation: evaluate({"action": _row.get("action", ""), "target": _row.get("target", ""), "line": ask},
+                                                                          scene, persona, max_chars(args, scene), content["forbidden"], False,
+                                                                          getattr(args, "normalize", True), _variation, recent))
+        problem = f"오류 {error[:60]}" if error else game_problem(row, persona, recent, scene, variation,
+                                                                                  max_chars(args, scene) + LENGTH_TOLERANCE, reevaluate)
         if problem:
             rejected.append(f"{attempt}차 {problem}")
         if error or problem is None or attempt == attempts:

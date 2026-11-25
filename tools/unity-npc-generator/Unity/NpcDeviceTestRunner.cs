@@ -67,6 +67,10 @@ namespace Jamkkaebi.Npc
         [Tooltip("시스템 프롬프트 미리 읽기를 기다리는 최대 시간(초). 넘으면 멈추고 그대로 요청한다 (모델이 묶여도 시험이 그 장면에서 멈추지 않게). 느린 기기는 길게")]
         public float prepareTimeoutSeconds = 180f;
 
+        [Tooltip("시스템 프롬프트를 읽은 모델의 기억(KV 슬롯)을 파일(persistentDataPath/npc_kv/)로 남겼다가, 다음에 그 도깨비를 미리 읽을 때 읽는 대신 되살린다 (LlmUnityOptions.SaveSystemState). "
+            + "모델의 기억 칸은 하나라 A→B→A 로만 바뀌어도 A 를 다시 읽는데, 이것으로 메모리를 더 쓰지 않고 다시 읽기를 줄인다. 끄면 예전처럼 읽는다 (비교용). CSV 의 '기억' 열에 결과가 적힌다")]
+        public bool saveSystemState = true;
+
         [Header("미리 만들기 (칸 있는 대사)")]
         [Tooltip("요청 전에 장면마다 대사를 미리 만들어 둔다. 서버 값(시간대·호칭·방문 횟수)에 달린 말은 칸으로 남겨 두고, 요청 때 실제 값을 넣어 모델 없이 바로 완성한다. 끝난 뒤 요청해 적중률과 시간을 잰다")]
         public bool prefetchFirst = true;
@@ -89,9 +93,17 @@ namespace Jamkkaebi.Npc
         [Tooltip("대사를 띄운 뒤 그 상황의 칸 있는 대사를 쓴 만큼 뒤에서 다시 만든다 (NpcRequestManager.RefillAfterUse)")]
         public bool refillAfterUse = true;
 
-        [Tooltip("요청·미리 읽기가 끝난 뒤 이만큼(초) 아무 일이 없어야 뒤에서 미리 만들기·다시 만들기를 새로 시작한다 (NpcRequestManager.PrefetchIdleDelay, 게임 기본 10초). "
-            + "0 이면 요청이 끝나자마자 만든다 — 그러면 다음 장면의 미리 읽기가 그 생성 뒤에 줄을 선다 (2026-11-23 시험)")]
-        public float prefetchIdleSeconds = 10f;
+        [Tooltip("요청·미리 읽기가 끝난 뒤 이만큼(초) 아무 일이 없어야 뒤에서 미리 만들기·다시 만들기를 새로 시작한다 (NpcRequestManager.PrefetchIdleDelay, 게임 기본 3초). "
+            + "부딪혀도 플레이어가 먼저다(뒤에서 만들기는 한 조각 안에 비켜 준다) — 이 값은 부딪힘을 줄일 뿐이다. 예전 기본 10초와 비교하려면 10 으로 두고 Adaptive Idle 도 끈다 — 켜 두면 빨리 만드는 기기에서 더 짧게 줄어든다 (2026-11-25)")]
+        public float prefetchIdleSeconds = 3f;
+
+        [Tooltip("다른 도깨비의 미리 만들기·다시 만들기를 새로 시작하기 전에 쉬는 시간(초) (NpcRequestManager.PrefetchSwitchIdleDelay, 게임 기본 30초). "
+            + "뒤에서 만들기는 지금 모델이 읽어 둔 도깨비의 작업을 먼저 고르고, 다른 도깨비의 작업은 이만큼 쉰 뒤에만 시작한다 — 모델이 기억하던 시스템 프롬프트를 지우지 않게 (2026-11-24 시험)")]
+        public float prefetchSwitchIdleSeconds = 30f;
+
+        [Tooltip("뒤에서 만들기 전 쉬는 시간을 기기 속도에 맞춰 줄인다 (NpcRequestManager.AdaptiveIdleDelay): 미리 만들기 한 번의 시간 × 2 가 Prefetch Idle Seconds 보다 짧으면 그만큼만 쉰다. "
+            + "한 번에 10초가 넘는 폰은 예전과 같다. 끄면 늘 Prefetch Idle Seconds 를 다 쉰다 (비교용)")]
+        public bool adaptiveIdle = true;
 
         [Tooltip("장면 사이에 쉬는 시간(초). 플레이어가 잠깐 쉬는 것처럼 둔다. 0 이면 쉬지 않고 이어 가서 다시 만들기가 돌 틈이 없다 — "
             + "다시 만들기의 적중을 재려면 Prefetch Idle Seconds + 대사 하나 만드는 시간(기기에서 10~20초)보다 길게 둔다. 쉬는 시간은 CSV 의 시간에 넣지 않는다")]
@@ -236,9 +248,10 @@ namespace Jamkkaebi.Npc
             var run = new NpcRequestManager(slm, rule)
             {
                 SlmTimeout = TimeSpan.FromSeconds(slmTimeoutSeconds), PrefetchTimeout = TimeSpan.FromSeconds(prefetchTimeoutSeconds), RefillAfterUse = refillAfterUse,
-                PrefetchIdleDelay = TimeSpan.FromSeconds(Math.Max(0f, prefetchIdleSeconds))
+                PrefetchIdleDelay = TimeSpan.FromSeconds(Math.Max(0f, prefetchIdleSeconds)), PrefetchSwitchIdleDelay = TimeSpan.FromSeconds(Math.Max(0f, prefetchSwitchIdleSeconds)),
+                AdaptiveIdleDelay = adaptiveIdle
             };
-            Say("뒤에서 만들기 전 쉬는 시간 " + Math.Max(0f, prefetchIdleSeconds) + "초, 장면 사이 쉬는 시간 " + Math.Max(0f, sceneGapSeconds) + "초");
+            Say("뒤에서 만들기 전 쉬는 시간 " + Math.Max(0f, prefetchIdleSeconds) + "초(다른 도깨비는 " + Math.Max(0f, prefetchSwitchIdleSeconds) + "초), 장면 사이 쉬는 시간 " + Math.Max(0f, sceneGapSeconds) + "초");
             manager = run;
             if (useLineStore)
             {
@@ -254,7 +267,7 @@ namespace Jamkkaebi.Npc
             string path = Path.Combine(Application.persistentDataPath,
                     "npc_device_test_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".csv");
             // 미리읽기ms 는 끝난 미리 읽기만 (시간 초과면 -1), 시간 초과는 미리읽기초과ms 에 기다린 시간을 따로 적는다
-            File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값,미리읽기초과ms\n", new UTF8Encoding(true)); // BOM: 엑셀에서 한글이 안 깨진다
+            File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값,미리읽기초과ms,기억\n", new UTF8Encoding(true)); // BOM: 엑셀에서 한글이 안 깨진다
             csvPath = path;
             Say("CSV: " + path + " (장면마다 이어 쓴다)");
 
@@ -294,6 +307,8 @@ namespace Jamkkaebi.Npc
             var slmTimes = new List<long>();
             var firstTokens = new List<long>();
             var prepareTimes = new List<long>();
+            var restoredPrepares = new List<long>(); // 저장해 둔 기억을 되살린 미리 읽기의 시간
+            var readPrepares = new List<long>();     // 시스템 프롬프트를 실제로 읽은 미리 읽기의 시간 (같은 도깨비가 이어져 바로 끝난 것은 뺀다)
             var reasons = new Dictionary<string, int>();
             int total = 0;
             int fixedCount = 0;
@@ -320,6 +335,11 @@ namespace Jamkkaebi.Npc
                     // 게임에서 탭해 확대할 때처럼 시스템 프롬프트를 먼저 읽힌다. 같은 도깨비가 이어지면 바로 끝난다
                     long prepareMs = -1;        // 끝난 미리 읽기의 시간. 시간 초과·안 함이면 -1 (통계에 넣지 않는다)
                     long prepareTimedOutMs = -1; // 시간 초과면 기다린 시간
+                    // 기억(KV 슬롯) 저장·복원이 이 장면에서 무엇을 했는지 (CSV 의 '기억' 열). 공용 횟수(StateLoads·StateSaves)는 뒤에서 만들기의 것까지 세므로 쓰지 않고,
+                    // 이 미리 읽기·요청이 남긴 기록(LastPrepare·LastCall 이 새로 바뀌었는지와 그 기록의 되살림·저장 여부)으로 정한다
+                    LlmUnityModelBackend llm = model as LlmUnityModelBackend;
+                    string kvNote = "";
+                    LlmUnityCall prepareBefore = llm != null ? llm.LastPrepare : null;
                     if (prepareSystemPrompt && slm != null && slm.IsReady && !NpcActions.SkipsModel(request.Candidates))
                     {
                         Stopwatch preparing = Stopwatch.StartNew();
@@ -337,7 +357,7 @@ namespace Jamkkaebi.Npc
                                 prepareCts.Dispose();
                             }
                         };
-                        Task prepareTask = run.PrepareAsync(scene.RelicId, prepareCts.Token);
+                        Task<NpcPrepareOutcome> prepareTask = run.PrepareAsync(scene.RelicId, prepareCts.Token);
                         prepareTask.ContinueWith(t =>
                         {
                             if (t.IsFaulted)
@@ -363,10 +383,36 @@ namespace Jamkkaebi.Npc
                         }
                         // 화면을 닫는 중이면(OnDestroy 가 ct 를 취소) 다른 것을 건드리기 전에 멈춘다
                         ct.ThrowIfCancellationRequested();
-                        if (prepared)
+                        // PrepareAsync 는 예외를 던지지 않고 어떻게 끝났는지 돌려준다. 실패·취소·맡김·안 함은 끝난 미리 읽기가 아니라 미리읽기ms 를 비우고(-1) 통계에서도 뺀다 —
+                        // 예전에는 백엔드가 LastPrepare 를 적기 전에 실패해도 기록이 안 바뀌어 '이미 읽힘'으로 적혔고, 맡긴 시간이 빨리 끝난 미리 읽기로 CSV 에 남았다 (CodeRabbit 리뷰)
+                        NpcPrepareOutcome outcome = !prepared ? NpcPrepareOutcome.Cancelled
+                                : prepareTask.Status == TaskStatus.RanToCompletion ? prepareTask.Result : NpcPrepareOutcome.Failed;
+                        if (prepared && outcome != NpcPrepareOutcome.Completed)
+                        {
+                            kvNote = outcome == NpcPrepareOutcome.Deferred ? "뒤에서 만들기에 맡김"   // 같은 도깨비의 생성이 시스템 메시지를 읽는다 — 다 읽힌 것은 아니다
+                                    : outcome == NpcPrepareOutcome.Failed ? "미리읽기 실패(" + preparing.ElapsedMilliseconds + "ms)"
+                                    : outcome == NpcPrepareOutcome.Cancelled ? "미리읽기 취소(" + preparing.ElapsedMilliseconds + "ms)"
+                                    : "미리읽기 안 함";
+                        }
+                        else if (prepared)
                         {
                             prepareMs = preparing.ElapsedMilliseconds;
                             prepareTimes.Add(prepareMs);
+                            if (llm != null)
+                            {
+                                bool didPrepare = llm.LastPrepare != prepareBefore; // 이 미리 읽기가 모델에서 무언가를 했다 (이미 읽힌 것이면 기록이 안 바뀐다)
+                                kvNote = !didPrepare ? "이미 읽힘"
+                                        : llm.LastPrepareRestored ? "미리읽기 되살림"
+                                        : llm.LastPrepareSaved ? "미리읽기 읽고 저장" : "미리읽기 읽음";
+                                if (kvNote == "미리읽기 되살림")
+                                {
+                                    restoredPrepares.Add(prepareMs);
+                                }
+                                else if (kvNote != "이미 읽힘")
+                                {
+                                    readPrepares.Add(prepareMs);
+                                }
+                            }
                         }
                         else
                         {
@@ -376,9 +422,15 @@ namespace Jamkkaebi.Npc
                         }
                     }
 
+                    LlmUnityCall callBefore = llm != null ? llm.LastCall : null;
                     Stopwatch watch = Stopwatch.StartNew();
                     NpcResponse response = await run.RequestAsync(request, ct);
                     watch.Stop();
+                    // 이 요청의 생성이 끝나 LastCall 을 새로 남겼고(뒤에서 만들기는 남기지 않는다) 그 생성이 기억을 되살렸을 때만
+                    if (llm != null && llm.LastCall != callBefore && llm.LastCallRestored)
+                    {
+                        kvNote += (kvNote.Length > 0 ? ", " : "") + "요청 전 되살림"; // 모델이 다른 도깨비를 기억하던 채로 온 요청 (미리 읽기를 안 했거나 그 사이 바뀜)
+                    }
 
                     long memory = MemoryMb();
                     peak = Math.Max(peak, memory);
@@ -431,7 +483,8 @@ namespace Jamkkaebi.Npc
                     Say(scene.Id + " " + source + " " + action + " " + line + "  (" + watch.ElapsedMilliseconds + "ms"
                         + (prepareMs >= 0 ? ", 미리 읽기 " + prepareMs + "ms" : "")
                         + (prepareTimedOutMs >= 0 ? ", 미리 읽기 시간 초과(" + prepareTimedOutMs + "ms 기다림)" : "")
-                        + (firstToken >= 0 ? ", 첫 응답 " + firstToken + "ms" : "") + ")"
+                        + (firstToken >= 0 ? ", 첫 응답 " + firstToken + "ms" : "")
+                        + (kvNote.Length > 0 ? ", " + kvNote : "") + ")"
                         + (fromSlm && response.Reaction.Note == null ? "" : "  ← " + response.Note));
                     var row = new StringBuilder();
                     row.Append(Csv(scene.Id)).Append(',').Append(rep).Append(',').Append(source).Append(',').Append(action).Append(',')
@@ -439,7 +492,8 @@ namespace Jamkkaebi.Npc
                         .Append(prepareMs).Append(',').Append(firstToken).Append(',').Append(watch.ElapsedMilliseconds).Append(',')
                         .Append(memory).Append(',').Append(Csv(response.Note)).Append(',').Append(prefetched ? "O" : "X").Append(',')
                         .Append(Csv(prefetched && response.Reaction != null ? response.Reaction.Note : "")).Append(',').Append(Csv(retargeted)).Append(',')
-                        .Append(prepareTimedOutMs >= 0 ? prepareTimedOutMs.ToString(CultureInfo.InvariantCulture) : "").Append('\n');
+                        .Append(prepareTimedOutMs >= 0 ? prepareTimedOutMs.ToString(CultureInfo.InvariantCulture) : "").Append(',')
+                        .Append(Csv(kvNote)).Append('\n');
                     AppendCsv(path, row.ToString());
 
                     // 플레이어가 잠깐 쉬는 틈 — 다시 만들기는 이 사이에 돈다. 시간에는 넣지 않는다 (다음 장면의 미리 읽기부터 잰다)
@@ -451,6 +505,7 @@ namespace Jamkkaebi.Npc
             }
 
             Say("=== 요약 ===");
+            LlmUnityModelBackend llm0 = model as LlmUnityModelBackend;
             Say("SLM 대사 " + slmCount + "/" + (total - fixedCount) + " (이야기 " + fixedCount + "건은 정해진 대사, 문장 잘라 씀 " + trimmed + "건"
                 + ", 다듬어 바로 씀 " + speechFixed + "건)"
                 + ", 기대 행동 일치 " + expectedOk + "/" + total);
@@ -458,6 +513,13 @@ namespace Jamkkaebi.Npc
             {
                 Say("시스템 프롬프트 미리 읽기: 중앙값 " + Percentile(prepareTimes, 0.5) + "ms, 최대 " + prepareTimes.Max() + "ms"
                     + " (같은 도깨비가 이어지면 0 에 가깝다, 끝난 " + prepareTimes.Count + "건만)");
+            }
+            if (restoredPrepares.Count > 0 || readPrepares.Count > 0)
+            {
+                // 되살림이 읽기보다 훨씬 짧아야 한다. 되살린 뒤의 첫 응답이 읽은 뒤와 비슷하면 되살린 기억을 llama.cpp 가 앞부분으로 다시 쓰고 있다는 뜻이다
+                Say("기억 되살림 " + restoredPrepares.Count + "건" + (restoredPrepares.Count > 0 ? " (중앙값 " + Percentile(restoredPrepares, 0.5) + "ms)" : "")
+                    + ", 실제로 읽음 " + readPrepares.Count + "건" + (readPrepares.Count > 0 ? " (중앙값 " + Percentile(readPrepares, 0.5) + "ms)" : "")
+                    + (llm0 != null ? ", 저장 " + llm0.StateSaves + "번" : "") + (saveSystemState ? "" : " — 기억 저장 꺼짐"));
             }
             if (prepareTimeouts > 0)
             {
@@ -507,6 +569,7 @@ namespace Jamkkaebi.Npc
                         NumGpuLayers = gpuLayers >= 0 ? gpuLayers : (Application.platform == RuntimePlatform.IPhonePlayer ? 99 : 0),
                         NumThreads = threads,
                         Grammar = grammar,
+                        SaveSystemState = saveSystemState,
                         DownloadProgress = p => status = "모델 내려받는 중 " + (int)(p * 100) + "%"
                     });
 #else
