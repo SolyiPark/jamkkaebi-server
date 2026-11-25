@@ -1,6 +1,6 @@
 // 실기기 시험(Unity/NpcDeviceTestRunner.cs)을 Unity 없이 PC 에서 돌린다. 모델은 LM Studio 로 부른다.
 //
-//   verify.bat --device [--url http://127.0.0.1:1234] [--model kanana-1.5-2.1b-instruct-2505] [--repeat 4] [--gap 0] [--idle 10]
+//   verify.bat --device [--url http://127.0.0.1:1234] [--model kanana-1.5-2.1b-instruct-2505] [--repeat 4] [--gap 0] [--idle 3] [--switch-idle 30] [--no-adaptive-idle]
 //                       [--seed 0] [--fresh] [--per-scene 2] [--no-prefetch] [--no-store] [--no-refill] [--no-prepare] [--same-server-values]
 //
 // 흐름은 실기기 시험과 같다: 파일(npc_lines.txt)을 읽고 → 장면마다 칸 있는 대사를 미리 만들고 → 장면을 반복해 요청한다.
@@ -31,7 +31,9 @@ public static class DeviceRun
         public string Model = "kanana-1.5-2.1b-instruct-2505";
         public int Repeat = 4;
         public double GapSeconds = 0;
-        public double IdleSeconds = 10;
+        public double IdleSeconds = 3;
+        public double SwitchIdleSeconds = 30;
+        public bool AdaptiveIdle = true;
         public int? Seed;
         public bool Fresh;
         public int PerScene = 2;
@@ -109,6 +111,8 @@ public static class DeviceRun
                 case "--repeat": s.Repeat = Math.Max(1, (int)Number(args, ref i)); break;
                 case "--gap": s.GapSeconds = Math.Max(0, Number(args, ref i)); break;
                 case "--idle": s.IdleSeconds = Math.Max(0, Number(args, ref i)); break;
+                case "--switch-idle": s.SwitchIdleSeconds = Math.Max(0, Number(args, ref i)); break;
+                case "--no-adaptive-idle": s.AdaptiveIdle = false; break;
                 case "--seed": s.Seed = (int)Number(args, ref i); break;
                 case "--per-scene": s.PerScene = Math.Max(1, (int)Number(args, ref i)); break;
                 case "--slm-timeout": s.SlmTimeoutSeconds = Math.Max(1, Number(args, ref i)); break;
@@ -152,7 +156,7 @@ public static class DeviceRun
                                      DefaultLineCatalog lineCatalog, ForbiddenCatalog forbidden, CancellationToken ct)
     {
         Say("=== 실기기 시험을 PC 에서 (LM Studio " + s.Url + ", " + s.Model + ") ===");
-        Say("반복 " + s.Repeat + ", 장면 사이 쉬는 시간 " + s.GapSeconds + "초, 뒤에서 만들기 전 쉬는 시간 " + s.IdleSeconds + "초, seed "
+        Say("반복 " + s.Repeat + ", 장면 사이 쉬는 시간 " + s.GapSeconds + "초, 뒤에서 만들기 전 쉬는 시간 " + s.IdleSeconds + "초(다른 도깨비는 " + s.SwitchIdleSeconds + "초, 기기 속도에 맞춰 줄이기 " + Onoff(s.AdaptiveIdle) + "), seed "
             + (s.Seed.HasValue ? s.Seed.Value + " (매번 같음 — 고치기 전 LLMUnity 와 같은 상황)" : "없음 (LM Studio 가 매번 무작위)"));
         Say("미리 만들기 " + Onoff(s.Prefetch) + " (상황당 " + s.PerScene + "개), 대사 파일 " + Onoff(s.Store) + ", 쓴 만큼 다시 만들기 " + Onoff(s.Refill)
             + ", 미리 읽기 " + Onoff(s.Prepare) + ", 요청 때 서버 값 바꾸기 " + Onoff(s.OtherServerValues));
@@ -186,7 +190,8 @@ public static class DeviceRun
         var run = new NpcRequestManager(slm, rule)
         {
             SlmTimeout = TimeSpan.FromSeconds(s.SlmTimeoutSeconds), PrefetchTimeout = TimeSpan.FromSeconds(s.PrefetchTimeoutSeconds), RefillAfterUse = s.Refill,
-            PrefetchIdleDelay = TimeSpan.FromSeconds(s.IdleSeconds)
+            PrefetchIdleDelay = TimeSpan.FromSeconds(s.IdleSeconds), PrefetchSwitchIdleDelay = TimeSpan.FromSeconds(s.SwitchIdleSeconds),
+            AdaptiveIdleDelay = s.AdaptiveIdle
         };
         try
         {
@@ -228,7 +233,7 @@ public static class DeviceRun
         }
 
         string path = Path.Combine(dir, "npc_device_test_" + stamp + ".csv");
-        File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값,미리읽기초과ms\n", new UTF8Encoding(true));
+        File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값,미리읽기초과ms,기억\n", new UTF8Encoding(true));
         Say("CSV: " + path + " (장면마다 이어 쓴다), 로그: " + logPath);
 
         // 기억을 꺼내는 장면(S14)은 게임처럼 돌린다: 반복마다 기억을 남기고 꺼냈음을 표시해, 같은 기억을 연달아 꺼내지 않는다 (NpcTestMemory)
@@ -264,6 +269,7 @@ public static class DeviceRun
         }
 
         var slmTimes = new List<long>();
+        int prepareDeferred = 0;                // 같은 도깨비의 뒤에서 만들기에 맡겨 미리 읽지 않은 수 (NpcRequestManager.LastPrepareDeferred)
         var prepareSame = new List<long>();     // 앞 장면과 같은 도깨비 — 시스템 프롬프트가 이미 읽혀 있어 짧은 호출 한 번이어야 한다
         var prepareChanged = new List<long>();  // 도깨비가 바뀜 — 시스템 프롬프트를 새로 읽는다
         var reasons = new Dictionary<string, int>();
@@ -291,6 +297,7 @@ public static class DeviceRun
 
                 long prepareMs = -1;
                 long prepareTimedOutMs = -1;
+                string kvNote = ""; // CSV 의 기억 열 (기기 시험과 같은 열)
                 if (s.Prepare && slm.IsReady && !NpcActions.SkipsModel(request.Candidates))
                 {
                     Stopwatch preparing = Stopwatch.StartNew();
@@ -333,7 +340,16 @@ public static class DeviceRun
                     if (prepared)
                     {
                         prepareMs = preparing.ElapsedMilliseconds;
-                        (scene.RelicId == lastRelic ? prepareSame : prepareChanged).Add(prepareMs);
+                        if (run.LastPrepareDeferred)
+                        {
+                            // 같은 도깨비의 뒤에서 만들기에 맡겨 미리 읽지 않았다 — 바로 끝나지만 준비가 끝난 것은 아니라 미리 읽기 통계에서 뺀다
+                            prepareDeferred++;
+                            kvNote = "뒤에서 만들기에 맡김";
+                        }
+                        else
+                        {
+                            (scene.RelicId == lastRelic ? prepareSame : prepareChanged).Add(prepareMs);
+                        }
                     }
                     else
                     {
@@ -393,7 +409,8 @@ public static class DeviceRun
                     .Append(prepareMs).Append(',').Append(-1).Append(',').Append(watch.ElapsedMilliseconds).Append(',')
                     .Append(-1).Append(',').Append(Csv(response.Note)).Append(',').Append(prefetched ? "O" : "X").Append(',')
                     .Append(Csv(prefetched && response.Reaction != null ? response.Reaction.Note : "")).Append(',').Append(Csv(retargeted)).Append(',')
-                    .Append(prepareTimedOutMs >= 0 ? prepareTimedOutMs.ToString(CultureInfo.InvariantCulture) : "").Append('\n');
+                    .Append(prepareTimedOutMs >= 0 ? prepareTimedOutMs.ToString(CultureInfo.InvariantCulture) : "").Append(',')
+                    .Append(Csv(kvNote)).Append('\n'); // 기억 열: LM Studio 백엔드는 기억(KV 슬롯) 저장·복원을 하지 않아 '뒤에서 만들기에 맡김'만 적는다
                 File.AppendAllText(path, row.ToString(), new UTF8Encoding(false));
 
                 if (s.GapSeconds > 0)
@@ -408,6 +425,10 @@ public static class DeviceRun
         Say("SLM 대사 " + slmCount + "/" + (total - fixedCount) + " (이야기·끌려갈 때 " + fixedCount + "건은 정해진 대사), 기대 행동 일치 " + expectedOk + "/" + total);
         Say("미리 만든 대사 적중 " + prefetchHits + "/" + (total - fixedCount) + ", 반복별 " + string.Join("·", hitsPerRep.Select(h => h.ToString(CultureInfo.InvariantCulture)).ToArray()));
         Say("메모에 Repeated 가 적힌 장면 " + repeated + "건");
+        if (prepareDeferred > 0)
+        {
+            Say("미리 읽기 — 같은 도깨비의 뒤에서 만들기에 맡김(미리 읽지 않고 그 생성을 이어 감): " + prepareDeferred + "건 (아래 통계에서 뺌)");
+        }
         if (prepareSame.Count > 0)
         {
             Say("미리 읽기 — 앞 장면과 같은 도깨비: 중앙값 " + Percentile(prepareSame, 0.5) + "ms, 최대 " + prepareSame.Max() + "ms (" + prepareSame.Count + "건 — LM Studio 는 같은 도깨비도 1토큰을 다시 불러 0 은 아니다. 수 초면 뒤에서 만들던 대사 뒤에 줄을 선 것)");
