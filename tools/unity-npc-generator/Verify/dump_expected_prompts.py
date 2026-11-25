@@ -43,6 +43,16 @@ for scene in content["scenes"]:
     _, user_days, _, _ = run.build_prompts(args, "single", scene, persona, content, 1)
     expected["_askDays"][scene["id"]] = user_days
 
+# 재봉인에서 한 칸 올라 흐려짐이 된 정령의 안부(마지막 관리 2일 전): 아직 덜 나았다고 말하고 며칠 전 변형을 쓰지 않는다 (variation 0·1)
+expected["_askPartly"] = {}
+for scene in content["scenes"]:
+    if run.is_fixed(scene) or not run.needs_ask(scene) or run.fact_of(scene, "clarity") != "흐려짐":
+        continue
+    partly = json.loads(json.dumps(scene))
+    partly["facts"] = [f for f in partly["facts"] if f["key"] != "last_care_days_ago"] + [{"key": "last_care_days_ago", "value": "2"}]
+    persona = content["personas"][scene["relicId"]]
+    expected["_askPartly"][scene["id"]] = [run.build_prompts(args, "single", partly, persona, content, v)[1] for v in (0, 1)]
+
 prompt_count = len(expected)
 
 # 말투 다듬기(normalize_speech)를 C# NpcLineChecks.NormalizeSpeech 와 비교할 예문. 2026-11-11 시험에서 어미 검사에 걸린 대사들이다.
@@ -128,7 +138,7 @@ NO_RECORD_SAMPLES = [
     "오랜만에 보자고 했지.",  # CodeRabbit 리뷰: '보자'는 온전한 꼴만 ("반가워고 했지"가 되지 않게)
     # 2026-11-24: 문장 안의 다른 꼴의 '오랜만'도 고친다 (기기 시험에서 인사 실패의 첫째 원인)
     "드디어 오랜만에 하늘이 나를 찾았네.", "오랜만이라 반가워!", "오랜만인데 잘 지냈어?", "와, 정말 오랜만!", "왔구나! 오랜만이네요.",
-    "오랜만이구나, 기다렸어.", "오랜만에 반가워!", "오랜만에 봤네!", "오랜만이라고 해야겠다.", "오랜만에 보러 왔구나.", "오랫만에 왔네!", "오랜만에야 왔구나.",
+    "오랜만이구나, 기다렸어.", "오랜만에 반가워!", "오랜만에 봤네!", "오랜만이라고 해야겠다.", "오랜만에 보러 왔구나.", "오랫만에 왔네!", "오랜만에야 왔구나.", "오랜만이라 그런지 반가워!",
 ]
 for line in NO_RECORD_SAMPLES:
     expected["_speechSamples"].append({"label": "반말", "line": line, "noRecord": True, "want": run.normalize_speech(line, "반말", None, None, None, None, "발굴자", True)})
@@ -194,7 +204,7 @@ FN_SAMPLES = [
     ("bareOwn", "내 자개는 공들였어. 무늬도 정성껏 새겼지.", ""), ("bareOwn", "자개 반짝이는 거 좋아했지?", ""),
     ("recallFragment", "기억난다, 내 자개 공들여 만들었다고 자랑했던 일", ""), ("recallFragment", "기억나, 그때 자개 자랑했던 일!", ""), ("recallFragment", "그때 일 기억나?", ""),
     ("probe", "안녕, 오늘은 좀 일찍 왔구나.", "greet"), ("probe", "어서 와, 반가워!", "greet"), ("probe", "무슨 일이야?", "thank_calm"), ("probe", "뭘 찾으러 왔어?", "wander_greet"),
-    ("probe", "날 찾으러 왔구나!", "greet"), ("probe", "와! 나를 찾으러 왔네.", "greet"), ("probe", "보물 찾으러 왔어?", "greet"),
+    ("probe", "날 찾으러 왔구나!", "greet"), ("probe", "와! 나를 찾으러 왔네.", "greet"), ("probe", "보물 찾으러 왔어?", "greet"), ("probe", "나를  찾으러 왔구나!", "greet"), ("probe", "뭘   찾으러 왔어?", "greet"),
 ]
 
 

@@ -94,7 +94,7 @@ namespace Jamkkaebi.Npc
         public bool refillAfterUse = true;
 
         [Tooltip("요청·미리 읽기가 끝난 뒤 이만큼(초) 아무 일이 없어야 뒤에서 미리 만들기·다시 만들기를 새로 시작한다 (NpcRequestManager.PrefetchIdleDelay, 게임 기본 3초). "
-            + "부딪혀도 플레이어가 먼저다(뒤에서 만들기는 한 조각 안에 비켜 준다) — 이 값은 부딪힘을 줄일 뿐이다. 예전 기본 10초와 비교하려면 10 으로 둔다 (2026-11-25)")]
+            + "부딪혀도 플레이어가 먼저다(뒤에서 만들기는 한 조각 안에 비켜 준다) — 이 값은 부딪힘을 줄일 뿐이다. 예전 기본 10초와 비교하려면 10 으로 두고 Adaptive Idle 도 끈다 — 켜 두면 빨리 만드는 기기에서 더 짧게 줄어든다 (2026-11-25)")]
         public float prefetchIdleSeconds = 3f;
 
         [Tooltip("다른 도깨비의 미리 만들기·다시 만들기를 새로 시작하기 전에 쉬는 시간(초) (NpcRequestManager.PrefetchSwitchIdleDelay, 게임 기본 30초). "
@@ -335,13 +335,10 @@ namespace Jamkkaebi.Npc
                     // 게임에서 탭해 확대할 때처럼 시스템 프롬프트를 먼저 읽힌다. 같은 도깨비가 이어지면 바로 끝난다
                     long prepareMs = -1;        // 끝난 미리 읽기의 시간. 시간 초과·안 함이면 -1 (통계에 넣지 않는다)
                     long prepareTimedOutMs = -1; // 시간 초과면 기다린 시간
-                    // 기억(KV 슬롯) 저장·복원이 이 장면에서 무엇을 했는지 (CSV 의 '기억' 열). 그동안 뒤에서 만들기는 쉬므로 횟수가 늘면 대개 이 장면의 것이다 —
-                    // 미리 읽기가 시작될 때 뒤에서 만들기가 마침 기억을 되살리거나 저장하던 중이면(짧고 멈출 수 없는 일) 그것까지 이 장면에 세일 수 있다
-                    // (뒤에서 만들기의 기억 저장은 StateSaves 만 늘리고 LastPrepare 를 바꾸지 않아 '미리읽기 읽고 저장'으로 잘못 적힐 수 있다)
+                    // 기억(KV 슬롯) 저장·복원이 이 장면에서 무엇을 했는지 (CSV 의 '기억' 열). 공용 횟수(StateLoads·StateSaves)는 뒤에서 만들기의 것까지 세므로 쓰지 않고,
+                    // 이 미리 읽기·요청이 남긴 기록(LastPrepare·LastCall 이 새로 바뀌었는지와 그 기록의 되살림·저장 여부)으로 정한다
                     LlmUnityModelBackend llm = model as LlmUnityModelBackend;
                     string kvNote = "";
-                    int loadsBefore = llm != null ? llm.StateLoads : 0;
-                    int savesBefore = llm != null ? llm.StateSaves : 0;
                     LlmUnityCall prepareBefore = llm != null ? llm.LastPrepare : null;
                     if (prepareSystemPrompt && slm != null && slm.IsReady && !NpcActions.SkipsModel(request.Candidates))
                     {
@@ -398,9 +395,10 @@ namespace Jamkkaebi.Npc
                             }
                             else if (llm != null)
                             {
-                                kvNote = llm.StateLoads > loadsBefore ? "미리읽기 되살림"
-                                        : llm.StateSaves > savesBefore ? "미리읽기 읽고 저장"
-                                        : llm.LastPrepare != prepareBefore ? "미리읽기 읽음" : "이미 읽힘";
+                                bool didPrepare = llm.LastPrepare != prepareBefore; // 이 미리 읽기가 모델에서 무언가를 했다 (이미 읽힌 것이면 기록이 안 바뀐다)
+                                kvNote = !didPrepare ? "이미 읽힘"
+                                        : llm.LastPrepareRestored ? "미리읽기 되살림"
+                                        : llm.LastPrepareSaved ? "미리읽기 읽고 저장" : "미리읽기 읽음";
                                 if (kvNote == "미리읽기 되살림")
                                 {
                                     restoredPrepares.Add(prepareMs);
@@ -419,11 +417,12 @@ namespace Jamkkaebi.Npc
                         }
                     }
 
-                    int loadsBeforeRequest = llm != null ? llm.StateLoads : 0;
+                    LlmUnityCall callBefore = llm != null ? llm.LastCall : null;
                     Stopwatch watch = Stopwatch.StartNew();
                     NpcResponse response = await run.RequestAsync(request, ct);
                     watch.Stop();
-                    if (llm != null && llm.StateLoads > loadsBeforeRequest)
+                    // 이 요청의 생성이 끝나 LastCall 을 새로 남겼고(뒤에서 만들기는 남기지 않는다) 그 생성이 기억을 되살렸을 때만
+                    if (llm != null && llm.LastCall != callBefore && llm.LastCallRestored)
                     {
                         kvNote += (kvNote.Length > 0 ? ", " : "") + "요청 전 되살림"; // 모델이 다른 도깨비를 기억하던 채로 온 요청 (미리 읽기를 안 했거나 그 사이 바뀜)
                     }

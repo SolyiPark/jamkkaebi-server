@@ -548,9 +548,29 @@ namespace Jamkkaebi.Npc
                 string n = request.FindFact(NpcFactKeys.LastCareDaysAgo);
                 return pick == 0 ? "마지막 관리가 " + n + "일 전이었어." : "관리받은 지 " + n + "일이 지났어.";
             }
+            if (PartlyRestoredAsk(request))
+            {
+                return pick == 0 ? "아직 몸이 좀 흐려." : "아직 다 맑아지지 않았어.";
+            }
             string clarity = request.FindFact(NpcFactKeys.Clarity);
             bool resealed = clarity == "재봉인" || clarity == "RESEALED";
             return resealed ? (pick == 0 ? "몸이 흐려지다 못해 봉인됐어." : "다시 봉인될 만큼 흐려졌어.") : (pick == 0 ? "몸이 흐려졌어." : "몸이 많이 흐려졌어.");
+        }
+
+        /// <summary>
+        /// 재봉인에서 한 칸 올라 흐려짐이 된 정령의 안부인지 (사실 칸이 흐려짐이고 마지막 관리가 7일 안). NpcContextBuilder.PartlyRestored 와 같다.
+        /// 방금 관리받았으므로 "몸이 흐려졌어"(나빠졌다)·"마지막 관리가 0일 전이었어"가 아니라 아직 덜 나았다고 말한다. run.py 의 partly_restored_ask 와 같다.
+        /// </summary>
+        public static bool PartlyRestoredAsk(ReactionRequest request)
+        {
+            if (!NpcLineChecks.NeedsAsk(request))
+            {
+                return false;
+            }
+            string clarity = request.FindFact(NpcFactKeys.Clarity);
+            int days;
+            return (clarity == "흐려짐" || clarity == "FADED")
+                    && int.TryParse(request.FindFact(NpcFactKeys.LastCareDaysAgo), out days) && days >= 0 && days < NpcContextBuilder.LongGapDays;
         }
 
         /// <summary>이 요청이 쓸 수 있는 '이미 한 말'(코드가 정한 앞 문장) 전부. 최근 대사에서 앞 문장을 떼어 부탁 부분끼리 견줄 때 쓴다. 흐려진 안부가 아니면 빈 목록.</summary>
@@ -571,12 +591,15 @@ namespace Jamkkaebi.Npc
             list.Add("몸이 많이 흐려졌어.");
             list.Add("몸이 흐려지다 못해 봉인됐어.");
             list.Add("다시 봉인될 만큼 흐려졌어.");
+            list.Add("아직 몸이 좀 흐려.");
+            list.Add("아직 다 맑아지지 않았어.");
             return list;
         }
 
         // 흐려진 안부의 '이미 한 말' 꼴 전부 — 날 수는 어느 값이든(다른 날 띄운 최근 대사), 칸('{날수}')이어도 맞는다. LinePrefix·AskPrefixes 와 같은 문장이다
         private static readonly Regex AnyAskPrefix = new Regex(
-                "^(?:마지막 관리가 (?:[0-9]+|\\{날수\\})일 전이었어\\.|관리받은 지 (?:[0-9]+|\\{날수\\})일이 지났어\\.|몸이 흐려졌어\\.|몸이 많이 흐려졌어\\.|몸이 흐려지다 못해 봉인됐어\\.|다시 봉인될 만큼 흐려졌어\\.)\\s*",
+                "^(?:마지막 관리가 (?:[0-9]+|\\{날수\\})일 전이었어\\.|관리받은 지 (?:[0-9]+|\\{날수\\})일이 지났어\\.|몸이 흐려졌어\\.|몸이 많이 흐려졌어\\.|몸이 흐려지다 못해 봉인됐어\\.|다시 봉인될 만큼 흐려졌어\\."
+                + "|아직 몸이 좀 흐려\\.|아직 다 맑아지지 않았어\\.)\\s*",
                 RegexOptions.CultureInvariant);
 
         /// <summary>
@@ -684,7 +707,7 @@ namespace Jamkkaebi.Npc
                 return null;
             }
             string clarity = request.FindFact(NpcFactKeys.Clarity);
-            return "이어서 " + (clarity == "재봉인" || clarity == "RESEALED" ? "깨워" : "닦아") + " 달라고 부탁하는 말을 한다";
+            return "이어서 " + (clarity == "재봉인" || clarity == "RESEALED" ? "깨워" : PartlyRestoredAsk(request) ? "마저 닦아" : "닦아") + " 달라고 부탁하는 말을 한다";
         }
 
         // 모델이 부탁을 빼먹거나 사실을 또 말하면 코드가 부탁 문장을 채운다 (2026-11-17 22:07 시험). run.py 의 ASK_FALLBACKS·ask_fallback 과 같다
@@ -697,6 +720,17 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public static string AskFallbackAvoiding(ReactionRequest request, string linePrefix, IEnumerable<string> recent, int maxLength)
         {
+            List<string> candidates = AskFallbackCandidates(request, linePrefix, recent, maxLength);
+            return candidates.Count > 0 ? candidates[0] : null;
+        }
+
+        /// <summary>
+        /// AskFallbackAvoiding 이 고를 수 있는 부탁 문장 전부 (고르는 차례대로). 출력 검사는 이것을 차례로 모든 검사에 넣어 보고 통과한 첫 것을 쓴다.
+        /// run.py 의 ask_fallback_candidates 와 같다.
+        /// </summary>
+        public static List<string> AskFallbackCandidates(ReactionRequest request, string linePrefix, IEnumerable<string> recent, int maxLength)
+        {
+            var candidates = new List<string>();
             string clarity = request.FindFact(NpcFactKeys.Clarity);
             string verb = clarity == "재봉인" || clarity == "RESEALED" ? "깨워" : "닦아";
             int n = AskFallbacks.Length;
@@ -707,10 +741,10 @@ namespace Jamkkaebi.Npc
                 string full = linePrefix + " " + ask;
                 if (full.Length <= maxLength && !FindRepeat(full, recent).HasValue)
                 {
-                    return ask;
+                    candidates.Add(ask);
                 }
             }
-            return null;
+            return candidates;
         }
 
         public static string AskFallback(ReactionRequest request)
@@ -746,7 +780,8 @@ namespace Jamkkaebi.Npc
             {
                 return null;
             }
-            return ((request.Variation % 2) + 2) % 2 == 1 && request.FindFact(NpcFactKeys.LastCareDaysAgo) != null ? "days" : "state";
+            // 한 칸 올라 흐려짐이 된 정령은 며칠 전 문장을 쓰지 않는다 — "마지막 관리가 0일 전이었어"·"관리받은 지 2일이 지났어"는 방치된 것처럼 들린다
+            return ((request.Variation % 2) + 2) % 2 == 1 && request.FindFact(NpcFactKeys.LastCareDaysAgo) != null && !PartlyRestoredAsk(request) ? "days" : "state";
         }
 
         private IEnumerable<string> SituationLines(ReactionRequest request)

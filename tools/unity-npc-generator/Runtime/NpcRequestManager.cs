@@ -681,7 +681,7 @@ namespace Jamkkaebi.Npc
             ReactionResult served = ReactionResult.Success(request.RequestId, ready.ActionId, ready.TargetId, ready.Line, ReactionSource.Slm, ready.Note);
             Remember(request, served.Line);
             Refill(request, false);
-            SaveSoon(); // 꺼낸 대사가 파일에서 빠지게 한다 (RecentLineCount 가 0 이면 Remember 가 저장하지 않는다, CodeRabbit 리뷰)
+            SaveSoon(); // 꺼낸 대사가 파일에서 빠지게 한다 (RecentLineCount 가 0 이면 Remember 가 저장하지 않는다)
             return NpcResponse.Show(served, null, PrefetchedNote);
         }
 
@@ -1324,6 +1324,7 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public async Task PrepareAsync(int relicId, CancellationToken ct = default(CancellationToken))
         {
+            lastPrepareDeferred = false; // 아무것도 하지 않고 끝나도 앞 미리 읽기의 표시가 남지 않게
             if (!SlmEnabled || SlmStatus != NpcModelStatus.Ready) // 예외를 던지지 않는다 (SlmStatus 가 삼킨다)
             {
                 return;

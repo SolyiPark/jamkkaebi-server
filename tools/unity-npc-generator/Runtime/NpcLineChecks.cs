@@ -1265,7 +1265,9 @@ namespace Jamkkaebi.Npc
             line = line.Replace("오랫만", "오랜만"); // 철자 고치기(FixTypos)는 이보다 뒤에 돈다
             line = Regex.Replace(line, "오(?:랜|래간)만(?:이(?:네요|구나|군요|군|잖아)|인걸)", replacement, RegexOptions.CultureInvariant);
             line = Regex.Replace(line, "오(?:랜|래간)만이(?:야|네|다|에요)", replacement, RegexOptions.CultureInvariant);
-            line = Regex.Replace(line, "오(?:랜|래간)만(?:이(?:라서|라|어서|니까|던데|라도)|인데)(?![가-힣]),? ?", "", RegexOptions.CultureInvariant);
+            // 마디 뒤에 이어 주는 말("그런지·그래서·그런가·그런데")이 오면 함께 지운다 — "오랜만이라 그런지 반가워!"에서 '그런지'만 남지 않게
+            line = Regex.Replace(line, "오(?:랜|래간)만(?:이(?:라서|라|어서|니까|던데|라도)|인데)(?![가-힣]),? ?(?:(?:그런지|그래서|그런가|그런데)(?![가-힣]),? ?)?", "",
+                    RegexOptions.CultureInvariant);
             return Regex.Replace(line, "(?:(?:정말|진짜|참|너무|되게) )?오(?:랜|래간)만(?=[!?.~…]|$)", replacement, RegexOptions.CultureInvariant);
         }
 
@@ -2404,7 +2406,7 @@ namespace Jamkkaebi.Npc
             var keep = new List<string>();
             foreach (string part in parts)
             {
-                if (!Probe.IsMatch(part))
+                if (FindProbe(part) == null)
                 {
                     keep.Add(part);
                 }
@@ -2414,7 +2416,7 @@ namespace Jamkkaebi.Npc
                 string text = Regex.Replace(string.Join(" ", keep.ToArray()), "[,，]+$", "");
                 line = Regex.IsMatch(text, "[.!?…~]$") ? text : text + ".";
             }
-            if (Regex.IsMatch(line, "\\?+$") && !Probe.IsMatch(line) && Regex.IsMatch(line, "반가|환영|어서|안녕|왔"))
+            if (Regex.IsMatch(line, "\\?+$") && FindProbe(line) == null && Regex.IsMatch(line, "반가|환영|어서|안녕|왔"))
             {
                 line = Regex.Replace(line, "\\?+$", "!");
             }
@@ -2428,12 +2430,19 @@ namespace Jamkkaebi.Npc
             {
                 return null;
             }
-            Match found = Probe.Match(line);
-            if (found.Success)
+            return FindProbe(line);
+        }
+
+        // 지어낸 사정·캐묻기 말 (없으면 null). 가로 띄어쓰기가 여럿 이어지면 하나로 보고 찾는다 — "나를  찾으러"도 "나를 찾으러"처럼 반가움으로 본다
+        // (Probe 의 앞말 조건은 띄어쓰기 하나까지만 본다). run.py 의 find_probe 와 같다
+        private static string FindProbe(string text)
+        {
+            if (string.IsNullOrEmpty(text))
             {
-                return found.Value;
+                return null;
             }
-            return null;
+            Match found = Probe.Match(Regex.Replace(text, "[ \\t]+", " "));
+            return found.Success ? found.Value : null;
         }
 
         /// <summary>

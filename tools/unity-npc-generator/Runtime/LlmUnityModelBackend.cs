@@ -232,6 +232,7 @@ namespace Jamkkaebi.Npc
         private volatile LlmUnityCall lastPrepare;
         private volatile bool lastPrepareRestored;
         private volatile bool lastCallRestored;
+        private volatile bool lastPrepareSaved;
         private int foregroundWaiting; // 모델 줄을 기다리는 플레이어의 일(요청·미리 읽기) 수 (Acquire). Interlocked 로만 읽고 쓴다
         private CancellationTokenSource backgroundYield; // 지금 모델을 잡은 뒤에서 만들기에 비키라고 알리는 것. gate 안에서 읽고 쓴다
         private int stateLoads;
@@ -321,6 +322,21 @@ namespace Jamkkaebi.Npc
         public bool LastPrepareRestored
         {
             get { return lastPrepareRestored; }
+        }
+
+        /// <summary>모델 줄을 기다리는 플레이어의 일(요청·미리 읽기) 수. 시험이 '플레이어의 일이 줄에 섰다'를 확인할 때 쓴다.</summary>
+        internal int ForegroundWaiting
+        {
+            get { return Volatile.Read(ref foregroundWaiting); }
+        }
+
+        /// <summary>
+        /// 마지막 미리 읽기(LastPrepare)가 시스템 메시지를 읽은 뒤 그 기억을 저장했으면 true. 되살렸거나 저장하지 못했으면 false.
+        /// StateSaves 는 뒤에서 만들기의 저장까지 세므로, 이 미리 읽기가 저장했는지는 이것으로 본다 (기기 시험의 '기억' 열).
+        /// </summary>
+        public bool LastPrepareSaved
+        {
+            get { return lastPrepareSaved; }
         }
 
         /// <summary>마지막 생성이 시작 전에 저장해 둔 시스템 메시지의 기억을 되살렸으면 true (모델이 다른 도깨비를 기억하던 채로 온 생성).</summary>
@@ -821,13 +837,14 @@ namespace Jamkkaebi.Npc
                     if (restored)
                     {
                         token.ThrowIfCancellationRequested();
-                        watch.Stop();
                         readSession = current;
                         readSystem = system;
                         knownSystem = system;
                         if (prepare)
                         {
+                            watch.Stop();
                             lastPrepareRestored = true;
+                            lastPrepareSaved = false;
                             lastPrepare = new LlmUnityCall(-1, watch.ElapsedMilliseconds, 0);
                             return "";
                         }
@@ -843,7 +860,12 @@ namespace Jamkkaebi.Npc
                         await ReadInSteps(current, system, user, alreadyRead || restored, restored ? system : known, token).ConfigureAwait(false);
                         knownSystem = null; // 마지막 생성이 끝나기 전에는 모델이 무엇을 기억하는지 모른다
                     }
-                    watch = Stopwatch.StartNew();
+                    // 플레이어의 생성은 되살리기부터 잰다 — 부른 쪽이 기다린 시간이 첫 응답(FirstTokenMs)·전체(ElapsedMs)에 다 들어가게.
+                    // 미리 읽기는 시스템 메시지를 읽는 시간만 잰다(LastPrepare), 뒤에서 만들기는 적지 않는다
+                    if (prepare || background)
+                    {
+                        watch = Stopwatch.StartNew();
+                    }
                     long firstToken = -1;
                     var stop = new StopAfterFirstToken();
                     Task<string> chat = null;
@@ -893,18 +915,20 @@ namespace Jamkkaebi.Npc
                     var measured = new LlmUnityCall(Interlocked.Read(ref firstToken), watch.ElapsedMilliseconds, reply != null ? reply.Length : 0);
                     if (prepare)
                     {
-                        lastPrepare = measured;
+                        lastPrepareSaved = false;
                         lastPrepareRestored = false;
+                        lastPrepare = measured;
                         if (store != null)
                         {
                             // 기억 저장도 취소를 듣지 않는다. 취소되면 기다리지 않고 돌려주되, 끝날 때까지 줄은 붙잡는다
-                            Task persisting = PersistState(current, store, stateKey, token);
+                            Task<bool> persisting = PersistState(current, store, stateKey, token);
                             if (!await FinishedBefore(persisting, token).ConfigureAwait(false))
                             {
                                 releaseLater = true;
                                 ReleaseWhenDone(persisting, alive, current);
                                 throw new OperationCanceledException(token);
                             }
+                            lastPrepareSaved = persisting.Result;
                         }
                     }
                     else if (!background)
@@ -1064,20 +1088,22 @@ namespace Jamkkaebi.Npc
             }
         }
 
-        // 방금 읽은 시스템 메시지의 기억을 저장. 실패해도 생성에는 영향이 없다
+        // 방금 읽은 시스템 메시지의 기억을 저장한다. 저장했으면 true. 실패해도 생성에는 영향이 없다
         // 메인 스레드가 꺼내기 전에 취소되면(token) 저장하지 않는다 (다음에 다시 읽을 뿐이다)
-        private async Task PersistState(ILlmUnitySession owner, ILlmUnityStateStore store, string key, CancellationToken token)
+        private async Task<bool> PersistState(ILlmUnitySession owner, ILlmUnityStateStore store, string key, CancellationToken token)
         {
             try
             {
                 if (await OnModel(owner, () => store.SaveStateAsync(key), token).ConfigureAwait(false))
                 {
                     Interlocked.Increment(ref stateSaves);
+                    return true;
                 }
             }
             catch (Exception)
             {
             }
+            return false;
         }
 
         /// <summary>

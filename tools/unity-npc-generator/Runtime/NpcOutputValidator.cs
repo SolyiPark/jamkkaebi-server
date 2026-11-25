@@ -217,9 +217,15 @@ namespace Jamkkaebi.Npc
                 throw new ArgumentNullException("request");
             }
             string said;
-            OutputCheck check = Inspect(raw, request, out said);
+            OutputCheck check = Inspect(raw, request, out said, false);
             check.LineBeforeSpeechFix = said;
             return check;
+        }
+
+        // 흐려진 안부의 부탁 문장 하나를 모델이 쓴 것처럼 검사에 넣을 JSON (앞 문장은 검사기가 다시 붙인다)
+        private static string AskJson(string action, string target, string ask)
+        {
+            return "{\"action\": \"" + (action ?? "") + "\", \"target\": \"" + (target ?? "") + "\", \"line\": \"" + ask + "\"}";
         }
 
         // 반복 검사에 넣을 글: 길이에 맞춰 줄인 대사 (줄이지 못하면 그대로)
@@ -258,8 +264,8 @@ namespace Jamkkaebi.Npc
             return fixedLine;
         }
 
-        // said: 어미를 고쳤으면 고치기 전 대사, 아니면 null
-        private OutputCheck Inspect(string raw, ReactionRequest request, out string said)
+        // said: 어미를 고쳤으면 고치기 전 대사, 아니면 null. replacingAsk: 흐려진 안부의 부탁을 바꿔 넣은 대사를 다시 검사하는 중 (또 바꾸지 않는다)
+        private OutputCheck Inspect(string raw, ReactionRequest request, out string said, bool replacingAsk)
         {
             said = null;
             Dictionary<string, object> json;
@@ -521,16 +527,25 @@ namespace Jamkkaebi.Npc
             // 흐려진 안부: 코드가 정한 앞 문장("마지막 관리가 9일 전이었어.")까지 포함한 전체 대사로 견준다 — 앞 문장이 같으면 부탁 부분끼리(앞 문장만 같아 거르던 것을 막는다),
             // 앞 문장이 다르면 전체끼리. 예전에는 늘 부탁 부분만 견주어, 앞 문장이 달라 다른 대사인데도 '반복'으로 걸렀다 (PromptAssembler.SimilarLine, 2026-11-24)
             KeyValuePair<string, string>? same = PromptAssembler.FindRepeat(fitted, request.RecentLines);
-            if (same.HasValue && linePrefix != null)
+            if (same.HasValue && linePrefix != null && !replacingAsk)
             {
                 // 흐려진 안부의 부탁 부분이 최근 대사와 같으면, 버리고 기본 대사로 넘어가는 대신 코드의 부탁 문장 중 최근 대사와 겹치지 않는 것으로 바꾼다 (2026-11-25).
                 // 부탁은 첫 낱말 + '닦아/깨워 줄래' 꼴이라 모델이 써도 코드가 채운 것(AskFallback, 모델이 부탁을 빼먹었을 때 이미 쓰는 문장)과 다르지 않다.
-                // 기본 대사로 넘어가면 그 상황의 기본 대사가 둘뿐이라 오히려 같은 대사가 잦다 (2026-11-25 PC 시험 S03 #4: 부탁 부분까지 같아 기본 대사)
-                // 바꾼 대사도 같은 길이 제한(limit)을 지킨다 — 넘으면 길이 줄이기가 앞 문장만 남겨 부탁이 빠진다. 맞는 것이 없으면 바꾸지 않고 반복으로 거른다
-                string ask = PromptAssembler.AskFallbackAvoiding(request, linePrefix, request.RecentLines, limit);
-                if (ask != null)
+                // 기본 대사로 넘어가면 그 상황의 기본 대사가 둘뿐이라 오히려 같은 대사가 잦다 (2026-11-25 PC 시험 S03 #4: 부탁 부분까지 같아 기본 대사).
+                // 바꾼 대사는 모델이 쓴 것처럼 처음부터 모든 검사(길이·호칭·금칙어·반복…)를 다시 거쳐, 통과한 첫 것만 쓴다. 다 걸리면 반복으로 거른다.
+                // 다듬기(LineBeforeSpeechFix)·자르기(FullLine)는 바꾼 대사의 것으로 두고, 모델이 쓴 대사와 겹친 최근 대사는 메모(Detail)에 따로 남긴다
+                string modelLine = said ?? rawLine; // 모델이 쓴 그대로 (다듬기 전)
+                foreach (string ask in PromptAssembler.AskFallbackCandidates(request, linePrefix, request.RecentLines, limit))
                 {
-                    return new OutputCheck(OutputProblem.None, OutputCheck.AskReplacedNote +" ('" + same.Value.Key + "')", action, target, linePrefix + " " + ask, line, truncated);
+                    string replacedSaid;
+                    OutputCheck replaced = Inspect(AskJson(action, target, ask), request, out replacedSaid, true);
+                    if (replaced.IsValid)
+                    {
+                        said = replacedSaid;
+                        return new OutputCheck(OutputProblem.None,
+                                OutputCheck.AskReplacedNote + " ('" + modelLine + "' → '" + replaced.Line + "', 겹친 최근 대사 '" + same.Value.Key + "')",
+                                replaced.ActionId, replaced.TargetId, replaced.Line, replaced.FullLine, replaced.Truncated);
+                    }
                 }
             }
             if (same.HasValue)

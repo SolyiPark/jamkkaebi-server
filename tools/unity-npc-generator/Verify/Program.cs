@@ -556,6 +556,19 @@ public static class Program
                 ok &= Same(id + "(며칠 전 변형)", "사용자", (string)((Dictionary<string, object>)expected["_askDays"])[id], assembler.Build(request).User);
                 request.Variation = 0;
             }
+            // 재봉인에서 한 칸 올라 흐려짐이 된 정령의 안부(마지막 관리 2일 전)도 run.py 와 같은 프롬프트 (Variation 0·1)
+            if (expected.ContainsKey("_askPartly") && ((Dictionary<string, object>)expected["_askPartly"]).ContainsKey(id))
+            {
+                ReactionRequest partly = ToRequest(scene);
+                partly.Facts.RemoveAll(f => f.Key == NpcFactKeys.LastCareDaysAgo);
+                partly.Facts.Add(new Fact(NpcFactKeys.LastCareDaysAgo, "2"));
+                List<string> wants = ((IEnumerable)((Dictionary<string, object>)expected["_askPartly"])[id]).Cast<object>().Select(o => (string)o).ToList();
+                for (int v = 0; v < 2; v++)
+                {
+                    partly.Variation = v;
+                    ok &= Same(id + "(덜 나은 흐려짐 " + v + ")", "사용자", wants[v], assembler.Build(partly).User);
+                }
+            }
             // 문법도 모델이 적을 칸만 둔다: 행동·대상이 하나뿐이면 {"line"} 만, 대상만 하나뿐이면 {"action","line"}, 아니면 전부
             bool lineOnly = prompt.ActionIds.Count == 1 && prompt.TargetIds.Count == 1;
             if (lineOnly)
@@ -1053,13 +1066,27 @@ public static class Program
         }
         Expect(reviewValidator, Out("answer_status", "player", "시간 되면 닦아 줄래?"), askSim, OutputProblem.Repeated,
                 "흐려진 안부: 코드의 부탁 문장까지 모두 최근 대사면 계속 반복으로 거름");
-        // 바꾼 대사도 출력 검사의 길이 제한을 지킨다 — 넘는 부탁 문장은 고르지 않는다 (2026-11-25 리뷰)
-        askSim.RecentLines = new List<string> { "마지막 관리가 9일 전이었어. 시간 되면 닦아 줄래?" };
-        string fitsAsk = PromptAssembler.AskFallbackAvoiding(askSim, "마지막 관리가 9일 전이었어.", askSim.RecentLines, int.MaxValue);
-        string shortestAllowed = PromptAssembler.AskFallbackAvoiding(askSim, "마지막 관리가 9일 전이었어.", askSim.RecentLines, "마지막 관리가 9일 전이었어. ".Length + 8);
-        Check(fitsAsk != null && PromptAssembler.AskFallbackAvoiding(askSim, "마지막 관리가 9일 전이었어.", askSim.RecentLines, 10) == null
-                && (shortestAllowed == null || ("마지막 관리가 9일 전이었어. " + shortestAllowed).Length <= "마지막 관리가 9일 전이었어. ".Length + 8),
-                "흐려진 안부: 바꿀 부탁 문장은 길이 제한 안에 드는 것만 고름 ← 제한 없음 '" + fitsAsk + "', 8자 '" + shortestAllowed + "'");
+        // 바꾼 대사도 출력 검사의 길이 제한을 지킨다 — 넘는 부탁 문장은 건너뛰고 그다음 맞는 것을 고른다
+        const string daysLead = "마지막 관리가 9일 전이었어.";
+        askSim.RecentLines = new List<string> { daysLead + " 시간 되면 닦아 줄래?" };
+        List<string> allAsks = PromptAssembler.AskFallbackCandidates(askSim, daysLead, askSim.RecentLines, int.MaxValue);
+        int shortAllowance = daysLead.Length + 1 + "살살 닦아 줄래?".Length;   // 짧은 부탁 문장(9자)만 드는 길이
+        string firstAsk = allAsks.Count > 0 ? allAsks[0] : null;
+        string expectedShort = allAsks.FirstOrDefault(a => daysLead.Length + 1 + a.Length <= shortAllowance);
+        string pickedShort = PromptAssembler.AskFallbackAvoiding(askSim, daysLead, askSim.RecentLines, shortAllowance);
+        Check(firstAsk != null && daysLead.Length + 1 + firstAsk.Length > shortAllowance && expectedShort != null && pickedShort == expectedShort && pickedShort != firstAsk,
+                "흐려진 안부: 길이 제한을 넘는 앞 순번의 부탁 문장('" + firstAsk + "')을 건너뛰고 드는 것을 고름 ← '" + pickedShort + "'");
+        Check(PromptAssembler.AskFallbackAvoiding(askSim, daysLead, askSim.RecentLines, 10) == null, "흐려진 안부: 드는 부탁 문장이 없으면 null");
+        // 바꾼 대사도 모델이 쓴 것처럼 모든 검사를 거친다 — 낯선 상대의 닉네임이 첫 낱말과 같으면("괜찮으면") 그 부탁 문장은 호칭 검사에 걸려 건너뛰고 다음 것을 쓴다.
+        // 자르지 않았으므로 '잘라 씀' 메모는 붙지 않고, 바꾼 것은 따로 적힌다
+        askSim.Nickname = "괜찮으면";
+        askSim.RecentLines = new List<string> { daysLead + " 시간 되면 닦아 줄래?" };
+        OutputCheck nicknameAsk = reviewValidator.Check(Out("answer_status", "player", "시간 되면 닦아 줄래?"), askSim);
+        string nicknameNote = nicknameAsk.IsValid ? nicknameAsk.ToResult("r2").Note : null;
+        Check(nicknameAsk.IsValid && !nicknameAsk.Line.Contains("괜찮으면") && !nicknameAsk.Trimmed && nicknameNote != null
+                && nicknameNote.Contains(OutputCheck.AskReplacedNote) && !nicknameNote.Contains("잘라"),
+                "흐려진 안부: 바꿀 부탁 문장도 모든 검사를 거쳐 통과한 것만 쓰고, 자르지 않았으면 '잘라 씀'을 적지 않음 ← " + nicknameAsk.Line + " " + nicknameAsk.Problem + " / " + nicknameNote);
+        askSim.Nickname = null;
         // 2026-11-24: 앞 문장까지 포함한 전체 대사로 본다 — 앞 문장이 다르면 부탁 부분이 같아도 다른 대사, 꼴이 같으면(날 수만 다름) 같은 대사
         askSim.RecentLines = new List<string> { "몸이 흐려졌어. 시간 되면 닦아 줄래?", "다시 봉인될 만큼 흐려졌어. 시간 되면 닦아 줄래?" };
         OutputCheck otherLeadAsk = reviewValidator.Check(Out("answer_status", "player", "시간 되면 닦아 줄래?"), askSim);
@@ -1106,6 +1133,9 @@ public static class Program
         Check(NpcLineChecks.GreetingProbe("안녕, 오늘은 좀 일찍 왔구나.", NpcActions.Greet) != null && NpcLineChecks.GreetingProbe("와, 처음 온 친구야?", NpcActions.WanderGreet) != null
                 && NpcLineChecks.GreetingProbe("어서 와, 반가워!", NpcActions.Greet) == null && NpcLineChecks.GreetingProbe("무슨 일이야?", NpcActions.ThankCalm) == null,
                 "다 지워도 남는 지어낸 사정은 인사 행동에서만 거름");
+        Check(NpcLineChecks.GreetingProbe("나를 찾으러 왔구나!", NpcActions.Greet) == null && NpcLineChecks.GreetingProbe("나를  찾으러 왔구나!", NpcActions.Greet) == null
+                && NpcLineChecks.GreetingProbe("날\t찾으러 왔네.", NpcActions.Greet) == null && NpcLineChecks.GreetingProbe("뭘   찾으러 왔어?", NpcActions.Greet) != null,
+                "'날·나를 찾으러'는 띄어쓰기가 몇 칸이어도 반가움, '뭘 찾으러'는 계속 캐묻기로 거름");
         Check(NpcLineChecks.IsCleanAsk("시간 되면 닦아 줄 수 있어?") && NpcLineChecks.IsCleanAsk("살살 깨워줘.") && NpcLineChecks.IsCleanAsk("오늘은 닦아 줄래?")
                 && !NpcLineChecks.IsCleanAsk("괜찮으면 도와줄래?") && !NpcLineChecks.IsCleanAsk("조심조심 들어와, 내 마음을 좀 닦아줄래?") && !NpcLineChecks.IsCleanAsk("이왕이면 닦아줄게, 몸이 많이 흐려 보여서 걱정이야.")
                 && !NpcLineChecks.IsCleanAsk("조심조심 찾아와 줘서 고마워, 잠깐 깨워줄 수 있을까?"),
@@ -1598,7 +1628,9 @@ public static class Program
             new[] { "오랫만에 왔네!", "왔네!" },
             new[] { "오랜만이라고 해야겠다.", "오랜만이라고 해야겠다." }, // 지우면 "고 해야겠다" 토막이 남아 그대로 둔다 (출력 검사가 거른다)
             new[] { "오랜만에 보러 왔구나.", "오랜만에 보러 왔구나." },  // 지우면 "보러 왔구나"만 남아 그대로 둔다
-            new[] { "오랜만에야 왔구나.", "오랜만에야 왔구나." }       // 뒤에 글자가 붙은 꼴: 지우면 "야 왔구나" 토막이 남아 그대로 둔다 (2026-11-25 리뷰)
+            new[] { "오랜만에야 왔구나.", "오랜만에야 왔구나." },      // 뒤에 글자가 붙은 꼴: 지우면 "야 왔구나" 토막이 남아 그대로 둔다
+            new[] { "오랜만이라 그런지 반가워!", "반가워!" },          // 마디 뒤의 이어 주는 말까지 지운다 ("그런지 반가워!" 토막이 남지 않게)
+            new[] { "오랜만이어서 그래서, 기다렸어.", "기다렸어." }
         };
         foreach (string[] c in absenceCases)
         {
@@ -2812,7 +2844,9 @@ public static class Program
         // 2) 열쇠: 정화는 상태(관리 결과)마다 하나이고 날 수는 넣지 않는다 — 이번 정화 때 만들어 두면 다음 정화(날 수 모름)가 같은 열쇠로 찾는다
         ReactionRequest faded9 = builder.Build(Owner(8, NpcInputs.Care, "FADED", 9)).Request;
         ReactionRequest faded12 = builder.Build(Owner(8, NpcInputs.Care, "FADED", 12)).Request;
-        ReactionRequest resealed16 = builder.Build(Owner(8, NpcInputs.Care, "RESEALED", 16)).Request;
+        NpcContextInput resealedCare = Owner(8, NpcInputs.Care, "RESEALED", 16);
+        resealedCare.ClarityAfterCare = "FADED";   // 보통 난이도로 한 판: 재봉인 → 흐려짐 (정산 결과 응답의 clarity)
+        ReactionRequest resealed16 = builder.Build(resealedCare).Request;
         ReactionRequest clear2 = builder.Build(Owner(8, NpcInputs.Care, "CLEAR", 2)).Request;
         Check(NpcLineCache.TemplateKeyOf(faded9) == NpcLineCache.TemplateKeyOf(faded12) && NpcLineCache.KeyOf(faded9) != NpcLineCache.KeyOf(faded12),
                 "흐려진 뒤 정화: 9일·12일이어도 칸 있는 대사의 열쇠는 같음 (서버 값에 달린 기존 열쇠는 다름)");
@@ -2820,9 +2854,21 @@ public static class Program
                 "선명·흐려짐·재봉인은 열쇠가 다름 (무슨 말을 할지가 다르다)");
         List<ReactionRequest> careTemplates = builder.PrefetchTemplates(Owner(8, NpcInputs.Tap, "CLEAR", 2)).Where(r => r.Input == NpcInputs.Care).ToList();
         string careResults = string.Join(",", careTemplates.Select(r => r.FindFact(NpcFactKeys.CareResult)).ToArray());
-        Check(careResults == "선명→선명,흐려짐→선명,재봉인→선명", "정화 견본은 다음 정화 때의 상태를 몰라 세 상태 모두 ← " + careResults);
+        Check(careResults == "선명→선명,흐려짐→선명,재봉인→흐려짐", "정화 견본은 다음 정화 때의 상태를 몰라 세 상태 모두, 관리 뒤는 보통 난이도 한 칸 ← " + careResults);
         Check(careTemplates.Select(r => NpcLineCache.TemplateKeyOf(r)).SequenceEqual(new[] { clear2, faded12, resealed16 }.Select(r => NpcLineCache.TemplateKeyOf(r))),
                 "정화 견본의 열쇠가 다음 정화(2일·12일·16일 뒤) 요청의 열쇠와 같음");
+        // 지금 재봉인이면 한 판 뒤 흐려짐(마지막 정화 오늘)이 되고, 이어서 마저 닦는 정화가 곧 온다 — 그 견본도 만들고, 그 정화의 열쇠와 같다
+        List<ReactionRequest> resealedTemplates = builder.PrefetchTemplates(Owner(8, NpcInputs.Tap, "RESEALED", 16)).Where(r => r.Input == NpcInputs.Care).ToList();
+        NpcContextInput finishCare = Owner(8, NpcInputs.Care, "FADED", 0);
+        finishCare.ClarityAfterCare = "CLEAR";
+        ReactionRequest finish0 = builder.Build(finishCare).Request;
+        Check(string.Join(",", resealedTemplates.Select(r => r.FindFact(NpcFactKeys.CareResult)).ToArray()) == "선명→선명,흐려짐→선명,재봉인→흐려짐,흐려짐→선명"
+                && NpcLineCache.TemplateKeyOf(resealedTemplates[3]) == NpcLineCache.TemplateKeyOf(finish0)
+                && NpcLineCache.TemplateKeyOf(resealedTemplates[3]) != NpcLineCache.TemplateKeyOf(faded12),
+                "지금 재봉인이면 마저 닦는 정화(최근 흐려짐 → 선명) 견본도 만들고, 그 열쇠는 오래 흐려진 정화와 다름");
+        Check(builder.PrefetchTemplates(Owner(8, NpcInputs.Tap, "FADED", 2)).Count(r => r.Input == NpcInputs.Care) == 4
+                && builder.PrefetchTemplates(Owner(8, NpcInputs.Tap, "FADED", 9)).Count(r => r.Input == NpcInputs.Care) == 3,
+                "한 칸 올라 흐려짐(2일 전 관리)이면 마저 닦는 견본까지 넷, 오래 흐려짐(9일)은 셋");
 
         // 3) 파일 모양: 칸 있는 대사와 최근 대사를 쓰고 되읽는다. 버전이 다르면 칸 있는 대사는 버린다
         string careAction = faded9.Candidates[0].ActionId;
@@ -3479,14 +3525,22 @@ public static class Program
         starters3.PrefetchCompletion.Wait(5000);
         string prefetchStarter = starterOf(starterBackend.LastPrompt);
         Check(prefetchStarter != null && prefetchStarter != prefetchPlanned, "미리 만들기는 보관한 대사의 첫 낱말('" + prefetchPlanned + "')을 피함 ← " + prefetchStarter);
-        // ⑤ 흐려진 안부는 코드가 붙인 앞 문장을 떼고 부탁의 말머리를 견준다 — 다른 날(다른 날 수)·칸('{날수}')의 최근 대사도 (CodeRabbit 리뷰).
+        // ⑤ 흐려진 안부는 코드가 붙인 앞 문장을 떼고 부탁의 말머리를 견준다 — 다른 날(다른 날 수)·칸('{날수}')의 최근 대사도.
         // 2026-11-24: 출력 검사가 앞 문장까지 포함한 전체 대사로 반복을 보므로, 이번 번호에 붙을 앞 문장과 꼴이 같은 최근 대사의 말머리만 피한다
         // (요청마다 builder 가 번호를 늘리므로 앞 문장은 보낼 그 요청에서 구한다)
         for (int kind = 0; kind < 4; kind++)
         {
             ReactionRequest fadedAsk = builder.Build(Owner(5, NpcInputs.AskStatus, "FADED", 9)).Request;
+            if ((kind == 1 || kind == 2) && fadedAsk.Variation % 2 == 0)
+            {
+                fadedAsk.Variation++; // 날 수 문장(홀수 번호)이어야 날 수만 다른 것·날 수 칸을 시험한다 — 짝수면 상태 문장이라 '9일'이 없어 같은 앞 문장을 다시 시험한다
+            }
             string fadedPlanned = PromptAssembler.Starter(fadedAsk);
             string ownLead = PromptAssembler.LinePrefix(fadedAsk);
+            if (kind == 1 || kind == 2)
+            {
+                Check(ownLead.Contains("9일"), "흐려진 안부 시험: 날 수 문장으로 시험함 ← " + ownLead);
+            }
             string ignoredRest;
             string ownShape = PromptAssembler.AskPrefixShape(ownLead + " ", out ignoredRest);
             // 0: 같은 앞 문장, 1: 날 수만 다름, 2: 날 수 칸, 3: 꼴이 다른 앞 문장
@@ -3713,7 +3767,7 @@ public static class Program
         // 빌더가 만든 견본 요청: 서버 값 없이 낮·발굴자로 만들고, 서버 값이 온 뒤 만든 요청과 열쇠가 같다
         NpcContextInput ownerState = Owner(8, NpcInputs.Tap, "FADED", 9);
         List<ReactionRequest> templates = builder.PrefetchTemplates(ownerState);
-        Check(templates.Count == 5 && templates[0].FindFact(NpcFactKeys.TimeOfDay) == "낮" && templates[0].Nickname == null && templates[0].AddressName == NpcAddress.Stranger
+        Check(templates.Count == 5 && templates[0].FindFact(NpcFactKeys.TimeOfDay) == "낮"   // 9일 흐려짐은 오래 방치라 마저 닦는 견본은 없다 && templates[0].Nickname == null && templates[0].AddressName == NpcAddress.Stranger
                 && templates.Count(r => r.Input == NpcInputs.Care) == 3,
                 "주인: 선명도를 알면 탭 인사·안부와 정화 세 상태(선명·흐려짐·재봉인), 5개를 견본(낮·발굴자)으로 만듦 ← " + templates.Count);
         NpcContextInput realState = Owner(8, NpcInputs.Tap, "FADED", 9);
@@ -4322,8 +4376,12 @@ public static class Program
         foreach (KeyValuePair<string, int> care in new[] { new KeyValuePair<string, int>("CLEAR", 3), new KeyValuePair<string, int>("FADED", 10), new KeyValuePair<string, int>("RESEALED", 18) })
         {
             KeyValuePair<string, int> captured = care;
-            requests.Add(new KeyValuePair<string, Func<ReactionRequest>>("정화-" + captured.Key + "-" + captured.Value + "일",
-                    () => builder.Build(Owner(careRelic, NpcInputs.Care, captured.Key, captured.Value)).Request));
+            requests.Add(new KeyValuePair<string, Func<ReactionRequest>>("정화-" + captured.Key + "-" + captured.Value + "일", () =>
+            {
+                NpcContextInput careState = Owner(careRelic, NpcInputs.Care, captured.Key, captured.Value);
+                careState.ClarityAfterCare = captured.Key == "RESEALED" ? "FADED" : "CLEAR";   // 보통 난이도로 한 판 깬 정산 결과
+                return builder.Build(careState).Request;
+            }));
         }
         List<ReactionRequest> careTemplates = builder.PrefetchTemplates(Owner(careRelic, NpcInputs.Tap, "CLEAR", 2)).Where(r => r.Input == NpcInputs.Care).ToList();
 
@@ -4546,10 +4604,18 @@ public static class Program
             };
             first.Delay = TimeSpan.FromMilliseconds(150); // 조각 하나 0.15초
             int bgStart = first.Calls.Count;
+            int bgChats = Volatile.Read(ref first.ChatsStarted);
+            // 뒤에서 만들기의 첫 조각을 읽는 중에 붙잡아 두고, 플레이어의 생성이 줄에 선 것을 본 뒤에 놓는다 — 시험 스레드가 늦어도 뒤에서 만들기가 먼저 다 끝나지 않게
+            var pieceGate = new ManualResetEventSlim(false);
+            first.ReadGate = pieceGate;
             Task<string> background = Task.Run(() => backend.CompleteAsync(bgPrompt, CancellationToken.None));
-            Check(WaitUntil(() => first.Calls.Count >= bgStart + 2, 3000), "플레이어 먼저 시험: 뒤에서 만들기가 프롬프트를 나눠 읽기 시작");
+            Check(WaitUntil(() => Volatile.Read(ref first.ChatsStarted) > bgChats, 3000), "플레이어 먼저 시험: 뒤에서 만들기가 첫 조각을 읽기 시작");
+            first.ReadGate = null;
             Stopwatch foregroundWatch = Stopwatch.StartNew();
-            string foregroundRaw = Within(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)));
+            Task<string> foreground = Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None));
+            Check(WaitUntil(() => backend.ForegroundWaiting > 0, 3000), "플레이어 먼저 시험: 플레이어의 생성이 모델 줄에 섬");
+            pieceGate.Set();
+            string foregroundRaw = Within(foreground);
             long foregroundMs = foregroundWatch.ElapsedMilliseconds;
             string backgroundError = ErrorWithin(background, 3000);
             List<FakeLlmCall> raceCalls;
@@ -4566,6 +4632,7 @@ public static class Program
             // 비키지 않으면(뒤에서 만들기만 돌면) 조각을 다 읽고 마지막에 한 번 만든다 — 시스템 메시지 조각 + 사용자 메시지 조각 + 마지막 생성
             int soloStart = first.Calls.Count;
             first.Delay = TimeSpan.FromMilliseconds(30);
+            LlmUnityCall foregroundRecord = backend.LastCall; // 위 플레이어 생성의 기록 — 뒤에서 만들기가 끝나도 그대로여야 한다 (답 글이 같아 길이로는 못 가린다)
             string soloRaw = Within(Task.Run(() => backend.CompleteAsync(bgPrompt, CancellationToken.None)));
             List<FakeLlmCall> soloCalls;
             lock (first.Calls)
@@ -4575,9 +4642,9 @@ public static class Program
             Check(soloRaw == reply && soloCalls.Count > 2 && soloCalls[soloCalls.Count - 1].MaxTokens == 40 && soloCalls[soloCalls.Count - 1].User == bgPrompt.User
                     && soloCalls.Take(soloCalls.Count - 1).All(c => c.MaxTokens == 1),
                     "뒤에서 만들기만 돌면 조각을 다 읽고 마지막에 형식 제약으로 한 번 만듦 ← 호출 " + soloCalls.Count + "번");
-            Check(backend.LastCall != null && backend.LastCall.ReplyChars == reply.Length, "뒤에서 만들기는 LastCall(플레이어 요청의 첫 응답 시간)을 덮지 않음");
+            Check(foregroundRecord != null && ReferenceEquals(backend.LastCall, foregroundRecord), "뒤에서 만들기는 LastCall(플레이어 요청의 첫 응답 시간)을 덮지 않음");
             // 모델에 남은 앞 프롬프트와 같은 앞부분(모든 도깨비에 같은 규칙 등)은 조각으로 다시 부르지 않고, 시스템 메시지 조각 뒤에는 시스템 메시지 전체 + '준비'를
-            // 한 번 읽혀(어느 조각도 한 조각보다 많이 새로 읽지 않게) 그 기억을 저장한다 (2026-11-25 리뷰)
+            // 한 번 읽혀(어느 조각도 한 조각보다 많이 새로 읽지 않게) 그 기억을 저장한다
             string sharedHead = new string('공', 300);
             Finish(Task.Run(() => backend.CompleteAsync(new NpcPrompt { System = sharedHead + "가 도깨비", User = "안녕", Grammar = prompt.Grammar }, CancellationToken.None)));
             first.Store = new HashSet<string>();
@@ -4655,6 +4722,14 @@ public static class Program
                     + (first.Calls.Count - callsBeforeGen) + "번");
             Finish(Task.Run(() => backend.CompleteAsync(promptA, CancellationToken.None)));
             Check(first.Loaded.Count == 3 && !backend.LastCallRestored, "기억 복원: 바로 앞 생성과 시스템 메시지가 같으면 되살리지 않음");
+            // 플레이어의 생성이 되살린 시간은 첫 응답·전체 시간에 들어간다 (부른 쪽이 기다린 시간)
+            Finish(Task.Run(() => backend.PrepareAsync("기억할 시스템 메시지 B", CancellationToken.None)));
+            first.LoadDelay = TimeSpan.FromMilliseconds(200);
+            Finish(Task.Run(() => backend.CompleteAsync(promptA, CancellationToken.None)));
+            first.LoadDelay = TimeSpan.Zero;
+            Check(backend.LastCallRestored && backend.LastCall != null && backend.LastCall.FirstTokenMs >= 180 && backend.LastCall.ElapsedMs >= backend.LastCall.FirstTokenMs,
+                    "기억 복원: 되살리기(0.2초)가 플레이어 생성의 첫 응답·전체 시간에 들어감 ← 첫 응답 " + (backend.LastCall != null ? backend.LastCall.FirstTokenMs : -1)
+                    + "ms, 전체 " + (backend.LastCall != null ? backend.LastCall.ElapsedMs : -1) + "ms");
             Finish(Task.Run(() => backend.CompleteAsync(prompt, CancellationToken.None)));
             Check(first.Saved.Count == 2, "기억 저장은 미리 읽을 때만 (생성 요청 뒤에는 저장 안 함 — 사용자 메시지가 섞이므로)");
             first.FailLoad = true;
@@ -5393,8 +5468,14 @@ public static class Program
                 return Task.FromResult(false);
             }
             Loaded.Add(key);
+            if (LoadDelay > TimeSpan.Zero)
+            {
+                return Task.Delay(LoadDelay).ContinueWith(_ => true); // 되살리기에 걸리는 시간 (기기에서 0.2~0.9초)
+            }
             return Task.FromResult(true);
         }
+
+        public TimeSpan LoadDelay = TimeSpan.Zero;
 
         public Task<string> ChatOnceAsync(string system, string user, string grammar, int maxTokens, LlmUnityOptions options, Action onFirstToken)
         {
@@ -5631,6 +5712,71 @@ public static class Program
         };
     }
 
+    // 관리 플레이 한 판이 선명도를 한 칸만 올리는 서버 규칙 (보통 난이도: 재봉인 → 흐려짐 → 선명). lastPurifiedAt 은 판을 깰 때마다 바뀌어,
+    // 흐려짐이면서 마지막 정화가 최근인 정령이 생긴다
+    private static void CheckStepRestore(NpcContextBuilder builder, PersonaCatalog personas, ActionCatalog actions)
+    {
+        // 관리 결과는 관리 뒤 선명도(정산 결과 응답의 clarity)
+        NpcContextInput unseal = Owner(2, NpcInputs.Care, "RESEALED", 16);
+        unseal.ClarityAfterCare = "FADED";
+        NpcContext unsealed = builder.Build(unseal);
+        Check(FactsOf(unsealed) == "care_result=재봉인→흐려짐, last_care_days_ago=16" && unsealed.KeyFact == "long_gap_care"
+                && unsealed.Request.Situation == "주인이 오랜만에 너를 관리해 주었다. 너는 다시 깨어났지만 아직 흐리다.",
+                "재봉인에서 보통 난이도 한 판: 관리 결과는 재봉인→흐려짐이고 아직 흐리다고 적음 ← " + FactsOf(unsealed) + " / " + unsealed.Request.Situation);
+        NpcContextInput hard = Owner(2, NpcInputs.Care, "RESEALED", 16);
+        hard.ClarityAfterCare = "clear";
+        Check(FactsOf(builder.Build(hard)) == "care_result=재봉인→선명, last_care_days_ago=16"
+                && FactsOf(builder.Build(Owner(2, NpcInputs.Care, "RESEALED", 16))) == "care_result=재봉인→선명, last_care_days_ago=16"
+                && !builder.Build(hard).Request.Situation.Contains("흐리"),
+                "어려움(바로 선명)·관리 뒤 선명도를 안 주면 재봉인→선명");
+
+        // 한 칸 올라 흐려짐이 된 정령을 마저 닦음: 2일 전에 관리받았으니 "오랜만에"가 아니다
+        NpcContextInput finish = Owner(2, NpcInputs.Care, "FADED", 2);
+        finish.ClarityAfterCare = "CLEAR";
+        NpcContext finished = builder.Build(finish);
+        Check(finished.KeyFact == "none" && FactsOf(finished) == "care_result=흐려짐→선명"
+                && finished.Request.Situation == "주인이 너를 관리해 주었다. 너는 다시 맑아졌다.",
+                "최근에 관리받은 흐려짐을 마저 닦으면 '오랜만에'가 아니고 다시 맑아졌다고 적음 ← " + finished.Request.Situation);
+        Check(builder.Build(Owner(2, NpcInputs.Care, "FADED", 7)).Request.Situation == "주인이 오랜만에 너를 관리해 주었다."
+                && builder.Build(Owner(2, NpcInputs.Care, "FADED", null)).KeyFact == "long_gap_care",
+                "7일 지난 흐려짐·마지막 정화를 모르는 흐려짐은 예전처럼 오랜만에");
+
+        // 안부: 흐려짐인데 오늘·2일 전에 관리받았다 — 오래 방치된 것이 아니라 아직 덜 나았다
+        var assembler = new PromptAssembler(personas, actions);
+        foreach (int days in new[] { 0, 2 })
+        {
+            NpcContext ask = builder.Build(Owner(5, NpcInputs.AskStatus, "FADED", days));
+            Check(ask.KeyFact == "faded" && Acts(ask) == "answer_status"
+                    && ask.Request.Situation == "주인이 안부를 물었다. 너는 최근에 관리를 받아 다시 깨어났지만 아직 흐리다. 주인에게 마저 닦아 달라고 부탁한다."
+                    && FactsOf(ask) == "clarity=흐려짐, last_care_days_ago=" + days,
+                    "안부·" + days + "일 전에 관리받은 흐려짐: '오래 관리를 받지 못해'가 아님 ← " + ask.Request.Situation);
+            ReactionRequest request = ask.Request;
+            var said = new List<string>();
+            for (int v = 0; v < 4; v++)
+            {
+                request.Variation = v;
+                said.Add(PromptAssembler.LinePrefix(request));
+            }
+            string user = assembler.Build(request).User;
+            Check(string.Join("|", said.ToArray()) == "아직 몸이 좀 흐려.|아직 몸이 좀 흐려.|아직 다 맑아지지 않았어.|아직 다 맑아지지 않았어."
+                    && PromptAssembler.AskVariant(request) == "state" && user.Contains("마저 닦아 달라고") && !user.Contains("일 전이었어") && !user.Contains("일이 지났어"),
+                    "안부·" + days + "일 전 관리의 흐려짐: 며칠 전 문장 없이 '아직 덜 나았다'고 말함 ← " + string.Join("|", said.ToArray()));
+            string rest;
+            Check(PromptAssembler.AskPrefixShape("아직 몸이 좀 흐려. 살살 닦아 줄래?", out rest) != null && rest == "살살 닦아 줄래?",
+                    "'아직 덜 나았다' 앞 문장도 떼고 부탁 부분끼리 견줌");
+        }
+        // 오래 흐려진 정령(9일)은 예전 그대로: 홀수 번째는 며칠 전 문장
+        NpcContext old = builder.Build(Owner(5, NpcInputs.AskStatus, "FADED", 9));
+        old.Request.Variation = 1;
+        Check(old.Request.Situation.Contains("오래 관리를 받지 못해") && PromptAssembler.LinePrefix(old.Request) == "마지막 관리가 9일 전이었어.",
+                "9일 흐려짐은 오래 방치된 것 그대로 ← " + PromptAssembler.LinePrefix(old.Request));
+        // 재봉인은 마지막 정화가 7일 안이 될 수 없다(한 칸 올라 흐려짐이 되면 7일 뒤에 다시 재봉인) — 오래 방치로 본다
+        Check(builder.Build(Owner(5, NpcInputs.AskStatus, "RESEALED", 8)).Request.Situation.Contains("오래 관리를 받지 못해"), "재봉인은 오래 방치");
+        Check(NpcContextBuilder.PartlyRestored("FADED", 6) && !NpcContextBuilder.PartlyRestored("FADED", 7) && !NpcContextBuilder.PartlyRestored("RESEALED", 2)
+                && !NpcContextBuilder.PartlyRestored("FADED", null) && !NpcContextBuilder.PartlyRestored("CLEAR", 2),
+                "덜 나은 흐려짐: 흐려짐이고 마지막 정화가 7일 안일 때만");
+    }
+
     private static NpcContextInput Guest(int relicId, string input, int? visits)
     {
         return new NpcContextInput
@@ -5739,6 +5885,7 @@ public static class Program
         NpcContext care = builder.Build(Owner(6, NpcInputs.Care, "CLEAR", 3));
         Check(care.KeyFact == "none" && !care.Request.Situation.Contains("오랜만") && care.Request.Situation.Contains("주인이 너를 관리해 주었다")
                 && FactsOf(care) == "care_result=선명→선명", "관리·평소: 누가 관리했는지 적고, 관리 날짜는 넣지 않음");
+        CheckStepRestore(builder, personas, actions);
 
         // 이야기 듣기: 실화 돌리기
         var storyBuilder = new NpcContextBuilder(personas);
