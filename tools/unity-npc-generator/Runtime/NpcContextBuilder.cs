@@ -55,7 +55,8 @@ namespace Jamkkaebi.Npc
         /// <summary>
         /// 지금 상대가 최근 30일에 방문한 날들 (서버의 방문 기록, 지금 방문을 포함해도 된다). 같은 날 여러 번이면 하루로 센다.
         /// 주인 장면은 GET /api/exhibition 의 recentVisitDates(주인이 내 전시관을 연 날), 손님 장면은 친구 전시관의 recentVisitDates(그 친구가 내 전시관에 온 날)를 그대로 넘긴다.
-        /// 친밀도는 이 날 수로 정한다(3·7·12·20번을 채울 때마다 한 단계, NpcAddress.IntimacyOf). 3단계(12번)부터 닉네임으로 부르고, 0~2단계는 '발굴자'로 부른다.
+        /// 손님 장면의 호칭 단계는 이 날 수로 정한다(3·7·12·20번을 채울 때마다 한 단계, NpcAddress.VisitorLevelOf). 주인 장면의 친밀도는 CareCount 로 정하고 이 기록은 쓰지 않는다.
+        /// 3단계(12번)부터 닉네임으로 부르고, 0~2단계는 '발굴자'로 부른다.
         /// 대사에는 이 날짜 그대로 "N일 전"이 들어간다.
         /// </summary>
         public List<DateTime> VisitDates { get; set; }
@@ -215,10 +216,10 @@ namespace Jamkkaebi.Npc
             var context = new NpcContext { Request = request, KeyFact = "none" };
             bool owner = input.Mode == InteractionMode.Owner;
 
-            // 친밀도: 최근 30일 방문한 날 수가 3·7·12·20번을 채울 때마다 한 단계. 3단계부터 닉네임으로 부르고, 0~2단계(또는 닉네임 없음)는 '발굴자'
+            // 친밀도: 주인이 이 도깨비를 관리한 누적 횟수가 3·7·12·20번을 채울 때마다 한 단계 (게임의 IntimacyPolicy 와 같은 기준).
+            // 손님은 관리하지 않으므로 최근 30일 방문한 날 수로 같은 단계를 매긴다. 3단계부터 닉네임으로 부르고, 0~2단계(또는 닉네임 없음)는 '발굴자'
             request.Nickname = CleanNickname(input.Nickname);
-            int? visitCount = VisitCount(input);
-            request.Intimacy = NpcAddress.IntimacyOf(visitCount);
+            request.Intimacy = owner ? NpcAddress.IntimacyOf(input.CareCount) : NpcAddress.VisitorLevelOf(VisitCount(input));
 
             if (input.Input == NpcInputs.Visit)
             {
@@ -300,7 +301,7 @@ namespace Jamkkaebi.Npc
                     RelicId = state.RelicId, Mode = state.Mode, Input = input, Today = state.Today, Clarity = state.Clarity,
                     ClarityAfterCare = input == NpcInputs.Care ? StepUp(state.Clarity) : null,   // 보통 난이도로 한 판 깬 뒤
                     AwakeningStage = state.AwakeningStage, LastPurifiedAt = state.LastPurifiedAt, RecentVisitDays = state.RecentVisitDays,
-                    Now = state.Now, Nickname = state.Nickname, VisitDates = state.VisitDates, RealStory = state.RealStory,
+                    CareCount = state.CareCount, Now = state.Now, Nickname = state.Nickname, VisitDates = state.VisitDates, RealStory = state.RealStory,
                     Memory = state.Memory != null ? new List<MemoryEntry>(state.Memory) : new List<MemoryEntry>()
                 };
                 ReactionRequest request = Build(copy).Request;

@@ -119,7 +119,7 @@ namespace Jamkkaebi.Npc
             object value;
             if (scene.TryGetValue("intimacy", out value) && value != null && !(value is bool))
             {
-                return Math.Max(0, Math.Min(NpcAddress.LevelUpVisits.Count, Convert.ToInt32(value, CultureInfo.InvariantCulture)));
+                return Math.Max(0, Math.Min(NpcAddress.LevelUpCareCounts.Count, Convert.ToInt32(value, CultureInfo.InvariantCulture)));
             }
             return scene.TryGetValue("familiar", out value) && value is bool && (bool)value ? NpcAddress.NicknameLevel : 0;
         }

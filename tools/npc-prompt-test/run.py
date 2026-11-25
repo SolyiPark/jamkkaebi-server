@@ -438,12 +438,20 @@ def system_block(p, with_examples):
 
 
 STRANGER = "발굴자"  # 친밀하지 않은 상대를 부르는 호칭 (C# NpcAddress.Stranger)
-LEVEL_UP_VISITS = (3, 7, 12, 20)  # 최근 30일 방문한 날 수가 이만큼 이상이면 친밀도가 한 단계씩 오른다 (C# NpcAddress.LevelUpVisits)
-NICKNAME_LEVEL = 3  # 이 단계(3단계 = 30일 방문 12번) 이상이면 닉네임으로 부른다 (C# NpcAddress.NicknameLevel). 0~2단계는 '발굴자'
+LEVEL_UP_CARE_COUNTS = (3, 7, 12, 20)  # 주인의 누적 관리 성공 횟수가 이만큼 이상이면 친밀도가 한 단계씩 오른다 (C# NpcAddress.LevelUpCareCounts, 게임의 IntimacyPolicy 기본값)
+LEVEL_UP_VISITS = (3, 7, 12, 20)  # 손님이 최근 30일에 방문한 날 수가 이만큼 이상이면 호칭 단계가 한 단계씩 오른다 (C# NpcAddress.LevelUpVisits)
+NICKNAME_LEVEL = 3  # 이 단계(3단계 = 주인은 관리 12번, 손님은 30일 방문 12번) 이상이면 닉네임으로 부른다 (C# NpcAddress.NicknameLevel). 0~2단계는 '발굴자'
 
 
-def intimacy_of_visits(visits):
-    """최근 30일 방문한 날 수(같은 날은 하루)에서 친밀도 0~4단계를 구한다. 기록이 없으면 0. C# NpcAddress.IntimacyOf 와 같다."""
+def intimacy_of_care(care_count):
+    """주인의 누적 관리 성공 횟수에서 친밀도 0~4단계를 구한다. 모르면 0. C# NpcAddress.IntimacyOf 와 같다."""
+    if care_count is None:
+        return 0
+    return sum(1 for need in LEVEL_UP_CARE_COUNTS if care_count >= need)
+
+
+def visitor_level_of(visits):
+    """손님이 최근 30일에 방문한 날 수(같은 날은 하루)에서 호칭 단계 0~4를 구한다. 기록이 없으면 0. C# NpcAddress.VisitorLevelOf 와 같다."""
     if visits is None:
         return 0
     return sum(1 for need in LEVEL_UP_VISITS if visits >= need)
@@ -453,7 +461,7 @@ def intimacy(scene):
     """장면의 친밀도. 'intimacy'(0~4)가 있으면 그것, 없으면 예전 칸 'familiar'(True → 닉네임 단계(3), False → 0단계). C# NpcTestScenes.IntimacyOf 와 같다."""
     value = scene.get("intimacy")
     if isinstance(value, (int, float)) and not isinstance(value, bool):
-        return max(0, min(len(LEVEL_UP_VISITS), int(value)))
+        return max(0, min(len(LEVEL_UP_CARE_COUNTS), int(value)))
     return NICKNAME_LEVEL if scene.get("familiar") is True else 0
 
 
@@ -469,7 +477,7 @@ def partner_lines(p, scene, variation=0):
     같은 도깨비·같은 상대면 이 부분도 앞 요청과 같아 다시 읽지 않는 범위가 늘어난다.
     두 태도를 다 실으면 작은 모델이 주인에게 손님 태도로 말해서 지금 상대의 것만 싣는다.
     """
-    # 호칭은 친밀도 3단계(30일에 12번 이상 방문)부터 닉네임, 아니면 '발굴자'. 꼭 부르지 않아도 된다 (모든 대사에 넣으면 부담스럽다)
+    # 호칭은 친밀도 3단계(주인은 관리 12번, 손님은 30일에 12번 이상 방문)부터 닉네임, 아니면 '발굴자'. 꼭 부르지 않아도 된다 (모든 대사에 넣으면 부담스럽다)
     # 닉네임·'발굴자'를 대사에 꼭 넣을 필요는 없지만 가끔은 나와야 정이 든다: 세 번에 한 번(variation 0·3·6…)은 "한 번 불러 준다"고 적고, 나머지는 호칭만 알려 준다.
     # "도윤님"처럼 '님'을 붙이면 출력 직전에 뗀다 (strip_nim). C# PromptAssembler.PartnerLines 와 같다
     address = f"호칭: {address_name(scene)}" + ("(한 번 불러 준다)" if variation % 3 == 0 else "")

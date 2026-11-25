@@ -421,7 +421,7 @@ namespace Jamkkaebi.Npc
 
         private static IEnumerable<string> PartnerLines(Persona p, ReactionRequest request)
         {
-            // 호칭은 친밀도 3단계(30일에 12번 이상 방문)부터 닉네임, 아니면 '발굴자'. 꼭 부르지 않아도 된다 (모든 대사에 넣으면 부담스럽다)
+            // 호칭은 친밀도 3단계(주인은 관리 12번, 손님은 30일에 12번 이상 방문)부터 닉네임, 아니면 '발굴자'. 꼭 부르지 않아도 된다 (모든 대사에 넣으면 부담스럽다)
             // 닉네임·'발굴자'를 대사에 꼭 넣을 필요는 없지만 가끔은 나와야 정이 든다: 세 번에 한 번(Variation 0·3·6…)은 "한 번 불러 준다"고 적고,
             // 나머지는 호칭만 알려 준다 (적어 두면 모델이 부르기도 한다). "도윤님"처럼 '님'을 붙이면 출력 직전에 뗀다(NpcLineChecks.NormalizeSpeech)
             string address = "호칭: " + request.AddressName + (request.Variation % 3 == 0 ? "(한 번 불러 준다)" : "");
