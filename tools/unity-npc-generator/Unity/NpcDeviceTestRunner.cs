@@ -357,7 +357,7 @@ namespace Jamkkaebi.Npc
                                 prepareCts.Dispose();
                             }
                         };
-                        Task prepareTask = run.PrepareAsync(scene.RelicId, prepareCts.Token);
+                        Task<NpcPrepareOutcome> prepareTask = run.PrepareAsync(scene.RelicId, prepareCts.Token);
                         prepareTask.ContinueWith(t =>
                         {
                             if (t.IsFaulted)
@@ -383,17 +383,22 @@ namespace Jamkkaebi.Npc
                         }
                         // 화면을 닫는 중이면(OnDestroy 가 ct 를 취소) 다른 것을 건드리기 전에 멈춘다
                         ct.ThrowIfCancellationRequested();
-                        if (prepared)
+                        // PrepareAsync 는 예외를 던지지 않고 어떻게 끝났는지 돌려준다. 실패·취소·맡김·안 함은 끝난 미리 읽기가 아니라 미리읽기ms 를 비우고(-1) 통계에서도 뺀다 —
+                        // 예전에는 백엔드가 LastPrepare 를 적기 전에 실패해도 기록이 안 바뀌어 '이미 읽힘'으로 적혔고, 맡긴 시간이 빨리 끝난 미리 읽기로 CSV 에 남았다 (CodeRabbit 리뷰)
+                        NpcPrepareOutcome outcome = !prepared ? NpcPrepareOutcome.Cancelled
+                                : prepareTask.Status == TaskStatus.RanToCompletion ? prepareTask.Result : NpcPrepareOutcome.Failed;
+                        if (prepared && outcome != NpcPrepareOutcome.Completed)
+                        {
+                            kvNote = outcome == NpcPrepareOutcome.Deferred ? "뒤에서 만들기에 맡김"   // 같은 도깨비의 생성이 시스템 메시지를 읽는다 — 다 읽힌 것은 아니다
+                                    : outcome == NpcPrepareOutcome.Failed ? "미리읽기 실패(" + preparing.ElapsedMilliseconds + "ms)"
+                                    : outcome == NpcPrepareOutcome.Cancelled ? "미리읽기 취소(" + preparing.ElapsedMilliseconds + "ms)"
+                                    : "미리읽기 안 함";
+                        }
+                        else if (prepared)
                         {
                             prepareMs = preparing.ElapsedMilliseconds;
                             prepareTimes.Add(prepareMs);
-                            if (run.LastPrepareDeferred)
-                            {
-                                // 같은 도깨비의 뒤에서 만들기에 맡겨 미리 읽지 않았다 — 미리읽기ms 가 0 에 가까워도 시스템 메시지가 다 읽힌 것은 아니다 (통계에서도 뺀다)
-                                kvNote = "뒤에서 만들기에 맡김";
-                                prepareTimes.RemoveAt(prepareTimes.Count - 1);
-                            }
-                            else if (llm != null)
+                            if (llm != null)
                             {
                                 bool didPrepare = llm.LastPrepare != prepareBefore; // 이 미리 읽기가 모델에서 무언가를 했다 (이미 읽힌 것이면 기록이 안 바뀐다)
                                 kvNote = !didPrepare ? "이미 읽힘"

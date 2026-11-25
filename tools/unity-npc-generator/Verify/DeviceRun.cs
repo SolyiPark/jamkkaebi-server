@@ -109,16 +109,16 @@ public static class DeviceRun
                 case "--url": s.Url = Value(args, ref i); break;
                 case "--model": s.Model = Value(args, ref i); break;
                 case "--repeat": s.Repeat = Math.Max(1, (int)Number(args, ref i)); break;
-                case "--gap": s.GapSeconds = Math.Max(0, Number(args, ref i)); break;
-                case "--idle": s.IdleSeconds = Math.Max(0, Number(args, ref i)); break;
-                case "--switch-idle": s.SwitchIdleSeconds = Math.Max(0, Number(args, ref i)); break;
+                case "--gap": s.GapSeconds = Seconds(args, ref i, 0); break;
+                case "--idle": s.IdleSeconds = Seconds(args, ref i, 0); break;
+                case "--switch-idle": s.SwitchIdleSeconds = Seconds(args, ref i, 0); break;
                 case "--no-adaptive-idle": s.AdaptiveIdle = false; break;
                 case "--seed": s.Seed = (int)Number(args, ref i); break;
                 case "--per-scene": s.PerScene = Math.Max(1, (int)Number(args, ref i)); break;
-                case "--slm-timeout": s.SlmTimeoutSeconds = Math.Max(1, Number(args, ref i)); break;
-                case "--prefetch-timeout": s.PrefetchTimeoutSeconds = Math.Max(1, Number(args, ref i)); break;
-                case "--prefetch-wait": s.PrefetchWaitSeconds = Math.Max(0, Number(args, ref i)); break;
-                case "--prepare-timeout": s.PrepareTimeoutSeconds = Math.Max(1, Number(args, ref i)); break;
+                case "--slm-timeout": s.SlmTimeoutSeconds = Seconds(args, ref i, 1); break;
+                case "--prefetch-timeout": s.PrefetchTimeoutSeconds = Seconds(args, ref i, 1); break;
+                case "--prefetch-wait": s.PrefetchWaitSeconds = Seconds(args, ref i, 0); break;
+                case "--prepare-timeout": s.PrepareTimeoutSeconds = Seconds(args, ref i, 1); break;
                 case "--fresh": s.Fresh = true; break;
                 case "--no-prefetch": s.Prefetch = false; break;
                 case "--no-store": s.Store = false; break;
@@ -149,6 +149,23 @@ public static class DeviceRun
             throw new ArgumentException(name + " 의 값이 숫자가 아니다: " + args[i]);
         }
         return value;
+    }
+
+    /// <summary>초 단위 옵션에 쓸 수 있는 가장 큰 값. TimeSpan 은 Task.Delay·CancelAfter 에 넘기므로 int.MaxValue ms(약 24일)를 넘지 못한다.</summary>
+    private const double MaxSeconds = int.MaxValue / 1000.0;
+
+    // 초 단위 옵션: 숫자가 아니거나 무한·NaN·MaxSeconds 를 넘으면 옵션 오류로 끝낸다 (LM Studio 에 연결하기 전에).
+    // 예전에는 "--switch-idle 1e20" 이 하한만 지나 연결한 뒤 TimeSpan.FromSeconds 에서 예외가 나, 옵션 오류가 아니라 실행 오류로 적혔다 (CodeRabbit 리뷰).
+    // 하한보다 작은 값은 예전처럼 하한으로 올린다 (0 은 그대로 쓸 수 있다)
+    private static double Seconds(string[] args, ref int i, double min)
+    {
+        string name = args[i];
+        double value = Number(args, ref i);
+        if (double.IsNaN(value) || double.IsInfinity(value) || value > MaxSeconds)
+        {
+            throw new ArgumentException(name + " 의 값이 쓸 수 없는 초다(0~" + (long)MaxSeconds + "): " + args[i]);
+        }
+        return Math.Max(min, value);
     }
 
     // LM Studio 에 연결하지 못하면 false
@@ -312,7 +329,7 @@ public static class DeviceRun
                             prepareCts.Dispose();
                         }
                     };
-                    Task prepareTask = run.PrepareAsync(scene.RelicId, prepareCts.Token);
+                    Task<NpcPrepareOutcome> prepareTask = run.PrepareAsync(scene.RelicId, prepareCts.Token);
                     // 기한과 경주시킨다. 기한이 먼저면 취소만 걸고 기다리지 않고 요청한다 — 취소를 듣지 않는 일에서도 시험이 멈추지 않게.
                     // 미리 읽기는 실패해도 요청이 처음부터 읽을 뿐이다
                     Task released = prepareTask.ContinueWith(t =>
@@ -337,17 +354,26 @@ public static class DeviceRun
                         releaseCts();
                     }
                     ct.ThrowIfCancellationRequested();
+                    // 실패·취소·맡김·안 함은 끝난 미리 읽기가 아니다 — CSV 의 미리읽기ms 를 비우고(-1) 통계에서도 뺀다 (NpcDeviceTestRunner 와 같다)
+                    NpcPrepareOutcome outcome = !prepared ? NpcPrepareOutcome.Cancelled
+                            : prepareTask.Status == TaskStatus.RanToCompletion ? prepareTask.Result : NpcPrepareOutcome.Failed;
                     if (prepared)
                     {
-                        prepareMs = preparing.ElapsedMilliseconds;
-                        if (run.LastPrepareDeferred)
+                        if (outcome == NpcPrepareOutcome.Deferred)
                         {
-                            // 같은 도깨비의 뒤에서 만들기에 맡겨 미리 읽지 않았다 — 바로 끝나지만 준비가 끝난 것은 아니라 미리 읽기 통계에서 뺀다
+                            // 같은 도깨비의 뒤에서 만들기에 맡겨 미리 읽지 않았다 — 바로 끝나지만 준비가 끝난 것은 아니라 미리 읽기 통계에서 빼고,
+                            // CSV 의 미리읽기ms 도 비운다(-1). 맡긴 시간을 적으면 빨리 끝난 미리 읽기로 셀 수 있다 (CodeRabbit 리뷰)
                             prepareDeferred++;
                             kvNote = "뒤에서 만들기에 맡김";
                         }
+                        else if (outcome != NpcPrepareOutcome.Completed)
+                        {
+                            kvNote = (outcome == NpcPrepareOutcome.Failed ? "미리읽기 실패(" : outcome == NpcPrepareOutcome.Cancelled ? "미리읽기 취소(" : "미리읽기 안 함(")
+                                    + preparing.ElapsedMilliseconds + "ms)";
+                        }
                         else
                         {
+                            prepareMs = preparing.ElapsedMilliseconds;
                             (scene.RelicId == lastRelic ? prepareSame : prepareChanged).Add(prepareMs);
                         }
                     }
@@ -410,7 +436,7 @@ public static class DeviceRun
                     .Append(-1).Append(',').Append(Csv(response.Note)).Append(',').Append(prefetched ? "O" : "X").Append(',')
                     .Append(Csv(prefetched && response.Reaction != null ? response.Reaction.Note : "")).Append(',').Append(Csv(retargeted)).Append(',')
                     .Append(prepareTimedOutMs >= 0 ? prepareTimedOutMs.ToString(CultureInfo.InvariantCulture) : "").Append(',')
-                    .Append(Csv(kvNote)).Append('\n'); // 기억 열: LM Studio 백엔드는 기억(KV 슬롯) 저장·복원을 하지 않아 '뒤에서 만들기에 맡김'만 적는다
+                    .Append(Csv(kvNote)).Append('\n'); // 기억 열: LM Studio 백엔드는 기억(KV 슬롯) 저장·복원을 하지 않아 '뒤에서 만들기에 맡김'·미리 읽기 실패·취소만 적는다
                 File.AppendAllText(path, row.ToString(), new UTF8Encoding(false));
 
                 if (s.GapSeconds > 0)
