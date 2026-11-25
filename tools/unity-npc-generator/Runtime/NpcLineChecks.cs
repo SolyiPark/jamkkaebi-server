@@ -908,7 +908,7 @@ namespace Jamkkaebi.Npc
         }
 
         /// <summary>
-        /// 호칭이 규칙과 다르면 그 말, 아니면 null. 친밀하면(3단계 이상 — 30일 방문 12번 이상) 닉네임으로 부르고 '발굴자'는 쓰지 않으며,
+        /// 호칭이 규칙과 다르면 그 말, 아니면 null. 친밀하면(3단계 이상 — 주인은 관리 12번, 손님은 30일 방문 12번 이상) 닉네임으로 부르고 '발굴자'는 쓰지 않으며,
         /// 아니면 '발굴자'로 부르고 닉네임은 쓰지 않는다. 둘 다 꼭 들어갈 필요는 없다. run.py 의 address_contradiction 과 같다.
         /// </summary>
         public static string AddressContradiction(string line, string nickname, bool familiar)

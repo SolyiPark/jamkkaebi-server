@@ -161,28 +161,48 @@ namespace Jamkkaebi.Npc
     }
 
     /// <summary>
-    /// 상대를 부르는 이름과 친밀도. 친밀도는 최근 30일 방문한 날 수로 정한다: 3·7·12·20번을 채울 때마다 한 단계 오른다 (0~4단계).
-    /// 3단계(30일 방문 12번)부터 닉네임으로 부르고, 0~2단계는 '발굴자'로 부른다.
+    /// 상대를 부르는 이름과 친밀도. 친밀도는 주인이 이 도깨비를 관리한(관리 플레이 성공) 누적 횟수로 정한다:
+    /// 3·7·12·20번을 채울 때마다 한 단계 오른다 (0~4단계). 게임의 IntimacyPolicy 기본값과 같은 기준이고, 게임 화면의 Lv.1~5 가 여기의 0~4단계다.
+    /// 3단계(관리 12번)부터 닉네임으로 부르고, 0~2단계는 '발굴자'로 부른다.
+    /// 손님(구경 온 친구)은 도깨비를 관리하지 않으므로 친밀도가 없다. 대신 최근 30일 방문한 날 수로 같은 단계를 매겨 호칭을 정한다 (VisitorLevelOf).
     /// </summary>
     public static class NpcAddress
     {
         /// <summary>친밀하지 않은 상대(0단계, 닉네임 없음)를 부르는 호칭.</summary>
         public const string Stranger = "발굴자";
 
-        /// <summary>최근 30일 방문한 날 수가 이만큼 이상이면 한 단계씩 오른다: 3번 → 1단계, 7번 → 2단계, 12번 → 3단계, 20번 → 4단계.</summary>
+        /// <summary>
+        /// 누적 관리 성공 횟수가 이만큼 이상이면 친밀도가 한 단계씩 오른다: 3번 → 1단계, 7번 → 2단계, 12번 → 3단계, 20번 → 4단계.
+        /// 게임의 IntimacyPolicy.Default.LevelUpCareCounts 와 같아야 한다 (게임 쪽 테스트가 확인한다).
+        /// </summary>
+        public static readonly System.Collections.ObjectModel.ReadOnlyCollection<int> LevelUpCareCounts =
+            System.Array.AsReadOnly(new[] { 3, 7, 12, 20 });
+
+        /// <summary>손님이 최근 30일에 방문한 날 수가 이만큼 이상이면 호칭 단계가 한 단계씩 오른다: 3번 → 1단계, 7번 → 2단계, 12번 → 3단계, 20번 → 4단계.</summary>
         public static readonly System.Collections.ObjectModel.ReadOnlyCollection<int> LevelUpVisits =
             System.Array.AsReadOnly(new[] { 3, 7, 12, 20 });
 
-        /// <summary>이 단계(3단계 = 30일 방문 12번) 이상이면 닉네임으로 부른다.</summary>
+        /// <summary>이 단계(3단계 = 주인은 관리 12번, 손님은 30일 방문 12번) 이상이면 닉네임으로 부른다.</summary>
         public const int NicknameLevel = 3;
 
-        /// <summary>최근 30일 방문한 날 수(같은 날은 하루)에서 친밀도를 구한다. 방문 기록이 없으면 0.</summary>
-        public static int IntimacyOf(int? visits)
+        /// <summary>주인이 이 도깨비를 관리한(관리 플레이 성공) 누적 횟수에서 친밀도(0~4단계)를 구한다. 횟수를 모르면 0.</summary>
+        public static int IntimacyOf(int? careCount)
+        {
+            return LevelOf(careCount, LevelUpCareCounts);
+        }
+
+        /// <summary>손님이 최근 30일에 방문한 날 수(같은 날은 하루)에서 호칭 단계(0~4)를 구한다. 방문 기록이 없으면 0.</summary>
+        public static int VisitorLevelOf(int? visitDays)
+        {
+            return LevelOf(visitDays, LevelUpVisits);
+        }
+
+        private static int LevelOf(int? count, System.Collections.ObjectModel.ReadOnlyCollection<int> levelUpCounts)
         {
             int level = 0;
-            if (visits.HasValue)
+            if (count.HasValue)
             {
-                while (level < LevelUpVisits.Count && visits.Value >= LevelUpVisits[level])
+                while (level < levelUpCounts.Count && count.Value >= levelUpCounts[level])
                 {
                     level++;
                 }
@@ -287,7 +307,8 @@ namespace Jamkkaebi.Npc
         public string Nickname { get; set; }
 
         /// <summary>
-        /// 친밀도 0~4단계 (NpcAddress.IntimacyOf — 최근 30일 방문한 날 수가 3·7·12·20번을 채울 때마다 한 단계). 컨텍스트 구성기가 정한다.
+        /// 친밀도 0~4단계 (NpcAddress.IntimacyOf — 주인의 누적 관리 성공 횟수가 3·7·12·20번을 채울 때마다 한 단계). 컨텍스트 구성기가 정한다.
+        /// 손님 장면에서는 최근 30일 방문한 날 수로 매긴 호칭 단계(NpcAddress.VisitorLevelOf)가 들어간다.
         /// 3단계부터 닉네임으로 부른다.
         /// </summary>
         public int Intimacy { get; set; }
