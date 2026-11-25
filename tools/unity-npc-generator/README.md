@@ -120,7 +120,7 @@ NpcContext context = builder.Build(new NpcContextInput
     Memory = memoryStore.For(spirit.relicId),  // 이 도깨비와의 대화 기억 (요약, DaysAgo, 꺼냈음 Recalled). 오래된 것부터, 새 기억은 뒤에 붙인 순서로
     Now = serverNow,                           // 서버 시각(KST, 시·분 포함) — 탭 인사에 시간대(새벽·아침·오전·낮·저녁·밤)를 말하게 한다. 기기 시계는 쓰지 않는다
     Nickname = exhibition.nickname,            // 지금 상대의 닉네임 (주인 장면은 주인, 손님 장면은 구경 온 친구)
-    VisitDates = exhibition.recentVisitDates   // 지금 상대가 최근 30일에 방문한 날들 (서버의 방문 기록). 친밀도를 이 날 수로 계산한다. 대사의 "N일 전"은 이 기록 그대로
+    CareCount = spirit.careCount               // 이 도깨비를 관리한(관리 플레이 성공) 누적 횟수 — 작업대·정화 응답의 careCount. 주인 장면의 친밀도를 이 횟수로 계산한다
 });
 
 NpcResponse response = await manager.RequestAsync(context.Request, ct);
@@ -137,7 +137,7 @@ if (response.ShouldShow)
         memoryStore.MarkRecalled(spirit.relicId, context.MemoryToMark);   // Finish 가 그 기억의 Recalled 를 true 로 바꿨다 — 저장소에도 남긴다 (2026-11-24)
     }
 }
-// 손님 장면: Mode = Visitor, Input = NpcInputs.Visit, Nickname = friendExhibition.visitorNickname, VisitDates = friendExhibition.recentVisitDates (그 친구가 내 전시관에 온 날들. 없으면 RecentVisitDays = friendExhibition.recentVisitDays 로 횟수만)
+// 손님 장면: Mode = Visitor, Input = NpcInputs.Visit, Nickname = friendExhibition.visitorNickname, VisitDates = friendExhibition.recentVisitDates (그 친구가 내 전시관에 온 날들 — 손님의 호칭 단계는 이 날 수로 계산하고, 대사의 "N일 전"도 이 기록 그대로다. 없으면 RecentVisitDays = friendExhibition.recentVisitDays 로 횟수만). CareCount 는 손님 장면에서 쓰지 않는다
 ```
 
 **미리 만들어 두기 (2026-11-14)** — 기기에서 SLM 은 한 번 만드는 데 몇 초가 걸려서, 요청이 오기 전에 한가할 때 대사를 백그라운드로 만들어 두고 요청이 오면 바로 꺼내 쓴다.
@@ -207,7 +207,7 @@ NpcResponse response = await manager.RequestAsync(builder.Build(input).Request, 
 | 입력 | 쓰임 |
 |---|---|
 | `Now` (서버 시각) | 탭 인사에만 `지금 시간대: 낮` 사실을 넣고, 상황 문장에 주인이 부른 때로 녹인다("주인이 낮에 찾아와 너를 불렀다". 2026-11-16부터 "탭했다"가 아니라 "불렀다" — 화면 조작 용어라 모델이 "탭해 줘서"를 따라 말해 금칙어에 걸렸다(64건 중 3건 재시도). "불렀다"는 "날 불러줘서 반가워"로 이어진다. 별도 문장으로 "시간대를 곁들인다"고 했더니 "아침이라 반가워"·"아침에 일찍 찾아뵈었어"처럼 어색했다, 2026-11-13). 상황 문장의 "화면이 너에게 가까이 다가왔다"는 "화면이 가까워져서"로 옮겨져 뺐다. 시간대는 새벽(0~5시)·아침(5~9)·오전(9~12)·낮(12~17)·저녁(17~21)·밤(21~24). 없으면 시간대 이야기를 하지 않고, 자료에 시간대가 없는데 "오늘 밤"이라고 하면 출력 검사가 거른다(`WrongTime`) |
-| `Nickname` + `VisitDates` | **최근 30일 방문한 날 수**(같은 날은 하루, 30일 밖·미래는 뺌)로 친밀도(`Intimacy`, 0~4단계)를 정한다: 3·7·12·20번을 채울 때마다 한 단계(`NpcAddress.LevelUpVisits`, `IntimacyOf`). **3단계(12번)부터** 친밀해져 `상대 호칭: 닉네임`(`NpcAddress.NicknameLevel`), 0~2단계면 `상대 호칭: 발굴자`(`NpcAddress.Stranger`)를 프롬프트에 싣는다. 닉네임·'발굴자' 모두 대사에 꼭 넣을 필요는 없고, 규칙과 다른 호칭(친밀한데 '발굴자', 아닌데 닉네임)만 `WrongAddress` 로 거른다. 닉네임이 없으면 늘 '발굴자' |
+| `Nickname` + `CareCount`(주인) · `VisitDates`(손님) | 친밀도(`Intimacy`, 0~4단계)는 주인이 그 도깨비를 관리한 **누적 관리 성공 횟수**(`CareCount`, 모르면 0단계)로 정한다: 3·7·12·20번을 채울 때마다 한 단계(`NpcAddress.LevelUpCareCounts`, `IntimacyOf`). 게임의 `IntimacyPolicy` 기본값과 같은 기준이고, 게임 화면의 Lv.1~5 가 여기의 0~4단계다. 손님은 관리하지 않으므로 **최근 30일 방문한 날 수**(같은 날은 하루, 30일 밖·미래는 뺌)로 같은 단계를 매긴다(`NpcAddress.LevelUpVisits`, `VisitorLevelOf`). **3단계(12번)부터** 친밀해져 `상대 호칭: 닉네임`(`NpcAddress.NicknameLevel`), 0~2단계면 `상대 호칭: 발굴자`(`NpcAddress.Stranger`)를 프롬프트에 싣는다. 닉네임·'발굴자' 모두 대사에 꼭 넣을 필요는 없고, 규칙과 다른 호칭(친밀한데 '발굴자', 아닌데 닉네임)만 `WrongAddress` 로 거른다. 닉네임이 없으면 늘 '발굴자' |
 | `VisitDates` | 손님 장면에 `최근 방문한 날: 오늘, 3일 전, 9일 전` 사실로 넘긴다. 최근 방문이 7일 안에 있으면(3일 전에도 왔으면) "오랜만"은 `WrongHistory` 로 거른다. 대사의 "어제"·"이틀 전"·"N일 전"은 이 기록·마지막 관리(`last_care_days_ago`)·대화 기억·상황 문장에 있는 날이어야 하고, 없는 날을 말하면 `WrongHistory` 로 거른다 |
 
 **가장 중요한 사실 고르기** — 선택지마다 위에서부터 조건을 보고 처음 맞는 것 하나만 상황 문장에 적는다 (`context.KeyFact` 에 무엇을 골랐는지 남는다).
@@ -378,7 +378,7 @@ llama.cpp 는 프롬프트 앞부분이 글자 하나까지 같으면 이미 읽
 | 외국어 | 영문·가나·한자가 섞임 (영어, 행동 ID `greet` 를 그대로 적음) | `Foreign` |
 | 기록 | 손님: 방문 횟수와 어긋남(단골에게 "처음", 첫 방문에 "오랜만"). **주인**: 대화 기억도 마지막 관리 사실(`last_care_days_ago`)도 없는데 "오랜만"·"또 왔"·"다시 만나" (실기기: 말발굽 탭 인사에서 "오랜만이야"). 상황 문장에 그 낱말이 있으면 근거가 있어 통과 | `WrongHistory` |
 | 시간대 | 지금 시간대와 어긋난 말(낮인데 "좋은 밤"), 자료에 시간대가 없는데 "오늘 밤". '낮잠'·'밤새'·'밤바다'는 시간대 낱말이 아니다 | `WrongTime` |
-| 호칭 | 친밀한데(3단계 이상, 30일 12번 이상) 문장 안에서 '발굴자', 친밀하지 않은데 문장 안에서 닉네임. 플레이어를 **부르는 말**(뒤에 쉼표·느낌표·물음표가 오는 '친구야,'·'손님,'·틀린 쪽 호칭)은 거르지 않고 맞는 쪽 하나로 바꾼다(`NpcLineChecks.UnifyPlayerCall` — 거르면 다시 만드는 1.5~2초가 든다) | `WrongAddress` |
+| 호칭 | 친밀한데(3단계 이상 — 주인은 관리 12번, 손님은 30일 방문 12번 이상) 문장 안에서 '발굴자', 친밀하지 않은데 문장 안에서 닉네임. 플레이어를 **부르는 말**(뒤에 쉼표·느낌표·물음표가 오는 '친구야,'·'손님,'·틀린 쪽 호칭)은 거르지 않고 맞는 쪽 하나로 바꾼다(`NpcLineChecks.UnifyPlayerCall` — 거르면 다시 만드는 1.5~2초가 든다) | `WrongAddress` |
 | 주체 | 자기 것(`ownThings`: 자개·옻칠…)을 '내 ~' 없이 남의 솜씨를 구경하듯 말함 — 자기 것이 주어이고 같은 문장에 솜씨 낱말(공들·정성껏·빚어·새겨·칠한…)과 구경하는 끝맺음(~거네·~거구나)이 함께 있을 때 ("오, 자개가 정말 공들여 만든 거네 덕분에 빛나네.", 2026-11-16 시험 S14). '내'·'나의'·'우리'가 앞에 있거나 '몸'·'모습'이면 통과 (`NpcLineChecks.SubjectContradiction`) | `WrongSubject` |
 | 오타 | `쏟었군`(모음 어긋남: ㅏ·ㅗ 뒤 `었`, 그 밖 뒤 `았`), `할께`·`할꺼`, 자음·모음만 남은 글(`ㅋㅋ`), 겹조사(`을를`), 자주 틀리는 철자(`됬`·`몇일`·`어떻해`·`웬지`·`금새`·`오랫만`·`바램`·`왠만`), `만먹` (`NpcLineChecks.Typo`) | `Typo` |
 | 끝맺음 | 이어 주는 말(`~서`·`~며`·`~니까`·`~면`…)이나 조사(`~은`·`~는`·`~을`·`~를`·`~의`)로 끝난 문장 ("꼬리까지 깨끗하게 관리해 줘서"). 인용(`~다고`)·"여기서"·"어서"는 끝난 것으로 봄. 끝의 의성어(`히힛!`·`어흠.`)는 말투 다듬기가 먼저 떼므로, 그 앞이 끊긴 말이면 걸린다 | `Incomplete` |

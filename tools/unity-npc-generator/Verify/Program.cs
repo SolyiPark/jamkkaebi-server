@@ -1658,7 +1658,7 @@ public static class Program
         askInput.Now = Today.AddHours(14);
         Check(builder.Build(askInput).Request.FindFact(NpcFactKeys.TimeOfDay) == null, "시간대는 탭 인사에만 넘김 (안부에는 없음)");
 
-        // 2) 호칭: 30일에 12번 이상(친밀도 3단계) 방문하면 닉네임, 아니면 '발굴자'
+        // 2) 호칭: 3단계(주인은 관리 12번 이상의 친밀도, 손님은 30일에 12번 이상 방문)면 닉네임, 아니면 '발굴자'
         NpcContextInput few = Guest(8, NpcInputs.Visit, null);
         few.Nickname = "도윤";
         few.VisitDates = new List<DateTime> { Today, Today.AddDays(-3) };
@@ -1702,23 +1702,43 @@ public static class Program
         Check(!builder.Build(noNick).Request.Familiar && builder.Build(noNick).Request.AddressName == "발굴자", "닉네임이 없으면 방문이 많아도 '발굴자'");
         NpcContextInput ownerKnown = Owner(8, NpcInputs.Tap, "CLEAR", null);
         ownerKnown.Nickname = "  하늘\n ";
-        ownerKnown.VisitDates = new List<DateTime>();
-        for (int d = 0; d < 12; d++)
-        {
-            ownerKnown.VisitDates.Add(Today.AddDays(-d));
-        }
+        ownerKnown.CareCount = 12;
         NpcContext ownerCtx = builder.Build(ownerKnown);
-        Check(ownerCtx.Request.Familiar && ownerCtx.Request.AddressName == "하늘", "주인 장면도 방문 기록이 12번 이상이면 닉네임 (공백·줄바꿈은 다듬음) ← [" + ownerCtx.Request.AddressName + "]");
-        Check(builder.Build(Owner(8, NpcInputs.Tap, "CLEAR", null)).Request.AddressName == "발굴자", "기록이 없는 주인은 '발굴자'");
+        Check(ownerCtx.Request.Intimacy == 3 && ownerCtx.Request.Familiar && ownerCtx.Request.AddressName == "하늘",
+                "주인 장면은 관리 성공 횟수가 12번 이상이면 닉네임 (공백·줄바꿈은 다듬음) ← [" + ownerCtx.Request.AddressName + "]");
+        Check(builder.Build(Owner(8, NpcInputs.Tap, "CLEAR", null)).Request.AddressName == "발굴자", "관리 횟수를 모르는 주인은 '발굴자'");
+        // 주인 장면의 친밀도는 방문 기록이 아니라 관리 성공 횟수다 (2026-11-25: 방문한 날 수로 세던 것을 고쳤다)
+        NpcContextInput ownerVisits = Owner(8, NpcInputs.Tap, "CLEAR", null);
+        ownerVisits.Nickname = "하늘";
+        ownerVisits.CareCount = 2;
+        ownerVisits.VisitDates = new List<DateTime>();
+        for (int d = 0; d < 20; d++)
+        {
+            ownerVisits.VisitDates.Add(Today.AddDays(-d));
+        }
+        Check(builder.Build(ownerVisits).Request.Intimacy == 0 && builder.Build(ownerVisits).Request.AddressName == "발굴자",
+                "주인 장면: 전시관을 20일 열었어도 관리가 2번이면 0단계, '발굴자' ← " + builder.Build(ownerVisits).Request.Intimacy);
+        NpcContextInput guestCare = Guest(8, NpcInputs.Visit, null);
+        guestCare.Nickname = "도윤";
+        guestCare.CareCount = 20;
+        guestCare.VisitDates = new List<DateTime> { Today, Today.AddDays(-3) };
+        Check(builder.Build(guestCare).Request.Intimacy == 0, "손님 장면: 관리 횟수는 쓰지 않고 방문한 날 수로만 ← " + builder.Build(guestCare).Request.Intimacy);
+        NpcContextInput ownerState = Owner(8, NpcInputs.Tap, "CLEAR", null);
+        ownerState.Nickname = "하늘";
+        ownerState.CareCount = 12;
+        List<ReactionRequest> ownerPrefetch = builder.PrefetchRequests(ownerState);
+        Check(ownerPrefetch.Count > 0 && ownerPrefetch.TrueForAll(delegate(ReactionRequest r) { return r.Intimacy == 3; }), "미리 만들 요청도 관리 횟수의 친밀도를 그대로 가짐");
 
-        // 친밀도: 30일 방문한 날 수가 3·7·12·20번을 채울 때마다 한 단계 (0~4). 3단계(12번)부터 닉네임, 0~2단계는 '발굴자'
+        // 친밀도: 누적 관리 성공 횟수가 3·7·12·20번을 채울 때마다 한 단계 (0~4, 게임의 IntimacyPolicy 와 같은 기준). 3단계(12번)부터 닉네임, 0~2단계는 '발굴자'.
+        // 손님의 호칭 단계는 30일 방문한 날 수로 같은 기준을 쓴다 (VisitorLevelOf)
         int[] visitsAt = { 0, 1, 2, 3, 6, 7, 11, 12, 19, 20, 99 };
         int[] levelAt = { 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4 };
         for (int i = 0; i < visitsAt.Length; i++)
         {
-            Check(NpcAddress.IntimacyOf(visitsAt[i]) == levelAt[i], "친밀도: 30일 " + visitsAt[i] + "번 방문 → " + levelAt[i] + "단계 ← " + NpcAddress.IntimacyOf(visitsAt[i]));
+            Check(NpcAddress.IntimacyOf(visitsAt[i]) == levelAt[i], "친밀도: 관리 " + visitsAt[i] + "번 → " + levelAt[i] + "단계 ← " + NpcAddress.IntimacyOf(visitsAt[i]));
+            Check(NpcAddress.VisitorLevelOf(visitsAt[i]) == levelAt[i], "손님 호칭 단계: 30일 " + visitsAt[i] + "번 방문 → " + levelAt[i] + "단계 ← " + NpcAddress.VisitorLevelOf(visitsAt[i]));
         }
-        Check(NpcAddress.IntimacyOf(null) == 0, "친밀도: 방문 기록이 없으면 0단계");
+        Check(NpcAddress.IntimacyOf(null) == 0 && NpcAddress.VisitorLevelOf(null) == 0, "친밀도·손님 호칭 단계: 횟수를 모르면 0단계");
         Check(fewCtx.Request.Intimacy == 0 && manyCtx.Request.Intimacy == 1, "컨텍스트: 2번 방문 → 0단계, 4번 방문 → 1단계 ← " + fewCtx.Request.Intimacy + "·" + manyCtx.Request.Intimacy);
         Check(sevenCtx.Request.Intimacy == 2 && twelveCtx.Request.Intimacy == 3, "컨텍스트: 7번 방문 → 2단계, 12번 방문 → 3단계 ← " + sevenCtx.Request.Intimacy + "·" + twelveCtx.Request.Intimacy);
         Check(NpcAddress.NicknameLevel == 3
