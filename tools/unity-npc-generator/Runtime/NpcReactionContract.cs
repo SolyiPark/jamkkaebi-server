@@ -144,8 +144,8 @@ namespace Jamkkaebi.Npc
 
     /// <summary>
     /// 사실(Facts) 키. 값은 문자열로 넣는다.
-    /// 서버 응답에서 만드는 법: last_care_days_ago 는 내 전시관의 lastPurifiedAt 으로 오늘까지 며칠인지 계산하고,
-    /// visit_count_30d 는 친구 전시관의 recentVisitDays 를 그대로 쓴다.
+    /// 서버 응답에서 만드는 법: last_care_days_ago 는 내 전시관의 lastPurifiedAt(마지막으로 판을 깬 시각 — 선명도와 따로 바뀐다)으로 오늘까지 며칠인지 계산하고,
+    /// visit_count_30d 는 친구 전시관의 recentVisitDays 를 그대로 쓴다. care_result 의 관리 뒤 선명도는 정산 결과 응답의 clarity 다.
     /// </summary>
     public static class NpcFactKeys
     {
