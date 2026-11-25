@@ -6,6 +6,21 @@ using System.Threading.Tasks;
 
 namespace Jamkkaebi.Npc
 {
+    /// <summary>NpcRequestManager.PrepareAsync(미리 읽기)가 어떻게 끝났는지.</summary>
+    public enum NpcPrepareOutcome
+    {
+        /// <summary>SLM 을 쓰지 않거나 모델이 준비되지 않아 아무것도 하지 않았다.</summary>
+        Skipped,
+        /// <summary>같은 도깨비의 뒤에서 만들기에 맡겨 미리 읽지 않았다 (그 생성이 시스템 메시지를 읽는다 — 다 읽혔다는 뜻은 아니다).</summary>
+        Deferred,
+        /// <summary>모델에 미리 읽기를 넣어 끝까지 마쳤다 (이미 읽혀 있어 할 일이 없었던 것도 여기다).</summary>
+        Completed,
+        /// <summary>다른 도깨비의 요청·준비, Cancel, ct 로 멈췄다.</summary>
+        Cancelled,
+        /// <summary>백엔드가 실패했다. 다음 요청이 시스템 메시지부터 읽는다.</summary>
+        Failed
+    }
+
     /// <summary>요청 관리자가 돌려주는 것. 띄울 반응이 있는지와, 왜 그렇게 됐는지.</summary>
     public sealed class NpcResponse
     {
@@ -125,6 +140,7 @@ namespace Jamkkaebi.Npc
         private CancellationTokenSource prefetchCts;
         private bool prefetchGenerating; // prefetchCts 의 생성이 시작 전 확인을 지나 모델에 들어갔는지. gate 안에서 읽고 쓴다
         private volatile bool lastPrepareDeferred; // 마지막 PrepareAsync 가 같은 도깨비의 뒤에서 만들기에 맡겨 미리 읽지 않았는지 (LastPrepareDeferred)
+        private volatile NpcPrepareOutcome lastPrepareOutcome; // 마지막 PrepareAsync 가 어떻게 끝났는지 (LastPrepareOutcome)
         private int prefetchRelicId;     // 그 생성의 도깨비 (prefetchGenerating 일 때만 뜻이 있다). gate 안에서 읽고 쓴다
         private bool prefetchPreempted;   // 지금 생성(prefetchCts)을 요청·미리 읽기·CancelPrefetch 가 멈췄는지. gate 안에서 읽고 쓴다
         private Task prefetchWorker = Task.FromResult(true);
@@ -495,6 +511,12 @@ namespace Jamkkaebi.Npc
             get { return lastPrepareDeferred; }
         }
 
+        /// <summary>마지막 PrepareAsync 가 어떻게 끝났는지 (PrepareAsync 가 돌려주는 값과 같다).</summary>
+        public NpcPrepareOutcome LastPrepareOutcome
+        {
+            get { return lastPrepareOutcome; }
+        }
+
         /// <summary>
         /// 지금 진행 중인 미리 만들기가 끝날 때까지 기다리는 작업 (할 일이 없으면 이미 끝난 작업). 시험과 화면 종료에서 쓴다.
         /// </summary>
@@ -797,6 +819,21 @@ namespace Jamkkaebi.Npc
             return prefetchJobs[0];
         }
 
+        /// <summary>시험용: 미리 만들기가 플레이어 대기 확인을 지나 도깨비를 적기 직전에 부른다 (Verify 가 그 틈에 요청을 끼워 넣는다). 게임에서는 쓰지 않는다.</summary>
+        internal Action BeforePrefetchMarkForTest { get; set; }
+
+        /// <summary>시험용: 모델이 시스템 메시지를 읽어 둔 도깨비 (모르면 null).</summary>
+        internal int? ModelRelicForTest
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return modelRelicKnown ? modelRelicId : (int?)null;
+                }
+            }
+        }
+
         // 모델이 이 도깨비의 시스템 메시지를 읽는다 (미리 읽기·모델을 쓰는 요청·미리 만들기가 모델을 부르기 직전)
         private void MarkModelRelic(int relicId)
         {
@@ -1006,13 +1043,25 @@ namespace Jamkkaebi.Npc
                     }
                     else
                     {
-                        MarkModelRelic(job.Template.RelicId); // 이 생성이 그 도깨비의 시스템 메시지를 읽는다 — 이어지는 같은 도깨비 작업은 다시 읽지 않는다
+                        Action beforeMark = BeforePrefetchMarkForTest;
+                        if (beforeMark != null)
+                        {
+                            beforeMark(); // 시험용 (Verify 의 경합 시험이 여기서 요청을 끼워 넣는다). 게임에서는 null
+                        }
                         lock (gate)
                         {
                             // 위의 확인을 지나 정말 모델에 들어가는 생성만 같은 도깨비의 미리 읽기가 맡길 수 있다 (PrepareAsync).
                             // 확인 전에 세우면, 미리 읽기가 맡긴 뒤에 이 생성이 위의 확인에서 스스로 멈춰 둘 다 하지 않게 된다
                             prefetchRelicId = job.Template.RelicId;
                             prefetchGenerating = !prefetchPreempted;
+                            // 이 생성이 그 도깨비의 시스템 메시지를 읽는다 — 이어지는 같은 도깨비 작업은 다시 읽지 않는다.
+                            // 멈췄는지(prefetchPreempted)와 같은 잠금 안에서 본다: 위의 확인 뒤에 요청 B 가 이 생성을 멈추고 B 를 적었으면,
+                            // 여기서 이 도깨비를 적으면 모델에 들어가지도 않은 A 가 B 를 덮어 B 에 전환 지연이 붙는다 (CodeRabbit 리뷰).
+                            // 요청은 멈추기(CancelCurrentPrefetch)를 먼저 하고 자기 도깨비를 적으므로, 이 잠금이 먼저면 B 가 나중에 덮는다
+                            if (!prefetchPreempted)
+                            {
+                                MarkModelRelic(job.Template.RelicId); // gate 는 다시 들어갈 수 있는 잠금이다
+                            }
                         }
                     }
                     ReactionResult result;
@@ -1322,13 +1371,15 @@ namespace Jamkkaebi.Npc
         /// Cancel(그 도깨비)·CancelAll 하거나, ct 가 취소되면 멈춘다. 같은 도깨비의 요청은 이 준비가 끝나기를 기다렸다가 이어 읽는다.
         /// 뒤에서 만들던 미리 만들기·다시 만들기는 멈추고, 이 준비가 끝난 뒤 PrefetchIdleDelay 동안 새로 시작하지 않는다.
         /// </summary>
-        public async Task PrepareAsync(int relicId, CancellationToken ct = default(CancellationToken))
+        public async Task<NpcPrepareOutcome> PrepareAsync(int relicId, CancellationToken ct = default(CancellationToken))
         {
             lastPrepareDeferred = false; // 아무것도 하지 않고 끝나도 앞 미리 읽기의 표시가 남지 않게
+            lastPrepareOutcome = NpcPrepareOutcome.Skipped;
             if (!SlmEnabled || SlmStatus != NpcModelStatus.Ready) // 예외를 던지지 않는다 (SlmStatus 가 삼킨다)
             {
-                return;
+                return NpcPrepareOutcome.Skipped;
             }
+            NpcPrepareOutcome outcome = NpcPrepareOutcome.Completed;
             var mine = new Session(ct);
             Session previous;
             bool sameSpiritBuilding;
@@ -1359,17 +1410,23 @@ namespace Jamkkaebi.Npc
             }
             try
             {
-                if (!sameSpiritBuilding)
+                if (sameSpiritBuilding)
+                {
+                    outcome = NpcPrepareOutcome.Deferred;
+                }
+                else
                 {
                     await slm.PrepareAsync(relicId, mine.Token).ConfigureAwait(false);
                 }
             }
-            catch (Exception)
+            catch (Exception e)
             {
-                // 미리 읽기는 덤이다. 취소·실패해도 다음 요청이 시스템 메시지부터 읽는다
+                // 미리 읽기는 덤이다. 취소·실패해도 다음 요청이 시스템 메시지부터 읽는다 — 다만 어떻게 끝났는지는 돌려준다(기기 시험이 실패를 '이미 읽힘'으로 적지 않게)
+                outcome = e is OperationCanceledException || mine.Token.IsCancellationRequested ? NpcPrepareOutcome.Cancelled : NpcPrepareOutcome.Failed;
             }
             finally
             {
+                lastPrepareOutcome = outcome;
                 lock (gate)
                 {
                     // 끝난 때를 먼저 적는다 — preparing 을 비운 틈에 미리 만들기가 시작하지 않게 (같은 잠금 안). 미리 읽기는 모델을 쓰는 일이다
@@ -1386,6 +1443,7 @@ namespace Jamkkaebi.Npc
                 }
                 mine.Dispose();
             }
+            return outcome;
         }
 
         /// <summary>그 도깨비의 진행 중인 요청(과 시스템 프롬프트 미리 읽기)을 취소한다 (NPC 전환). 결과는 버린다.</summary>

@@ -740,7 +740,16 @@ namespace Jamkkaebi.Npc
                     throw new OperationCanceledException("플레이어의 요청·미리 읽기에 모델을 비켜 줌");
                 }
                 KeyValuePair<string, string> piece = part;
-                await OnModel(current, () => current.ChatOnceAsync(piece.Key, piece.Value, null, 1, options, null), token).ConfigureAwait(false);
+                // 조각도 기억 저장도 취소를 듣지 않는 모델 안의 일이다. 취소되면(미리 만들기 시간 초과·플레이어의 일) 끝나기를 기다리지 않고 돌려주되,
+                // 줄은 그 일이 끝날 때까지 붙잡는다(PendingModelWork → Run 이 ReleaseWhenDone 에 넘긴다). 모델에 멈추라고 하지는 않는다 — 읽는 중의 취소는 슬롯을 묶는다.
+                // 예전에는 끝없이 기다려서, 끝나지 않는 조각이면 뒤에서 만들기가 줄을 쥔 채 돌아오지 않고 멈춤 판정(CancelHold)도 하지 않아,
+                // 백엔드는 Ready 인데 뒤의 요청이 모두 시간 초과가 됐다 (CodeRabbit 리뷰). 제때 끝나면 다음 조각 경계에서 이어 간다
+                Task chunk = OnModel(current, () => current.ChatOnceAsync(piece.Key, piece.Value, null, 1, options, null), token);
+                if (!await FinishedBefore(chunk, token).ConfigureAwait(false))
+                {
+                    throw new PendingModelWork(chunk);
+                }
+                await chunk.ConfigureAwait(false);
                 knownSystem = piece.Key;
                 if (piece.Key == system)
                 {
@@ -750,7 +759,11 @@ namespace Jamkkaebi.Npc
                     if (piece.Value == NpcPrompt.PrepareUser && store != null)
                     {
                         // 미리 읽기와 같은 상태(시스템 메시지 + '준비')라 그 기억을 저장한다 — 저장도 짧고 멈출 수 없는 일이라 조각 하나로 친다
-                        await PersistState(current, store, StateKey(system), token).ConfigureAwait(false);
+                        Task<bool> persisting = PersistState(current, store, StateKey(system), token);
+                        if (!await FinishedBefore(persisting, token).ConfigureAwait(false))
+                        {
+                            throw new PendingModelWork(persisting);
+                        }
                     }
                 }
             }
@@ -857,7 +870,18 @@ namespace Jamkkaebi.Npc
                     }
                     if (background && options.BackgroundStepChars > 0)
                     {
-                        await ReadInSteps(current, system, user, alreadyRead || restored, restored ? system : known, token).ConfigureAwait(false);
+                        try
+                        {
+                            await ReadInSteps(current, system, user, alreadyRead || restored, restored ? system : known, token).ConfigureAwait(false);
+                        }
+                        catch (PendingModelWork pending)
+                        {
+                            // 취소됐는데 조각·기억 저장이 아직 모델 안에 있다 — 부른 쪽에는 바로 돌려주고, 줄은 그 일이 끝날 때 놓는다
+                            // (CancelHold 가 지나도 안 끝나면 멈춘 것으로 표시한다. 기억 복원·생성 취소와 같다)
+                            releaseLater = true;
+                            ReleaseWhenDone(pending.Work, alive, current);
+                            throw new OperationCanceledException(token);
+                        }
                         knownSystem = null; // 마지막 생성이 끝나기 전에는 모델이 무엇을 기억하는지 모른다
                     }
                     // 플레이어의 생성은 되살리기부터 잰다 — 부른 쪽이 기다린 시간이 첫 응답(FirstTokenMs)·전체(ElapsedMs)에 다 들어가게.
@@ -1209,6 +1233,18 @@ namespace Jamkkaebi.Npc
         {
             task.ContinueWith(t => t.Exception.Handle(e => true),
                     TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
+        }
+
+        // ReadInSteps 가 취소됐는데 맡긴 일(조각·기억 저장)이 아직 모델 안에 있다 — Run 이 받아 줄을 그 일이 끝날 때 놓게 한다(ReleaseWhenDone)
+        private sealed class PendingModelWork : OperationCanceledException
+        {
+            public PendingModelWork(Task work) : base("취소됐지만 모델 안의 일이 아직 끝나지 않았다")
+            {
+                Work = work;
+                Observe(work);
+            }
+
+            public Task Work { get; private set; }
         }
     }
 }

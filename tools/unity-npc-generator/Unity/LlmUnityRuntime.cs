@@ -202,15 +202,70 @@ namespace Jamkkaebi.Npc
                         TryDelete(temp);
                         return false;
                     }
-                    TryDelete(path);
-                    File.Move(temp, path);
+                    Commit(temp, path);
                     PruneStates(path);
                     return true;
                 }
                 catch (Exception)
                 {
-                    TryDelete(temp);
+                    TryDelete(temp); // 옮기지 못했으면 예전 파일(path)은 그대로 남아 있다 — Commit 참고
                     return false;
+                }
+            }
+
+            // 임시 파일을 기억 파일 자리로 옮긴다. 예전 파일은 새 파일이 자리를 잡을 때까지 지우지 않는다 —
+            // 예전에는 먼저 지우고 옮겨서, 옮기다 실패하면 멀쩡하던 기억 파일까지 잃고 다음 미리 읽기가 시스템 메시지를 처음부터 다시 읽었다 (CodeRabbit 리뷰).
+            // 같은 폴더 안의 File.Replace 는 한 번에 바꿔 넣는다(Windows ReplaceFile, 그 밖은 rename). 그것을 못 쓰는 대상이면 예전 파일을 .bak 으로 옮겨 두고 바꾸며,
+            // 실패하면 되돌린다. 처음 저장(예전 파일 없음)은 그대로 옮긴다
+            private static void Commit(string temp, string path)
+            {
+                if (!File.Exists(path))
+                {
+                    File.Move(temp, path);
+                    return;
+                }
+                try
+                {
+                    File.Replace(temp, path, null);
+                    return;
+                }
+                catch (PlatformNotSupportedException)
+                {
+                }
+                catch (NotSupportedException)
+                {
+                }
+                string backup = path + ".bak";
+                TryDelete(backup);
+                File.Move(path, backup);
+                try
+                {
+                    File.Move(temp, path);
+                }
+                catch (Exception)
+                {
+                    if (!File.Exists(path))
+                    {
+                        File.Move(backup, path);
+                    }
+                    throw;
+                }
+                TryDelete(backup);
+            }
+
+            // .bak 으로 옮겨 둔 뒤 바꾸기 전에 앱이 꺼졌으면 기억 파일이 .bak 에만 있다 — 되살린다
+            private static void RecoverBackup(string path)
+            {
+                string backup = path + ".bak";
+                try
+                {
+                    if (!File.Exists(path) && File.Exists(backup))
+                    {
+                        File.Move(backup, path);
+                    }
+                }
+                catch (Exception)
+                {
                 }
             }
 
@@ -222,6 +277,7 @@ namespace Jamkkaebi.Npc
                     return false;
                 }
                 string path = StatePath(key);
+                RecoverBackup(path);
                 if (!File.Exists(path))
                 {
                     return false;
@@ -261,6 +317,14 @@ namespace Jamkkaebi.Npc
                     foreach (FileInfo stale in new DirectoryInfo(StateFolder).GetFiles("npc-kv-*.tmp"))
                     {
                         TryDelete(stale.FullName);
+                    }
+                    // 바꾸고 남은 .bak 은 지운다. 기억 파일이 없으면 .bak 이 유일한 것이라 다음 되살리기(RecoverBackup)를 위해 남긴다
+                    foreach (FileInfo backup in new DirectoryInfo(StateFolder).GetFiles("npc-kv-*.bin.bak"))
+                    {
+                        if (File.Exists(backup.FullName.Substring(0, backup.FullName.Length - ".bak".Length)))
+                        {
+                            TryDelete(backup.FullName);
+                        }
                     }
                     FileInfo[] files = new DirectoryInfo(StateFolder).GetFiles("npc-kv-*.bin");
                     if (files.Length <= MaxStateFiles)
