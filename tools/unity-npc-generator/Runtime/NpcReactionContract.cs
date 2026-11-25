@@ -339,6 +339,12 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public List<string> RecentLines { get; set; }
 
+        /// <summary>
+        /// 뒤에서 만드는 생성(미리 만들기·다시 만들기)인지. 요청 관리자가 붙인다. 백엔드는 이 생성보다 플레이어의 요청·미리 읽기를 먼저 모델에 넣는다
+        /// (NpcPrompt.Background, LlmUnityModelBackend 의 '뒤에서 만들기는 나눠 읽는다'). 게임이 보내는 요청은 false 그대로 둔다.
+        /// </summary>
+        public bool Background { get; set; }
+
         /// <summary>키에 맞는 사실의 값. 없으면 null.</summary>
         public string FindFact(string key)
         {

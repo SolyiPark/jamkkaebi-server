@@ -9,7 +9,8 @@ namespace Jamkkaebi.Npc
     /// 미리 만들어 둔 대사 보관함. 기기에서 SLM 은 한 번 만드는 데 몇 초가 걸려서, 요청이 오기 전에 한가할 때 대사를 백그라운드로 만들어 두고
     /// 요청이 오면 바로 꺼내 쓴다 (NpcRequestManager.Prefetch). 같은 상황(도깨비·선택지·상황 문장·사실·기억·호칭)에서 만든 대사만 꺼내 쓴다.
     ///
-    /// <para>중복: 보관함의 대사끼리, 그리고 이미 띄운 최근 대사와 <b>90% 이상 겹치면</b>(NpcLineChecks.Similar) 넣지도 꺼내지도 않는다.
+    /// <para>중복: 보관함의 대사끼리, 그리고 이미 띄운 최근 대사와 <b>90% 이상 겹치면</b>(PromptAssembler.SimilarLine — 출력 검사와 같은 기준) 넣지도 꺼내지도 않는다.
+    /// 흐려진 안부 대사는 코드가 붙인 앞 문장까지 포함한 전체 대사로 본다 (앞 문장이 같다는 것만으로 '시작이 같음'으로 버리지 않는다).
     /// 상황마다 MaxPerKey 개까지, 오래된 것(MaxAge)은 버린다 — 시간대가 바뀌었는데 "좋은 아침"이 나가지 않게.</para>
     ///
     /// <para>스레드: 잠금으로 보호한다. 만든 쪽(백그라운드)과 꺼내 쓰는 쪽(요청 처리)이 달라도 된다.</para>
@@ -227,7 +228,7 @@ namespace Jamkkaebi.Npc
                 List<Entry> live = LiveForWrite(key);
                 foreach (Entry entry in live)
                 {
-                    if (NpcLineChecks.Similar(slotted, entry.Result.Line) != null)
+                    if (PromptAssembler.SimilarLine(slotted, entry.Result.Line) != null)
                     {
                         return false;
                     }
@@ -283,7 +284,7 @@ namespace Jamkkaebi.Npc
                     {
                         continue; // 이 요청에는 못 쓰는 대사 — 다른 요청을 위해 둔다
                     }
-                    if (NpcLineChecks.FindSimilar(filled, recent).HasValue)
+                    if (PromptAssembler.FindRepeat(filled, recent).HasValue)
                     {
                         live.RemoveAt(i);
                         i--;
@@ -304,7 +305,7 @@ namespace Jamkkaebi.Npc
                         }
                         taken = ReactionResult.Success(stored.RequestId, rechecked.ActionId, rechecked.TargetId, rechecked.Line, stored.Source, taken.Note);
                         // 다시 검사가 대사를 바꿨으면(다듬기·앞 문장) 바뀐 최종 대사로 최근 대사와 한 번 더 견준다 (CodeRabbit 리뷰)
-                        if (taken.Line != filled && NpcLineChecks.FindSimilar(taken.Line, recent).HasValue)
+                        if (taken.Line != filled && PromptAssembler.FindRepeat(taken.Line, recent).HasValue)
                         {
                             live.RemoveAt(i);
                             i--;
@@ -354,7 +355,7 @@ namespace Jamkkaebi.Npc
                     {
                         continue; // 이 요청에는 못 쓰지만 다른 요청(짧은 닉네임 등)은 쓸 수 있어 둔다
                     }
-                    if (recent != null && NpcLineChecks.FindSimilar(filled, recent).HasValue)
+                    if (recent != null && PromptAssembler.FindRepeat(filled, recent).HasValue)
                     {
                         live.RemoveAt(i);
                         i--;
@@ -395,7 +396,7 @@ namespace Jamkkaebi.Npc
                 List<Entry> live = Live(KeyOf(request));
                 if (recent != null)
                 {
-                    live.RemoveAll(entry => NpcLineChecks.FindSimilar(entry.Result.Line, recent).HasValue);
+                    live.RemoveAll(entry => PromptAssembler.FindRepeat(entry.Result.Line, recent).HasValue);
                 }
                 return live.Count;
             }
@@ -451,7 +452,7 @@ namespace Jamkkaebi.Npc
                 }
                 foreach (Entry entry in live)
                 {
-                    if (NpcLineChecks.Similar(result.Line, entry.Result.Line) != null)
+                    if (PromptAssembler.SimilarLine(result.Line, entry.Result.Line) != null)
                     {
                         return false;
                     }
@@ -480,7 +481,7 @@ namespace Jamkkaebi.Npc
                     ReactionResult result = live[i].Result;
                     live.RemoveAt(i);
                     i--;
-                    if (!NpcLineChecks.FindSimilar(result.Line, recent).HasValue)
+                    if (!PromptAssembler.FindRepeat(result.Line, recent).HasValue)
                     {
                         return result;
                     }
@@ -556,7 +557,7 @@ namespace Jamkkaebi.Npc
                         list.RemoveAll(entry => entry.At < limit); // 지난 것이 칸을 차지해 새것을 막지 않게 먼저 쓸어 낸다 (CodeRabbit 리뷰)
                     }
                     string line = item.Result.Line;
-                    if (list != null && (list.Count >= MaxPerKey || list.Exists(entry => NpcLineChecks.Similar(line, entry.Result.Line) != null)))
+                    if (list != null && (list.Count >= MaxPerKey || list.Exists(entry => PromptAssembler.SimilarLine(line, entry.Result.Line) != null)))
                     {
                         continue;
                     }

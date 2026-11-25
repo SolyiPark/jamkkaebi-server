@@ -39,6 +39,9 @@ namespace Jamkkaebi.Npc
         /// <summary>대사를 다듬어서(어미·'오랜만'·호칭·한 문장 줄이기) 그대로 쓴 경우 Note 에 붙는 말. 거른 것이 아니다.</summary>
         public const string SpeechFixNote = "대사를 다듬어 바로 씀";
 
+        /// <summary>흐려진 안부의 부탁 부분이 최근 대사와 같아, 버리지 않고 코드의 부탁 문장으로 바꿔 쓴 경우 Note 에 붙는 말 (뒤에 겹친 최근 대사).</summary>
+        public const string AskReplacedNote = "부탁이 최근 대사와 같아 코드의 부탁 문장으로 바꿈";
+
         internal OutputCheck(OutputProblem problem, string detail, string actionId, string targetId, string line)
                 : this(problem, detail, actionId, targetId, line, line, false)
         {
@@ -108,6 +111,11 @@ namespace Jamkkaebi.Npc
                 string fix = SpeechFixNote + " ('" + LineBeforeSpeechFix + "' → '" + Line + "')";
                 note = note == null ? fix : note + "; " + fix;
             }
+            if (Detail != null)
+            {
+                // 통과한 대사에 붙은 설명 (흐려진 안부의 부탁을 코드의 부탁 문장으로 바꾼 것 등). 기기 시험 CSV 의 메모에서 보인다
+                note = note == null ? Detail : note + "; " + Detail;
+            }
             return ReactionResult.Success(requestId, ActionId, TargetId, Line, ReactionSource.Slm, note);
         }
     }
@@ -131,7 +139,8 @@ namespace Jamkkaebi.Npc
     /// <item>상황 옮기기: 상황 문장의 한 구절을 그대로 옮기지 않는다 (NpcLineChecks.CopiedFromSituation).</item>
     /// <item>자기 이름·어미: 페르소나 카탈로그를 받았으면, 자기 이름을 말하지 않고 문장마다 그 도깨비의 어미(endingHint)로 끝난다
     /// (존댓말·반말 섞기를 막는다, NpcLineChecks.SpeechMatches).</item>
-    /// <item>반복: 그 도깨비가 최근에 띄운 대사(request.RecentLines)와 같지 않다 (NpcLineChecks.Similar). 요청 관리자가 채운다.</item>
+    /// <item>반복: 그 도깨비가 최근에 띄운 대사(request.RecentLines)와 같지 않다 (PromptAssembler.SimilarLine — 흐려진 안부는 코드가 붙인 앞 문장까지 포함한 전체 대사로 본다). 요청 관리자가 채운다.
+    /// 흐려진 안부의 부탁 부분만 겹치면 거르지 않고 코드의 부탁 문장 중 겹치지 않는 것으로 바꾼다 (AskReplacedNote).</item>
     /// </list>
     /// 프롬프트 규칙만으로는 작은 모델이 이름·어미·반복을 지키지 않아서(2026-11-11 시험) 검사로 강제한다. 걸리면 SLM 생성기가
     /// 곁들일 거리를 바꿔 다시 생성하고(MaxAttempts), 그래도 걸리면 요청 관리자가 기본 대사로 대신한다.
@@ -509,24 +518,21 @@ namespace Jamkkaebi.Npc
             {
                 return new OutputCheck(OutputProblem.InnerRepeat, "한 대사 안의 반복 '" + repeatedWord + "'", action, target, fitted, line, truncated);
             }
-            // 흐려진 안부: 코드가 정한 앞 문장("마지막 관리가 9일 전이었어.")은 요청마다 같을 수 있어, 앞 문장을 뗀 부탁 부분끼리 견준다 (앞 문장만 같아 거르던 것을 막는다)
-            string compareLine = fitted;
-            IEnumerable<string> compareRecent = request.RecentLines;
-            if (linePrefix != null)
+            // 흐려진 안부: 코드가 정한 앞 문장("마지막 관리가 9일 전이었어.")까지 포함한 전체 대사로 견준다 — 앞 문장이 같으면 부탁 부분끼리(앞 문장만 같아 거르던 것을 막는다),
+            // 앞 문장이 다르면 전체끼리. 예전에는 늘 부탁 부분만 견주어, 앞 문장이 달라 다른 대사인데도 '반복'으로 걸렀다 (PromptAssembler.SimilarLine, 2026-11-24)
+            KeyValuePair<string, string>? same = PromptAssembler.FindRepeat(fitted, request.RecentLines);
+            if (same.HasValue && linePrefix != null)
             {
-                List<string> prefixes = PromptAssembler.AskPrefixes(request);
-                compareLine = PromptAssembler.StripAskPrefix(fitted, prefixes);
-                var stripped = new List<string>();
-                if (request.RecentLines != null)
+                // 흐려진 안부의 부탁 부분이 최근 대사와 같으면, 버리고 기본 대사로 넘어가는 대신 코드의 부탁 문장 중 최근 대사와 겹치지 않는 것으로 바꾼다 (2026-11-25).
+                // 부탁은 첫 낱말 + '닦아/깨워 줄래' 꼴이라 모델이 써도 코드가 채운 것(AskFallback, 모델이 부탁을 빼먹었을 때 이미 쓰는 문장)과 다르지 않다.
+                // 기본 대사로 넘어가면 그 상황의 기본 대사가 둘뿐이라 오히려 같은 대사가 잦다 (2026-11-25 PC 시험 S03 #4: 부탁 부분까지 같아 기본 대사)
+                // 바꾼 대사도 같은 길이 제한(limit)을 지킨다 — 넘으면 길이 줄이기가 앞 문장만 남겨 부탁이 빠진다. 맞는 것이 없으면 바꾸지 않고 반복으로 거른다
+                string ask = PromptAssembler.AskFallbackAvoiding(request, linePrefix, request.RecentLines, limit);
+                if (ask != null)
                 {
-                    foreach (string recent in request.RecentLines)
-                    {
-                        stripped.Add(PromptAssembler.StripAskPrefix(recent, prefixes));
-                    }
+                    return new OutputCheck(OutputProblem.None, OutputCheck.AskReplacedNote +" ('" + same.Value.Key + "')", action, target, linePrefix + " " + ask, line, truncated);
                 }
-                compareRecent = stripped;
             }
-            KeyValuePair<string, string>? same = NpcLineChecks.FindSimilar(compareLine, compareRecent);
             if (same.HasValue)
             {
                 return new OutputCheck(OutputProblem.Repeated, "최근 대사 '" + same.Value.Key + "' 와 같음 (" + same.Value.Value + ")",
