@@ -3459,31 +3459,37 @@ public static class Program
         int markHooked = 0;
         Task<NpcResponse> markForeground = null;
         int? relicWhenForegroundMarked = null;
+        // 끼움 지점이 결과(markForeground·relicWhenForegroundMarked)를 다 적은 뒤에 켠다. markHooked 는 끼움이 <b>시작</b>한 표시라
+        // 그것만 보고 결과를 읽으면, 일꾼이 결과를 적기 전에 시험이 읽어 맞는 코드에서도 실패할 수 있다 (CodeRabbit 리뷰)
+        var markPublished = new ManualResetEventSlim(false);
         marking.BeforePrefetchMarkForTest = () =>
         {
             if (Interlocked.Exchange(ref markHooked, 1) == 1)
             {
                 return;
             }
-            markForeground = Task.Run(() => Ask(marking, focusedTap));   // 요청 B(8번): A 를 멈추고 B 를 적는다
-            var markWatch = Stopwatch.StartNew();
-            while (marking.ModelRelicForTest != focusedTap.RelicId && markWatch.ElapsedMilliseconds < 3000)
+            try
             {
-                Thread.Sleep(5);
+                markForeground = Task.Run(() => Ask(marking, focusedTap));   // 요청 B(8번): A 를 멈추고 B 를 적는다
+                var markWatch = Stopwatch.StartNew();
+                while (marking.ModelRelicForTest != focusedTap.RelicId && markWatch.ElapsedMilliseconds < 3000)
+                {
+                    Thread.Sleep(5);
+                }
+                relicWhenForegroundMarked = marking.ModelRelicForTest;
             }
-            relicWhenForegroundMarked = marking.ModelRelicForTest;
+            finally
+            {
+                markPublished.Set(); // Set 은 앞의 쓰기를 Wait 가 돌아온 쪽에 보이게 한다
+            }
         };
         marking.PrefetchTemplate(otherTap, 1);   // 미리 만들기 A(5번)
-        var markWait = Stopwatch.StartNew();
-        while (Volatile.Read(ref markHooked) == 0 && markWait.ElapsedMilliseconds < 5000)
-        {
-            Thread.Sleep(5);
-        }
-        bool foregroundDone = markForeground != null && markForeground.Wait(5000) && markForeground.Result.ShouldShow;
+        bool markReported = markPublished.Wait(8000);
+        bool foregroundDone = markReported && markForeground != null && markForeground.Wait(5000) && markForeground.Result.ShouldShow;
         marking.CancelPrefetch();
         marking.PrefetchCompletion.Wait(5000);
-        Check(markHooked == 1 && relicWhenForegroundMarked == focusedTap.RelicId && foregroundDone && marking.ModelRelicForTest == focusedTap.RelicId,
-                "멈춘 미리 만들기(5번)는 모델이 읽어 둔 도깨비를 덮지 않음 — 요청한 8번이 남음 ← 끼움 " + markHooked + ", 요청 뒤 " + relicWhenForegroundMarked
+        Check(markReported && relicWhenForegroundMarked == focusedTap.RelicId && foregroundDone && marking.ModelRelicForTest == focusedTap.RelicId,
+                "멈춘 미리 만들기(5번)는 모델이 읽어 둔 도깨비를 덮지 않음 — 요청한 8번이 남음 ← 끼움 " + (markReported ? "끝남" : "없음/시간 초과") + ", 요청 뒤 " + relicWhenForegroundMarked
                 + ", 끝 " + marking.ModelRelicForTest);
 
         // ②-4 (2026-11-25) 다른 도깨비의 작업은 모델을 마지막으로 쓴 때부터 PrefetchSwitchIdleDelay 를 센다 — 모델을 쓰지 않는 요청(이야기)이 이어져도 시작한다
