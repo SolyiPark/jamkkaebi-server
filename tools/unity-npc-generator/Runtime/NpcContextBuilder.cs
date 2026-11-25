@@ -36,9 +36,16 @@ namespace Jamkkaebi.Npc
 
         /// <summary>
         /// 관리하기에서만 쓴다: 이번 관리 <b>뒤</b> 선명도. 정산 결과 응답(PurificationResultResponse)의 clarity 를 그대로 넘긴다.
-        /// 보통 난이도는 한 칸만 오른다(재봉인 → 흐려짐 → 선명), 어려움·쉬움은 선명. 비우면 선명으로 본다.
+        /// 보통 난이도는 한 칸만 오른다(재봉인 → 흐려짐 → 선명), 어려움·쉬움은 선명. 페이즈가 남은 중간 판은 서버(UserRelic.clearCarePlay)가
+        /// 선명도·lastPurifiedAt 을 그대로 둬 관리 전과 같은 값(재봉인 → 재봉인, 흐려짐 → 흐려짐)이 온다. 비우면 선명으로 본다.
         /// </summary>
         public string ClarityAfterCare { get; set; }
+
+        /// <summary>
+        /// 주인이 이 도깨비를 관리한(관리 플레이 성공) 누적 횟수. 작업대·정화 응답의 careCount 를 그대로 넘긴다. 모르면 null.
+        /// 주인 장면의 친밀도는 이 횟수로 정한다(3·7·12·20번을 채울 때마다 한 단계, NpcAddress.IntimacyOf). 손님 장면에서는 쓰지 않는다.
+        /// </summary>
+        public int? CareCount { get; set; }
 
         /// <summary>친구 전시관의 recentVisitDays (지금 열람 포함, 첫 방문이면 1). VisitDates 를 주면 그것으로 센다.</summary>
         public int? RecentVisitDays { get; set; }
@@ -541,8 +548,14 @@ namespace Jamkkaebi.Npc
                     : "주인이 너를 관리해 주었다.";
             // 관리 결과 사실은 프롬프트에 싣지 않으므로(HiddenFactKeys) 다 낫지 않았으면 상황 문장에 적는다 — 적지 않으면 재봉인에서 흐려짐까지만 올랐는데
             // 다 나은 것처럼 고마워한다. 한 칸 올라 흐려짐이던 정령이 마저 선명해졌으면 그것도 적는다(선명 → 선명과 같은 프롬프트가 되지 않게)
-            if (after != "CLEAR")
+            if (after == "RESEALED")
             {
+                // 페이즈가 남은 중간 판: 서버가 재봉인 그대로 돌려준다 — 깨어났다고 적으면 정산 결과와 어긋난다 (Copilot 리뷰)
+                situation += " 너는 아직 봉인되어 있다.";
+            }
+            else if (after != "CLEAR")
+            {
+                // "다시 깨어났지만"은 재봉인 → 흐려짐에서만. 흐려짐 그대로(중간 판)면 아직 흐리다고만 적는다
                 situation += before == "RESEALED" ? " 너는 다시 깨어났지만 아직 흐리다." : " 너는 아직 흐리다.";
             }
             else if (partly)

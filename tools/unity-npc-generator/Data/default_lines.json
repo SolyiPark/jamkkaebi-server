@@ -1,5 +1,5 @@
 {
-  "contentVersion": "lines-13",
+  "contentVersion": "lines-14",
   "storyPolicy": "stories 는 실화를 담은 이야기 대사로(잠깨비 목적에 맞춰 고른 실화), npc-prompt-test/data/personas.json 의 stories 와 같은 순서다. 사실은 그대로 두고 말투만 입혔다. 돌려 가며 써서 다 들려줄 때까지 같은 이야기를 반복하지 않는다. fallback(페르소나가 아직 없는 도깨비)은 stories 없이 자료 문장(verified_story) 앞뒤에 storyPrefix·storyTail 을 붙인다.",
   "spirits": [
     {
@@ -20,7 +20,9 @@
         { "actionId": "wander_greet", "variant": "", "lines": ["어흠, 누구야?", "처음 보는 얼굴이네."] },
         { "actionId": "wander_recall", "variant": "", "lines": ["안녕, 또 왔구나.", "단골이 왔네."] },
         { "actionId": "thank_calm", "variant": "", "lines": ["이 은혜, 장부에 적어 둘게.", "어흠… 고마워.", "고맙다는 말은 꼭 하고 싶었어.", "약속대로 깨끗해졌네. 고마워.", "덕분에 순찰이 한결 가벼워지겠어."] },
-        { "actionId": "thank_joyful", "variant": "", "lines": ["엄청 개운해. 고마워!", "고마워! 체면이 다시 섰어.", "와, 몸이 가벼워! 정말 고마워!", "순찰 나가고 싶을 만큼 개운해! 고마워!", "이 기분이면 지킬 약속이 넘쳐! 고마워!"] }
+        { "actionId": "thank_joyful", "variant": "", "lines": ["엄청 개운해. 고마워!", "고마워! 체면이 다시 섰어.", "와, 몸이 가벼워! 정말 고마워!", "순찰 나가고 싶을 만큼 개운해! 고마워!", "이 기분이면 지킬 약속이 넘쳐! 고마워!"] },
+        { "actionId": "thank_calm", "variant": "partial", "lines": ["어흠, 아직 덜 맑지만 고마워.", "어흠, 한결 낫네. 고마워.", "고마워. 마저 닦아 주면 체면이 서겠어."] },
+        { "actionId": "thank_joyful", "variant": "partial", "lines": ["어흠, 한결 나아! 고마워!", "고마워! 조금만 더 하면 순찰도 거뜬해!", "아직 흐려도 힘이 나! 고마워!"] }
       ]
     },
     {
@@ -41,7 +43,9 @@
         { "actionId": "wander_greet", "variant": "", "lines": ["호호, 편히 구경해.", "어서 와. 편히 쉬었다 가."] },
         { "actionId": "wander_recall", "variant": "", "lines": ["어머, 또 왔구나!", "또 와 줬네, 반가워."] },
         { "actionId": "thank_calm", "variant": "", "lines": ["고마워, 향이 다시 맑아졌어.", "호호, 덕분에 한결 개운해.", "천천히 퍼지는 향처럼 마음도 편안해. 고마워.", "호호, 손길이 참 다정해. 고마워.", "한결 포근해졌어. 고마워."] },
-        { "actionId": "thank_joyful", "variant": "", "lines": ["어머나! 이렇게 맑아지다니, 고마워!", "고마워! 향이 산마루까지 퍼지겠어.", "어머, 몸이 새털처럼 가벼워! 고마워!", "호호, 향이 가득 퍼지는 기분이야! 고마워!", "어머나, 정말 개운해! 고마워!"] }
+        { "actionId": "thank_joyful", "variant": "", "lines": ["어머나! 이렇게 맑아지다니, 고마워!", "고마워! 향이 산마루까지 퍼지겠어.", "어머, 몸이 새털처럼 가벼워! 고마워!", "호호, 향이 가득 퍼지는 기분이야! 고마워!", "어머나, 정말 개운해! 고마워!"] },
+        { "actionId": "thank_calm", "variant": "partial", "lines": ["호호, 한결 나아졌어. 고마워.", "아직 향이 덜 맑지만 고마워.", "호호, 손길 덕에 조금 편해졌어. 고마워."] },
+        { "actionId": "thank_joyful", "variant": "partial", "lines": ["어머, 한결 나아졌어! 고마워!", "호호, 향이 조금씩 돌아와! 고마워!", "어머나, 조금만 더 닦으면 되겠어! 고마워!"] }
       ]
     },
     {
@@ -62,7 +66,9 @@
         { "actionId": "wander_greet", "variant": "", "lines": ["어서 와..!", "천천히 구경해."] },
         { "actionId": "wander_recall", "variant": "", "lines": ["또 와 줬네.", "반가워, 또 왔구나."] },
         { "actionId": "thank_calm", "variant": "", "lines": ["살살 닦아 줘서 고마워.", "덕분에 무늬가 맑아졌어.", "구름 무늬가 한결 또렷해졌어. 고마워.", "손길이 섬세해서 마음이 놓여. 고마워.", "덕분에 몸이 맑아졌어. 고마워."] },
-        { "actionId": "thank_joyful", "variant": "", "lines": ["하늘처럼 맑아졌어! 고마워!", "고마워! 학이 날아오를 것 같아.", "와, 구름이 걷힌 것처럼 맑아졌어! 고마워!", "날개까지 가벼워! 정말 고마워!", "학이 된 것처럼 기뻐! 고마워!"] }
+        { "actionId": "thank_joyful", "variant": "", "lines": ["하늘처럼 맑아졌어! 고마워!", "고마워! 학이 날아오를 것 같아.", "와, 구름이 걷힌 것처럼 맑아졌어! 고마워!", "날개까지 가벼워! 정말 고마워!", "학이 된 것처럼 기뻐! 고마워!"] },
+        { "actionId": "thank_calm", "variant": "partial", "lines": ["아직 조금 흐리지만, 고마워.", "무늬가 조금 돌아왔어. 고마워.", "살살 닦아 줘서 고마워. 조금만 더 닦아 줄래?"] },
+        { "actionId": "thank_joyful", "variant": "partial", "lines": ["무늬가 조금 보여! 고마워!", "구름 사이로 빛이 드는 것 같아! 고마워!", "조금씩 돌아오고 있어! 고마워!"] }
       ]
     },
     {
@@ -83,7 +89,9 @@
         { "actionId": "wander_greet", "variant": "", "lines": ["…구경 왔어?", "천천히 봐도 돼."] },
         { "actionId": "wander_recall", "variant": "", "lines": ["…또 왔네.", "…자주 오네."] },
         { "actionId": "thank_calm", "variant": "", "lines": ["…고마워.", "…덕분에 좀 반짝이네.", "…손길이 꼼꼼하네. 고마워.", "…이만하면 반짝이네. 고마워.", "…자개가 다시 반짝여. 고마워."] },
-        { "actionId": "thank_joyful", "variant": "", "lines": ["꽤 마음에 들어… 고마워.", "…이 정도면 최고야. 고마워.", "…생각보다 훨씬 반짝이네. 고마워!", "…솔직히 기뻐. 고마워.", "…이 정도면 만족이야. 고마워!"] }
+        { "actionId": "thank_joyful", "variant": "", "lines": ["꽤 마음에 들어… 고마워.", "…이 정도면 최고야. 고마워.", "…생각보다 훨씬 반짝이네. 고마워!", "…솔직히 기뻐. 고마워.", "…이 정도면 만족이야. 고마워!"] },
+        { "actionId": "thank_calm", "variant": "partial", "lines": ["…아직 흐려도, 고마워.", "…조금 나아졌어. 고마워.", "…손길이 꼼꼼하네. 조금 나아졌어."] },
+        { "actionId": "thank_joyful", "variant": "partial", "lines": ["…조금 나아졌네. 고마워!", "…아직이지만 솔직히 기뻐. 고마워.", "…자개 무늬가 조금 보여. 고마워!"] }
       ]
     },
     {
@@ -104,7 +112,9 @@
         { "actionId": "wander_greet", "variant": "", "lines": ["킁킁, 누구야?", "히힛, 새 얼굴이다!"] },
         { "actionId": "wander_recall", "variant": "", "lines": ["앗, 또 왔다! 히힛.", "킁킁, 아는 냄새다!"] },
         { "actionId": "thank_calm", "variant": "", "lines": ["고마워! 히힛.", "킁킁, 개운하다. 고마워!", "고마워! 꼬리까지 개운해.", "포근하다. 고마워!", "킁킁, 깨끗한 냄새가 나. 고마워!"] },
-        { "actionId": "thank_joyful", "variant": "", "lines": ["히힛, 관리해 줘서 너무 좋아!", "앗싸, 반짝반짝! 고마워!", "와, 털이 반짝반짝해! 고마워!", "신나서 폴짝 뛰고 싶어! 고마워!", "히힛, 기분 최고야! 고마워!"] }
+        { "actionId": "thank_joyful", "variant": "", "lines": ["히힛, 관리해 줘서 너무 좋아!", "앗싸, 반짝반짝! 고마워!", "와, 털이 반짝반짝해! 고마워!", "신나서 폴짝 뛰고 싶어! 고마워!", "히힛, 기분 최고야! 고마워!"] },
+        { "actionId": "thank_calm", "variant": "partial", "lines": ["킁킁, 아직 좀 뿌옇지만 고마워!", "히힛, 조금 나아졌어. 고마워!", "고마워! 조금만 더 닦아 줘!"] },
+        { "actionId": "thank_joyful", "variant": "partial", "lines": ["와, 털이 조금 보송해졌어! 고마워!", "히힛, 한결 나아! 또 닦아 줘!", "킁킁, 아직 뿌옇지만 신나! 고마워!"] }
       ]
     }
   ],
@@ -125,6 +135,8 @@
       { "actionId": "wander_recall", "variant": "", "lines": ["또 오셨네요."] },
       { "actionId": "thank_calm", "variant": "", "lines": ["고마워요."] },
       { "actionId": "thank_joyful", "variant": "", "lines": ["정말 고마워요!"] },
+      { "actionId": "thank_calm", "variant": "partial", "lines": ["아직 조금 흐리지만 고마워요."] },
+      { "actionId": "thank_joyful", "variant": "partial", "lines": ["한결 나아졌어요. 고마워요!"] },
       { "actionId": "tell_story", "variant": "", "lines": ["제게도 오래된 이야기가 있어요."] }
     ]
   }

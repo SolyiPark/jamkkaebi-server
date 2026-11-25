@@ -83,7 +83,8 @@ namespace Jamkkaebi.Npc
 
     /// <summary>
     /// 행동 하나의 대사 묶음. variant 는 같은 행동을 상황에 따라 나눈 것이다
-    /// (answer_status: faded = 흐려짐·재봉인, recent_care = 최근에 관리 받음, default = 그 밖). 나누지 않으면 빈 문자열.
+    /// (answer_status: faded = 흐려짐·재봉인, recent_care = 최근에 관리 받음, default = 그 밖;
+    /// thank_calm·thank_joyful: partial = 관리 뒤에도 아직 선명이 아님). 나누지 않으면 빈 문자열.
     /// </summary>
     [Serializable]
     public sealed class LinePool
