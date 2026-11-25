@@ -1034,8 +1034,8 @@ namespace Jamkkaebi.Npc
                 // 출력 검사가 줄이지 않거나(기억의 내용이 뒤 문장에 있을 수 있다) 고마움이 든 문장을 골라 남겨서(뒤 문장일 수 있다) 둘째 문장을 버리지 않는다
                 grammar.Append("line ::= \"\\\"\" sentence ( \" \" sentence )? \"\\\"\"\n");
                 grammar.Append("sentence ::= \"…\"? ").Append(SentenceChain(SentenceMaxChars)).Append(" term term? term?\n");
-                grammar.Append("b ::= [^\"\\\\\\n\\r.!?~…]\n");
-                grammar.Append("term ::= [.!?~…]\n");
+                grammar.Append("b ::= [^\"\\\\\\n\\r.!?~…。]\n");
+                grammar.Append("term ::= [.!?~…。]\n");
             }
             else if (sentenceGrammar)
             {
@@ -1050,10 +1050,12 @@ namespace Jamkkaebi.Npc
                     grammar.Append(i == 0 ? " k" : " s k");
                 }
                 grammar.Append(" (").Append(SentenceChain(SentenceMaxChars - OneSentenceMinCore)).Append(")? term term? term?\n");
-                grammar.Append("k ::= [^\"\\\\\\n\\r.!?~… \\t,·'‘’“”]\n"); // 출력 검사가 세는 글자 (NpcLineChecks.Core 가 빼는 부호·띄어쓰기가 아닌 것)
+                // 출력 검사가 세는 글자 (NpcLineChecks.Core 가 빼는 부호·띄어쓰기가 아닌 것). '。'도 끝 부호다 — 글자(k·b)에 두면 "왔구나。 정말 반가워!"처럼
+                // 한 문장 안에 문장 끝이 들어가 NpcLineChecks.SentenceEnds 가 두 문장으로 나눴다 (CodeRabbit 리뷰)
+                grammar.Append("k ::= [^\"\\\\\\n\\r.!?~…。 \\t,·'‘’“”]\n");
                 grammar.Append("s ::= [ \\t,·'‘’“”]? [ \\t]?\n");          // 그 사이의 쉼표·띄어쓰기 ("안녕, 하늘아")
-                grammar.Append("b ::= [^\"\\\\\\n\\r.!?~…]\n");
-                grammar.Append("term ::= [.!?~…]\n");
+                grammar.Append("b ::= [^\"\\\\\\n\\r.!?~…。]\n");
+                grammar.Append("term ::= [.!?~…。]\n");
             }
             else
             {

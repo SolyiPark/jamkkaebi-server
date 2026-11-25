@@ -612,8 +612,20 @@ def partly_restored_ask(scene):
     C# PromptAssembler.PartlyRestoredAsk 와 같다."""
     if not needs_ask(scene) or fact_of(scene, "clarity") not in ("흐려짐", "FADED"):
         return False
-    days = fact_of(scene, "last_care_days_ago")
-    return days is not None and days.isdigit() and int(days) < LONG_GAP_DAYS
+    days = parse_int(fact_of(scene, "last_care_days_ago"))
+    return days is not None and 0 <= days < LONG_GAP_DAYS
+
+
+def parse_int(text):
+    """C# int.TryParse(기본 NumberStyles.Integer)처럼 읽는다: 앞뒤 공백과 부호 하나를 허용하고 0-9 숫자만. 못 읽으면 None.
+    str.isdigit() 는 " 2 " 를 못 읽고, int() 는 "1_0"·전각 숫자까지 읽어서 C# 과 갈린다."""
+    if text is None:
+        return None
+    match = re.fullmatch(r"[ \t\n\v\f\r]*([+-]?[0-9]+)[ \t\n\v\f\r]*", text)
+    if not match:
+        return None
+    value = int(match.group(1))
+    return value if -2**31 <= value < 2**31 else None
 
 
 def ask_prefix_candidates(scene):
@@ -2593,7 +2605,8 @@ def scene_visits(scene):
 # 도깨비가 모르는 사정을 지어낸 것이다. 인사는 반가움만 말하면 되므로, 이런 마디는 지우고 반가움 마디만 남긴다. 다 지워 남는 말이 없으면 거른다. C# NpcLineChecks.FixGreetingTail·GreetingProbe 와 같다
 GREETING_ACTIONS = ("greet", "wander_greet", "wander_recall")
 # '찾으러'는 "뭘 찾으러 왔어?"만 거른다. "날 찾으러 왔구나"·"나를 찾으러 왔네"는 반가움이라 둔다 (2026-11-25). C# NpcLineChecks.Probe 와 같다
-PROBE_RE = re.compile("무슨|뭘|뭐 |뭐하|왜|궁금|길래|일찍|늦게|(?<!날 )(?<!나를 )(?<!날)(?<!나를)찾으러|하러|급하게|보고 ?싶었|오늘은 좀|처음 온 친구야|어떤 일")
+# 날·나를은 따로 선 낱말일 때만 뺀다 (앞이 글의 처음이거나 한글이 아님) — "전날 찾으러"·"하나를 찾으러"는 거른다
+PROBE_RE = re.compile("무슨|뭘|뭐 |뭐하|왜|궁금|길래|일찍|늦게|(?<![^가-힣]날 )(?<!^날 )(?<![^가-힣]날)(?<!^날)(?<![^가-힣]나를 )(?<!^나를 )(?<![^가-힣]나를)(?<!^나를)찾으러|하러|급하게|보고 ?싶었|오늘은 좀|처음 온 친구야|어떤 일")
 CLAUSE_END = ",，.!?…~"
 
 
@@ -2737,6 +2750,8 @@ def game_problem(row, persona, recent, scene=None, variation=0, max_len=None, re
             for ask in ask_fallback_candidates(scene, variation, prefix, recent, max_len):
                 replaced = dict(row)
                 replaced.update(reevaluate(ask))
+                # 토큰 한도에 끊겼는지는 모델 출력의 지표다 — 바꿔 넣은 부탁(끊기지 않은 것으로 평가)의 값으로 덮지 않는다
+                replaced["truncated"] = row.get("truncated", False)
                 if game_problem(replaced, persona, recent, scene, variation, max_len, None) is None:
                     row.update(replaced)
                     row["ask_filled"] = True
@@ -2959,6 +2974,14 @@ def fact_of(scene, key):
     return next((str(f["value"]) for f in scene["facts"] if f["key"] == key), None)
 
 
+def care_partial(result):
+    """관리 결과("관리 전→관리 뒤")의 관리 뒤가 선명이 아닌지 (보통 난이도로 재봉인 → 흐려짐). 결과를 모르면 False. C# RuleBasedReactionGenerator.CareVariant 와 같다."""
+    if not result:
+        return False
+    after = result.rsplit("→", 1)[-1].strip()
+    return after not in ("", "선명") and after.upper() != "CLEAR"
+
+
 def pick_fallback(content, scene, recent):
     """기본 대사로 대신할 때 게임이 띄울 대사 (RuleBasedReactionGenerator 를 흉내 낸다). 기본 대사 파일이 없으면 None.
     후보 고르기(손님 방문 횟수 → preferredActions → 첫 후보)·안부 변형·최근 대사 피하기·바로 앞 대사 피하기가 같다. 고르기는 무작위다."""
@@ -2982,7 +3005,11 @@ def pick_fallback(content, scene, recent):
     def find(lines_of, variant_name):
         return next((p["lines"] for p in lines_of.get("pools", [])
                      if p["actionId"] == action and p["variant"] == variant_name), None)
-    lines = find(spirit, kind) or find(spirit, "") or find(data["fallback"], kind) or find(data["fallback"], "")
+    if action in ("thank_calm", "thank_joyful") and care_partial(fact_of(scene, "care_result")):
+        # 관리 뒤에도 아직 선명이 아니면 덜 나은 감사 대사만 — 일반 감사 풀로 내려가지 않는다 (C# RuleBasedReactionGenerator.CareVariant 와 같다)
+        lines = find(spirit, "partial") or find(data["fallback"], "partial")
+    else:
+        lines = find(spirit, kind) or find(spirit, "") or find(data["fallback"], kind) or find(data["fallback"], "")
     if not lines:
         return None
     key = f"{scene['relicId']}:{action}:{kind}"

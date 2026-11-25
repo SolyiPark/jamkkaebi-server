@@ -222,10 +222,32 @@ namespace Jamkkaebi.Npc
             return check;
         }
 
-        // 흐려진 안부의 부탁 문장 하나를 모델이 쓴 것처럼 검사에 넣을 JSON (앞 문장은 검사기가 다시 붙인다)
+        // 흐려진 안부의 부탁 문장 하나를 모델이 쓴 것처럼 검사에 넣을 JSON (앞 문장은 검사기가 다시 붙인다).
+        // 값은 모델 출력을 읽어 푼 것이라 JSON 으로 다시 이스케이프한다 — 대상 ID 에 역슬래시가 있으면("case\part") 그대로 붙였을 때 '\p' 가 잘못된 이스케이프라 바꾼 부탁이 모두 걸렸다
         private static string AskJson(string action, string target, string ask)
         {
-            return "{\"action\": \"" + (action ?? "") + "\", \"target\": \"" + (target ?? "") + "\", \"line\": \"" + ask + "\"}";
+            return "{\"action\": " + JsonString(action) + ", \"target\": " + JsonString(target) + ", \"line\": " + JsonString(ask) + "}";
+        }
+
+        private static string JsonString(string value)
+        {
+            var text = new System.Text.StringBuilder("\"");
+            foreach (char c in value ?? "")
+            {
+                if (c == '"' || c == '\\')
+                {
+                    text.Append('\\').Append(c);
+                }
+                else if (c < ' ')
+                {
+                    text.Append("\\u").Append(((int)c).ToString("x4"));
+                }
+                else
+                {
+                    text.Append(c);
+                }
+            }
+            return text.Append('"').ToString();
         }
 
         // 반복 검사에 넣을 글: 길이에 맞춰 줄인 대사 (줄이지 못하면 그대로)
@@ -544,7 +566,7 @@ namespace Jamkkaebi.Npc
                         said = replacedSaid;
                         return new OutputCheck(OutputProblem.None,
                                 OutputCheck.AskReplacedNote + " ('" + modelLine + "' → '" + replaced.Line + "', 겹친 최근 대사 '" + same.Value.Key + "')",
-                                replaced.ActionId, replaced.TargetId, replaced.Line, replaced.FullLine, replaced.Truncated);
+                                replaced.ActionId, replaced.TargetId, replaced.Line, replaced.FullLine, truncated);   // 토큰 한도에 끊겼는지는 모델 출력의 것 (run.py 와 같다)
                     }
                 }
             }

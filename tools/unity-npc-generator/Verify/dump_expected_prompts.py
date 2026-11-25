@@ -44,12 +44,13 @@ for scene in content["scenes"]:
     expected["_askDays"][scene["id"]] = user_days
 
 # 재봉인에서 한 칸 올라 흐려짐이 된 정령의 안부(마지막 관리 2일 전): 아직 덜 나았다고 말하고 며칠 전 변형을 쓰지 않는다 (variation 0·1)
+# 날 수는 앞뒤 공백이 붙은 " 2 " 로 준다 — C# int.TryParse 는 읽고 str.isdigit() 는 못 읽어 갈렸다 (CodeRabbit 리뷰)
 expected["_askPartly"] = {}
 for scene in content["scenes"]:
     if run.is_fixed(scene) or not run.needs_ask(scene) or run.fact_of(scene, "clarity") != "흐려짐":
         continue
     partly = json.loads(json.dumps(scene))
-    partly["facts"] = [f for f in partly["facts"] if f["key"] != "last_care_days_ago"] + [{"key": "last_care_days_ago", "value": "2"}]
+    partly["facts"] = [f for f in partly["facts"] if f["key"] != "last_care_days_ago"] + [{"key": "last_care_days_ago", "value": " 2 "}]
     persona = content["personas"][scene["relicId"]]
     expected["_askPartly"][scene["id"]] = [run.build_prompts(args, "single", partly, persona, content, v)[1] for v in (0, 1)]
 
@@ -205,6 +206,8 @@ FN_SAMPLES = [
     ("recallFragment", "기억난다, 내 자개 공들여 만들었다고 자랑했던 일", ""), ("recallFragment", "기억나, 그때 자개 자랑했던 일!", ""), ("recallFragment", "그때 일 기억나?", ""),
     ("probe", "안녕, 오늘은 좀 일찍 왔구나.", "greet"), ("probe", "어서 와, 반가워!", "greet"), ("probe", "무슨 일이야?", "thank_calm"), ("probe", "뭘 찾으러 왔어?", "wander_greet"),
     ("probe", "날 찾으러 왔구나!", "greet"), ("probe", "와! 나를 찾으러 왔네.", "greet"), ("probe", "보물 찾으러 왔어?", "greet"), ("probe", "나를  찾으러 왔구나!", "greet"), ("probe", "뭘   찾으러 왔어?", "greet"),
+    # CodeRabbit 리뷰: 날·나를이 따로 선 낱말일 때만 반가움 — "전날"·"하나를"은 나가 아니다
+    ("probe", "전날 찾으러 왔구나.", "greet"), ("probe", "하나를 찾으러 왔어?", "greet"), ("probe", "어, 날 찾으러 왔구나!", "greet"), ("probe", "그날  찾으러 왔어?", "greet"),
 ]
 
 
