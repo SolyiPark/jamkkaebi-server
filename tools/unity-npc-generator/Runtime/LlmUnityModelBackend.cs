@@ -32,7 +32,20 @@ namespace Jamkkaebi.Npc
             CancelHold = TimeSpan.FromMinutes(5);
             SaveSystemState = true;
             StateVersion = "1";
+            BackgroundStepChars = 48;
         }
+
+        /// <summary>
+        /// 뒤에서 만드는 생성(NpcPrompt.Background)이 프롬프트를 한 번에 읽을 글자 수. 0 이면 나누지 않는다.
+        /// 프롬프트를 읽는 동안에는 생성을 멈출 수 없어(LlamaLib 2.0.5 결함, Run 참고) 예전에는 뒤에서 만들기가 모델을 먼저 잡으면 플레이어의 요청·미리 읽기가
+        /// 그 읽기(폰에서 7~20초)가 끝날 때까지 기다렸다 — 누가 먼저 모델을 잡느냐에 따라 미리 읽기가 0초도 되고 45~68초도 됐다 (2026-11-24 기기 시험).
+        /// 그래서 뒤에서 만들기는 시스템 메시지·사용자 메시지를 이 글자 수씩 늘려 가며 1토큰 생성으로 읽히고(llama.cpp 가 앞서 읽은 부분을 다시 쓰므로 새로 읽는 것은 한 조각뿐),
+        /// 조각 사이마다 플레이어의 일이 기다리거나 취소됐으면 멈추지 않고 그 자리에서 비켜 준다. 플레이어가 기다리는 시간은 많아야 한 조각(폰에서 1~2초) 또는 기억 파일 되살리기·저장 한 번(이것도 멈출 수 없는 짧은 일)이고,
+        /// 그때까지 읽은 부분은 모델에 남아 이어지는 요청이 다시 읽지 않는다. 대신 뒤에서 만들기는 조각마다 끝맺음 몇 토큰을 더 읽어 조금 느려진다
+        /// (그래서 요청 관리자의 PrefetchTimeout 기본을 60초로 늘렸다). 앞 프롬프트와 같은 앞부분(모든 도깨비에 같은 규칙)은 조각으로 다시 부르지 않고,
+        /// 시스템 메시지 조각 뒤에는 미리 읽기와 같은 프롬프트(시스템 메시지 + '준비')를 한 번 읽혀 그 기억을 저장한다(SaveSystemState).
+        /// </summary>
+        public int BackgroundStepChars { get; set; }
 
         /// <summary>GGUF 파일 이름. 에디터의 LLM 모델 관리자에 등록한 이름 그대로 (예: "gemma-4-E2B-it-Q4_K_M.gguf").</summary>
         public string Model { get; set; }
@@ -103,6 +116,8 @@ namespace Jamkkaebi.Npc
         /// <summary>
         /// 시스템 메시지를 읽은 모델의 기억(KV 캐시)을 파일로 저장해 두고, 다음에 같은 시스템 메시지를 미리 읽을 때 읽는 대신
         /// 파일에서 되살린다. 앱을 다시 켜도 도깨비 다섯의 시스템 메시지(각 수백 토큰)를 다시 읽지 않아 첫 대사가 빨라진다.
+        /// 모델의 기억 칸(슬롯)은 하나라 마지막에 읽은 도깨비만 남는데, 이것으로 A→B→A 처럼 돌아온 도깨비도 다시 읽지 않는다 (2026-11-25, 기기에서 바뀔 때마다 15~20초).
+        /// 미리 읽기 없이 다른 도깨비의 생성이 와도(요청·미리 만들기) 먼저 되살린다. 저장은 미리 읽기(시스템 메시지 + 1토큰)가 끝났을 때만 한다.
         /// 세션이 ILlmUnityStateStore 를 지원하지 않거나 저장·복원이 실패하면 그냥 읽는다.
         /// </summary>
         public bool SaveSystemState { get; set; }
@@ -216,12 +231,18 @@ namespace Jamkkaebi.Npc
         private volatile LlmUnityCall lastCall;
         private volatile LlmUnityCall lastPrepare;
         private volatile bool lastPrepareRestored;
+        private volatile bool lastCallRestored;
+        private int foregroundWaiting; // 모델 줄을 기다리는 플레이어의 일(요청·미리 읽기) 수 (Acquire). Interlocked 로만 읽고 쓴다
+        private CancellationTokenSource backgroundYield; // 지금 모델을 잡은 뒤에서 만들기에 비키라고 알리는 것. gate 안에서 읽고 쓴다
         private int stateLoads;
         private int stateSaves;
 
         // 마지막으로 끝까지 읽힌 시스템 메시지와 그 세션. oneAtATime 안에서만 읽고 쓴다
         private ILlmUnitySession readSession;
         private string readSystem;
+        // 마지막으로 끝까지 돈 호출의 시스템 메시지(뒤에서 만들기의 조각이면 그 앞부분). 모델에 그 앞부분이 남아 있다고 아는 것 — 모르면 null.
+        // 뒤에서 만들기가 그것과 같은 앞부분을 조각으로 다시 부르지 않게 한다 (ReadInSteps). readSession 의 세션 것이고, oneAtATime 안에서만 읽고 쓴다
+        private string knownSystem;
 
         /// <summary>Unity 메인 스레드에서 만든다.</summary>
         public LlmUnityModelBackend(ILlmUnityRuntime runtime, LlmUnityOptions options)
@@ -300,6 +321,12 @@ namespace Jamkkaebi.Npc
         public bool LastPrepareRestored
         {
             get { return lastPrepareRestored; }
+        }
+
+        /// <summary>마지막 생성이 시작 전에 저장해 둔 시스템 메시지의 기억을 되살렸으면 true (모델이 다른 도깨비를 기억하던 채로 온 생성).</summary>
+        public bool LastCallRestored
+        {
+            get { return lastCallRestored; }
         }
 
         /// <summary>저장해 둔 기억을 되살린 횟수.</summary>
@@ -597,7 +624,7 @@ namespace Jamkkaebi.Npc
             {
                 throw new ArgumentNullException("prompt");
             }
-            return Run(prompt.System, prompt.User, GrammarFor(prompt), options.MaxTokens, false, ct);
+            return Run(prompt.System, prompt.User, GrammarFor(prompt), options.MaxTokens, false, prompt.Background, ct);
         }
 
         /// <summary>
@@ -610,10 +637,125 @@ namespace Jamkkaebi.Npc
             {
                 throw new ArgumentNullException("system");
             }
-            return Run(system, NpcPrompt.PrepareUser, null, 1, true, ct);
+            return Run(system, NpcPrompt.PrepareUser, null, 1, true, false, ct);
         }
 
-        private async Task<string> Run(string system, string user, string grammar, int maxTokens, bool prepare, CancellationToken ct)
+        // 모델 줄을 잡는다. 플레이어의 일(요청·미리 읽기)은 기다리는 동안 foregroundWaiting 에 센다 — 뒤에서 만들기는 그것이 있으면 줄을 잡아도 바로 놓고 비켜 준다.
+        // SemaphoreSlim 은 기다린 차례를 지켜 주지 않아, 이것이 없으면 뒤에서 만들기와 플레이어의 일 중 먼저 들어온 쪽이 모델을 잡았다
+        private async Task Acquire(bool background, CancellationToken token)
+        {
+            if (!background)
+            {
+                Interlocked.Increment(ref foregroundWaiting);
+                // 모델을 잡고 있는 뒤에서 만들기에 비키라고 알린다 (취소는 잠금 밖에서 — 취소에 걸린 이어 하기가 이 스레드에서 돌 수 있다)
+                CancellationTokenSource running;
+                lock (gate)
+                {
+                    running = backgroundYield;
+                }
+                if (running != null)
+                {
+                    try
+                    {
+                        running.Cancel();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        // 그 사이 끝났다
+                    }
+                }
+                try
+                {
+                    await oneAtATime.WaitAsync(token).ConfigureAwait(false);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref foregroundWaiting);
+                }
+                return;
+            }
+            while (true)
+            {
+                await oneAtATime.WaitAsync(token).ConfigureAwait(false);
+                if (Volatile.Read(ref foregroundWaiting) == 0)
+                {
+                    return;
+                }
+                oneAtATime.Release(); // 플레이어의 일이 기다린다 — 먼저 들여보낸다
+                await Task.Delay(BackgroundYieldMs, token).ConfigureAwait(false);
+            }
+        }
+
+        private const int BackgroundYieldMs = 20;
+
+        // 뒤에서 만들기가 플레이어의 일에 비켜 줘야 하는지 (취소됐거나 플레이어의 일이 줄을 기다린다)
+        private bool ShouldYield(CancellationToken token)
+        {
+            return token.IsCancellationRequested || Volatile.Read(ref foregroundWaiting) > 0;
+        }
+
+        // 뒤에서 만들기: 프롬프트를 BackgroundStepChars 씩 늘려 가며 1토큰 생성으로 읽힌다 (LlmUnityOptions.BackgroundStepChars).
+        // 조각 하나는 멈추라고 하지 않고 끝까지 읽힌다(읽는 중의 취소는 슬롯을 묶는다). 조각 사이에 플레이어의 일이 오면 OperationCanceledException 으로 비켜 준다.
+        // systemRead 면 시스템 메시지는 이미 모델에 있어(같은 도깨비·되살림) 사용자 메시지만 나눠 읽는다.
+        // known 은 모델에 남아 있다고 아는 앞 프롬프트의 시스템 메시지(모르면 null) — 그것과 같은 앞부분(모든 도깨비에 같은 규칙 등)은 조각으로 다시 부르지 않는다.
+        // 시스템 메시지 조각 뒤에는 시스템 메시지 전체 + '준비'(미리 읽기와 같은 프롬프트)를 한 번 더 읽혀, 어느 조각도 새로 읽는 것이 한 조각을 넘지 않게 하고
+        // 그 기억을 저장해 둔다 (다음에 이 도깨비로 넘어오면 되살린다)
+        private async Task ReadInSteps(ILlmUnitySession current, string system, string user, bool systemRead, string known, CancellationToken token)
+        {
+            int step = options.BackgroundStepChars;
+            var parts = new List<KeyValuePair<string, string>>();
+            if (!systemRead)
+            {
+                int shared = known != null ? CommonPrefixLength(known, system) : 0;
+                for (int k = (shared / step + 1) * step; k < system.Length; k += step)
+                {
+                    parts.Add(new KeyValuePair<string, string>(system.Substring(0, k), NpcPrompt.PrepareUser));
+                }
+                parts.Add(new KeyValuePair<string, string>(system, NpcPrompt.PrepareUser));
+            }
+            for (int j = step; j < user.Length; j += step)
+            {
+                parts.Add(new KeyValuePair<string, string>(system, user.Substring(0, j)));
+            }
+            foreach (KeyValuePair<string, string> part in parts)
+            {
+                if (ShouldYield(token))
+                {
+                    throw new OperationCanceledException("플레이어의 요청·미리 읽기에 모델을 비켜 줌");
+                }
+                KeyValuePair<string, string> piece = part;
+                await OnModel(current, () => current.ChatOnceAsync(piece.Key, piece.Value, null, 1, options, null), token).ConfigureAwait(false);
+                knownSystem = piece.Key;
+                if (piece.Key == system)
+                {
+                    readSession = current;
+                    readSystem = system; // 시스템 메시지는 끝까지 읽혔다 — 비켜 준 뒤 이 도깨비를 미리 읽으면 다시 읽지 않는다
+                    ILlmUnityStateStore store = options.SaveSystemState ? current as ILlmUnityStateStore : null;
+                    if (piece.Value == NpcPrompt.PrepareUser && store != null)
+                    {
+                        // 미리 읽기와 같은 상태(시스템 메시지 + '준비')라 그 기억을 저장한다 — 저장도 짧고 멈출 수 없는 일이라 조각 하나로 친다
+                        await PersistState(current, store, StateKey(system), token).ConfigureAwait(false);
+                    }
+                }
+            }
+            if (ShouldYield(token))
+            {
+                throw new OperationCanceledException("플레이어의 요청·미리 읽기에 모델을 비켜 줌");
+            }
+        }
+
+        private static int CommonPrefixLength(string a, string b)
+        {
+            int n = Math.Min(a.Length, b.Length);
+            int i = 0;
+            while (i < n && a[i] == b[i])
+            {
+                i++;
+            }
+            return i;
+        }
+
+        private async Task<string> Run(string system, string user, string grammar, int maxTokens, bool prepare, bool background, CancellationToken ct)
         {
             ILlmUnitySession current;
             CancellationToken alive;
@@ -628,10 +770,23 @@ namespace Jamkkaebi.Npc
                 ThrowIfStalled(current);
             }
 
-            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, alive))
+            // 뒤에서 만들기는 플레이어의 일이 줄에 서면 취소된다(yielding) — 조각 사이면 그 자리에서, 마지막 읽기·생성 중이면 첫 글자에서(미뤄 둔 취소) 비켜 준다
+            using (var yielding = new CancellationTokenSource())
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, alive, yielding.Token))
             {
                 CancellationToken token = linked.Token;
-                await oneAtATime.WaitAsync(token).ConfigureAwait(false);
+                await Acquire(background, token).ConfigureAwait(false);
+                if (background)
+                {
+                    lock (gate)
+                    {
+                        backgroundYield = yielding;
+                    }
+                    if (Volatile.Read(ref foregroundWaiting) > 0)
+                    {
+                        yielding.Cancel(); // 줄을 잡는 사이에 플레이어의 일이 왔다 (그쪽이 본 backgroundYield 는 아직 비어 있었다)
+                    }
+                }
                 bool releaseLater = false; // 멈추지 않은 생성이 끝날 때 ReleaseWhenDone 이 놓는다
                 try
                 {
@@ -640,14 +795,19 @@ namespace Jamkkaebi.Npc
                     {
                         ThrowIfStalled(current); // 줄에서 기다리는 동안 앞의 생성이 멈춘 것으로 판정됐다
                     }
-                    if (prepare && readSession == current && readSystem == system)
+                    bool alreadyRead = readSession == current && readSystem == system;
+                    if (prepare && alreadyRead)
                     {
                         return ""; // 이미 읽어 둔 시스템 메시지
                     }
-                    // 끝까지 읽히기 전에는 모델이 무엇을 기억하는지 모른다
+                    // 끝까지 읽히기 전에는 모델이 무엇을 기억하는지 모른다 (끝나면 아래에서 다시 적는다. 취소·실패면 모르는 채로 둔다)
                     readSystem = null;
+                    string known = readSession == current ? knownSystem : null;
+                    knownSystem = null;
                     Stopwatch watch = Stopwatch.StartNew();
-                    ILlmUnityStateStore store = prepare && options.SaveSystemState ? current as ILlmUnityStateStore : null;
+                    // 저장해 둔 그 시스템 메시지의 기억이 있으면 읽는 대신 되살린다. 미리 읽기뿐 아니라, 모델이 다른 도깨비를 기억하는 채로 온 생성
+                    // (미리 읽기 없이 온 요청, 다른 도깨비로 넘어간 미리 만들기)도 되살린 뒤 사용자 메시지만 읽는다 (2026-11-25). 이미 읽어 둔 것이면 되살리지 않는다
+                    ILlmUnityStateStore store = options.SaveSystemState && !alreadyRead ? current as ILlmUnityStateStore : null;
                     string stateKey = store != null ? StateKey(system) : null;
                     Task<bool> restoring = store != null ? RestoreState(current, store, stateKey, token) : Task.FromResult(false);
                     // 기억 복원도 모델 안의 일이라 취소를 듣지 않는다. 취소되면 기다리지 않고 돌려주되, 끝날 때까지 줄은 붙잡는다 (생성 취소와 같다)
@@ -657,15 +817,31 @@ namespace Jamkkaebi.Npc
                         ReleaseWhenDone(restoring, alive, current);
                         throw new OperationCanceledException(token);
                     }
-                    if (restoring.Result)
+                    bool restored = restoring.Result;
+                    if (restored)
                     {
                         token.ThrowIfCancellationRequested();
                         watch.Stop();
                         readSession = current;
                         readSystem = system;
-                        lastPrepareRestored = true;
-                        lastPrepare = new LlmUnityCall(-1, watch.ElapsedMilliseconds, 0);
-                        return "";
+                        knownSystem = system;
+                        if (prepare)
+                        {
+                            lastPrepareRestored = true;
+                            lastPrepare = new LlmUnityCall(-1, watch.ElapsedMilliseconds, 0);
+                            return "";
+                        }
+                        // 생성: 되살린 시스템 메시지 뒤로 사용자 메시지만 읽는다. 아래에서 끝까지 읽히기 전까지는 다시 모른다고 둔다
+                        readSystem = null;
+                    }
+                    if (!prepare && !background)
+                    {
+                        lastCallRestored = restored;
+                    }
+                    if (background && options.BackgroundStepChars > 0)
+                    {
+                        await ReadInSteps(current, system, user, alreadyRead || restored, restored ? system : known, token).ConfigureAwait(false);
+                        knownSystem = null; // 마지막 생성이 끝나기 전에는 모델이 무엇을 기억하는지 모른다
                     }
                     watch = Stopwatch.StartNew();
                     long firstToken = -1;
@@ -713,6 +889,7 @@ namespace Jamkkaebi.Npc
                     watch.Stop();
                     readSession = current;
                     readSystem = system;
+                    knownSystem = system;
                     var measured = new LlmUnityCall(Interlocked.Read(ref firstToken), watch.ElapsedMilliseconds, reply != null ? reply.Length : 0);
                     if (prepare)
                     {
@@ -730,14 +907,24 @@ namespace Jamkkaebi.Npc
                             }
                         }
                     }
-                    else
+                    else if (!background)
                     {
-                        lastCall = measured;
+                        lastCall = measured; // 뒤에서 만들기는 적지 않는다 — 플레이어 요청의 첫 응답 시간(기기 시험)을 덮지 않게
                     }
                     return reply ?? "";
                 }
                 finally
                 {
+                    if (background)
+                    {
+                        lock (gate)
+                        {
+                            if (backgroundYield == yielding)
+                            {
+                                backgroundYield = null; // 이 using 이 끝나면 yielding 을 버린다 — 플레이어의 일이 버린 것을 취소하지 않게
+                            }
+                        }
+                    }
                     if (!releaseLater)
                     {
                         oneAtATime.Release();
