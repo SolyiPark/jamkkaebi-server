@@ -75,7 +75,7 @@ namespace Jamkkaebi.Npc
     /// <para><b>아무것도 띄우지 않는 경우</b>: 부르는 쪽이 취소함(화면 종료), Cancel(relicId)(NPC 전환), CancelAll,
     /// 같은 도깨비에게 새 요청이 와서 옛 요청이 밀림, 후보가 없음. 늦게 끝난 옛 요청의 결과는 버린다.</para>
     ///
-    /// <para><b>같은 대사 막기</b>: 시나리오(같은 도깨비의 같은 선택지)마다 이번 실행에서 띄운 대사 RecentLineCount(10)개를 기억해 요청의 RecentLines 에 넣는다.
+    /// <para><b>같은 대사 막기</b>: 시나리오(같은 도깨비의 같은 선택지)마다 이번 실행에서 띄운 대사 RecentLineCount(5)개를 기억해 요청의 RecentLines 에 넣는다.
     /// 출력 검사기는 그와 같은 대사를 거르고(SLM 생성기가 다시 만든다), 기본 대사도 그와 다른 것을 고른다.</para>
     ///
     /// <para>도깨비(relicId)마다 진행 중인 요청을 하나만 둔다. 손님 관람처럼 여러 도깨비가 동시에 말풍선을 띄우는 것은 된다.
@@ -173,7 +173,7 @@ namespace Jamkkaebi.Npc
             this.rule = rule;
             SlmEnabled = slm != null;
             SlmTimeout = TimeSpan.FromSeconds(3);
-            RecentLineCount = 10;
+            RecentLineCount = 5; // 2026-11-26: 10 → 5. 15자 인사를 같은 도깨비가 거듭하면 10개와 겹치지 않을 말이 모자라 반복 실패가 가장 많았다 (ver8 기기 시험 57건 중 20건)
             Cache = new NpcLineCache();
             UsePrefetched = true;
             PrefetchTimeout = TimeSpan.FromSeconds(60);
@@ -541,10 +541,13 @@ namespace Jamkkaebi.Npc
         }
 
         /// <summary>
-        /// 시나리오(같은 도깨비의 같은 선택지)마다 기억해 두고 다시 쓰지 않을 최근 대사 수. 기본 10 — 최근 10개 중 하나와 90% 이상 겹치면
+        /// 시나리오(같은 도깨비의 같은 선택지)마다 기억해 두고 다시 쓰지 않을 최근 대사 수. 기본 5 (2026-11-26 에 10 에서 줄였다) — 최근 5개 중 하나와 90% 이상 겹치면
         /// 출력 검사가 거르고 SLM 생성기가 새로 만든다. 0 이면 기억하지 않는다.
         /// </summary>
         public int RecentLineCount { get; set; }
+
+        /// <summary>관리 감사·선명한 안부의 첫 낱말(깨끗하게·훨씬·몸이·덕분에·정말·개운하게)을 고르는 난수 (PromptAssembler.PicksStarterAtRandom). 비우면 처음 쓸 때 만든다. 시험은 씨앗을 준다.</summary>
+        public Random StarterRandom { get; set; }
 
         /// <summary>
         /// SLM 을 쓸지. 실기기 측정으로 정한 사양 기준에 못 미치는 기기면 false 로 두어 처음부터 기본 대사만 쓴다.
@@ -1199,10 +1202,13 @@ namespace Jamkkaebi.Npc
             // 앞 문장은 번호를 4로 나눈 나머지, 첫 낱말은 5로 나눈 나머지로 정해져 20번이면 모든 짝을 본다 (2026-11-24)
             bool askPrefix = NpcLineChecks.NeedsAsk(request);
             int search = askPrefix ? AskStarterSearch : StarterSearch;
+            bool atRandom = PromptAssembler.PicksStarterAtRandom(request);
             int start = request.Variation;
             int best = start;
             int bestScore = int.MaxValue;
             string bestStarter = null;
+            var ties = new List<int>();           // 무작위로 고르는 요청: 가장 덜 겹치는 첫 낱말마다 그 첫 번호
+            var tieStarters = new List<string>();
             var distinct = new List<string>();
             for (int k = 0; k < search; k++)
             {
@@ -1229,11 +1235,29 @@ namespace Jamkkaebi.Npc
                     best = variation;
                     bestScore = score;
                     bestStarter = starter;
+                    ties.Clear();
+                    tieStarters.Clear();
+                }
+                if (score == bestScore && !tieStarters.Contains(starter))
+                {
+                    ties.Add(variation);
+                    tieStarters.Add(starter);
                 }
             }
             if (bestStarter == null)
             {
                 return;
+            }
+            if (atRandom && ties.Count > 1)
+            {
+                // 관리 감사·선명한 안부(깨끗하게·훨씬·몸이·덕분에·정말·개운하게): 차례로 돌리지 않고 똑같이 덜 겹치는 것 가운데 무작위로 (2026-11-26)
+                int pick;
+                lock (gate)
+                {
+                    pick = (StarterRandom ?? (StarterRandom = new Random())).Next(ties.Count);
+                }
+                best = ties[pick];
+                bestStarter = tieStarters[pick];
             }
             request.Variation = best;
             lock (gate)
@@ -1247,7 +1271,8 @@ namespace Jamkkaebi.Npc
                 list.Remove(bestStarter);
                 list.Add(bestStarter);
                 // 첫 낱말 하나는 늘 비워 둔다 (목록이 작으면 모두 '최근'이 되어 고를 것이 없다)
-                int keep = Math.Min(TriedStarterCount, Math.Max(1, distinct.Count - 1));
+                // 무작위로 고르는 요청은 바로 앞에 준 것 하나만 피한다 — 최근 셋을 피하면(다른 첫 낱말처럼) 고를 것이 적어 차례로 도는 것에 가깝다
+                int keep = atRandom ? 1 : Math.Min(TriedStarterCount, Math.Max(1, distinct.Count - 1));
                 while (list.Count > keep)
                 {
                     list.RemoveAt(0);
