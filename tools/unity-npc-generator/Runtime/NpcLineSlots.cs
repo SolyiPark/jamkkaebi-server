@@ -208,7 +208,7 @@ namespace Jamkkaebi.Npc
                     return null;
                 }
                 text = text.Replace(AddressSlot, actual.Address);
-                text = text.Replace(AddressVocativeSlot, actual.Address == NpcAddress.Stranger ? actual.Address : actual.Address + VocativeSuffix(actual.Address));
+                text = text.Replace(AddressVocativeSlot, Vocative(actual.Address));
             }
             if (text.Contains(CountSlot))
             {
@@ -227,6 +227,12 @@ namespace Jamkkaebi.Npc
                 text = text.Replace(DaysSlot, actual.CareDays.Value.ToString());
             }
             return text;
+        }
+
+        /// <summary>부르는 말: '발굴자'는 그대로, 닉네임은 받침에 따라 '아'·'야'를 붙인다 ("도윤아", "하늘아", "미소야").</summary>
+        public static string Vocative(string address)
+        {
+            return address == NpcAddress.Stranger ? address : address + VocativeSuffix(address);
         }
 
         private static string VocativeSuffix(string word)

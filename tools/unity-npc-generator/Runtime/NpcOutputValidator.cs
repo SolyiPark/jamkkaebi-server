@@ -538,7 +538,22 @@ namespace Jamkkaebi.Npc
                 }
                 if (Array.IndexOf(PlainCheckedActions, action) >= 0 && NpcLineChecks.Core(fitted).Length < MinGreetingCore)
                 {
-                    return new OutputCheck(OutputProblem.TooPlain, "인사말뿐 '" + fitted + "'", action, target, fitted, line, truncated);
+                    // 인사("왔구나!", "어서 와.")는 버리지 않고 지금 상대를 부르는 말을 붙여 쓴다 — "왔구나, 하늘아!" (2026-11-26 기기 시험: 탭 인사 실패의 한 갈래).
+                    // 붙인 대사도 아래의 반복 검사를 거친다. 감사(thank_*)는 붙여도 고마운 까닭이 없어 그대로 거른다
+                    string called = action == NpcActions.Greet || action == NpcActions.WanderGreet
+                            ? NpcLineChecks.CallPlain(fitted, request.AddressName, limit) : null;
+                    // 붙인 대사는 그 앞의 검사를 지나지 않았다 — 붙인 부르는 말이 금칙어에 걸리거나(닉네임이 '바보') 호칭 규칙과 어긋나면 붙이지 않는다 (run.py 와 같다)
+                    if (called == null || NpcLineChecks.Core(called).Length < MinGreetingCore || filter.Find(called) != null
+                            || NpcLineChecks.AddressContradiction(called, request.Nickname, request.Familiar) != null)
+                    {
+                        return new OutputCheck(OutputProblem.TooPlain, "인사말뿐 '" + fitted + "'", action, target, fitted, line, truncated);
+                    }
+                    said = said ?? fitted; // 메모에 "다듬어 바로 씀 ('왔구나!' → '왔구나, 하늘아!')"로 남는다
+                    if (line == fitted)
+                    {
+                        line = called; // 자르지 않은 대사면 붙인 것을 자른 것으로 적지 않는다 (잘랐으면 모델이 쓴 전체 대사를 그대로 둔다)
+                    }
+                    fitted = called;
                 }
             }
             string repeatedWord = persona != null ? NpcLineChecks.InnerRepeat(fitted) : null;
