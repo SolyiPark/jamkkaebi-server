@@ -190,7 +190,14 @@ public static class Program
         ReactionRequest selfName = tap(null);
         selfName.Nickname = personas.Find(8).name;
         Expect(validator, Out("greet", "player", "안녕!"), selfName, OutputProblem.TooPlain, "닉네임이 도깨비 이름이면 부르는 말을 붙이지 않고 인사말뿐 (" + selfName.Nickname + ")");
-        OutputCheck hanulHello = validator.Check(Out("greet", "player", "안녕!"), tap(null));
+        // 말투 검사도 거친다 (Copilot 리뷰: 닉네임 '셔니'를 붙이면 "안녕, 셔니야!"가 말발굽의 말투 규칙(bannedPattern '셔')에 걸리는데 통과했다).
+        // 붙인 대사는 모델이 쓴 대사와 같은 내용 검사(ContentCheck)를 모두 거친다 — 검사를 하나씩 더하지 않는다
+        ReactionRequest speechName = tap(null);
+        speechName.Nickname = "셔니";
+        Check(validator.Check(Out("greet", "player", "안녕, 셔니야!"), speechName).Problem == OutputProblem.SpeechMismatch,
+                "전제: 모델이 '안녕, 셔니야!'라고 쓰면 말투 검사에 걸림");
+        Expect(validator, Out("greet", "player", "안녕!"), speechName, OutputProblem.TooPlain, "붙이면 말투 검사에 걸리는 닉네임이면 붙이지 않고 인사말뿐");
+                OutputCheck hanulHello = validator.Check(Out("greet", "player", "안녕!"), tap(null));
         Check(hanulHello.IsValid && hanulHello.Line == "안녕, 하늘아!", "알맞은 닉네임은 그대로 붙임 ← " + hanulHello.Line + " " + hanulHello.Problem);
         // ⑥ '오랜만' 바꿔 넣을 말은 부르는 말을 붙인 대사로 견준다 (CodeRabbit 리뷰: "반가워!" → "반가워, 하늘아!"가 최근 대사와 같은데 그대로 골랐다)
         OutputCheck absenceCalled = validator.Check(Out("greet", "player", "오랜만이야!"), tap(new List<string> { "반가워, 하늘아!" }));

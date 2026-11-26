@@ -2710,35 +2710,18 @@ def find_probe(text):
     return found.group(0) if found else None
 
 
-def game_problem(row, persona, recent, scene=None, variation=0, max_len=None, reevaluate=None, forbidden_groups=None):
-    """게임의 출력 검사(NpcOutputValidator, 페르소나를 받은 것)에 걸리는 이유. 통과하면 None. 검사 순서도 같다.
-    recent 는 그 도깨비가 최근에 띄운 대사다 (게임의 ReactionRequest.RecentLines). variation 은 그 요청의 번호(게임의 ReactionRequest.Variation)다.
-    흐려진 안부의 부탁 부분이 최근 대사와 같으면 row["line"] 을 겹치지 않는 코드의 부탁 문장으로 바꾸고(row["ask_filled"]) 통과시킨다 — C# 출력 검사도 대사를 바꿔 돌려준다."""
-    if not row.get("json_ok"):
-        return "JSON 아님"
-    if not row.get("action_ok"):
-        return f"후보 밖 행동 '{row['action']}'"
-    if not row.get("target_ok"):
-        return f"대상 틀림 '{row['target']}'"
-    line = row.get("line", "")
-    if not line:
-        return "빈 대사"
-    if not row.get("newline_ok"):
-        return "줄바꿈"
-    if not row.get("length_ok"):
-        return "길이 초과"
-    if not row.get("bad_ok"):
-        return f"금칙어 {row['bad_hits']}"
-    if not row.get("foreign_ok", True):
-        return f"영문·가나·한자가 섞임 '{line}'"
+def content_problem(line, action, scene, persona):
+    """내보낼 대사의 내용 검사(부탁·발견 어미·인사 사정·오타·끊긴 말·기록·상황 옮김·시간대·호칭·주체·페르소나 옮김·자기 이름·솜씨 칭찬·말투). 걸리면 이유, 통과하면 None.
+    모델이 쓴 대사와 부르는 말을 붙인 대사(complete_plain)가 같은 검사를 거치게 한 곳에 모았다 (CodeRabbit·Copilot 리뷰: 'Alice'·도깨비 이름·'셔니' 닉네임).
+    금칙어·외국어·길이·줄바꿈은 evaluate 가 칸에 매겨 game_problem 이 본다. C# NpcOutputValidator.ContentCheck 와 같다."""
     if scene is not None and needs_ask(scene) and not has_ask(line):
         return f"닦아 달라는 부탁이 없다 '{line}'"
     if scene is not None and needs_ask(scene) and mixed_ask_facts(line):
         return f"상태와 며칠 전을 함께 말함 '{line}'"
-    discovered = discovery_ending(line, row.get("action"))
+    discovered = discovery_ending(line, action)
     if discovered:
         return f"자기 이야기에 발견 어미(~구나) '{discovered}'"
-    probe = greeting_probe(line, row.get("action"))
+    probe = greeting_probe(line, action)
     if probe:
         return f"인사에 지어낸 사정·캐묻기 '{probe}' ← '{line}'"
     wrong_spelling = typo(line)
@@ -2783,12 +2766,39 @@ def game_problem(row, persona, recent, scene=None, variation=0, max_len=None, re
     wrong_subject = subject_contradiction(line, persona.get("ownThings"))
     if wrong_subject:
         return f"주체가 어긋남 '{wrong_subject}' (자기 것은 '내 {wrong_subject}'처럼 말한다)"
-    praised = craft_praise(line, row.get("action"))
+    praised = craft_praise(line, action)
     if praised:
         return f"자기 솜씨를 남의 것처럼 칭찬 '{praised}' (자기 것은 '내 ~'라고 말한다)"
     wrong = speech_mismatch(line, persona.get("endingHint"))
     if wrong:
         return f"어미 섞임 '{wrong}'"
+    return None
+
+
+def game_problem(row, persona, recent, scene=None, variation=0, max_len=None, reevaluate=None, forbidden_groups=None):
+    """게임의 출력 검사(NpcOutputValidator, 페르소나를 받은 것)에 걸리는 이유. 통과하면 None. 검사 순서도 같다.
+    recent 는 그 도깨비가 최근에 띄운 대사다 (게임의 ReactionRequest.RecentLines). variation 은 그 요청의 번호(게임의 ReactionRequest.Variation)다.
+    흐려진 안부의 부탁 부분이 최근 대사와 같으면 row["line"] 을 겹치지 않는 코드의 부탁 문장으로 바꾸고(row["ask_filled"]) 통과시킨다 — C# 출력 검사도 대사를 바꿔 돌려준다."""
+    if not row.get("json_ok"):
+        return "JSON 아님"
+    if not row.get("action_ok"):
+        return f"후보 밖 행동 '{row['action']}'"
+    if not row.get("target_ok"):
+        return f"대상 틀림 '{row['target']}'"
+    line = row.get("line", "")
+    if not line:
+        return "빈 대사"
+    if not row.get("newline_ok"):
+        return "줄바꿈"
+    if not row.get("length_ok"):
+        return "길이 초과"
+    if not row.get("bad_ok"):
+        return f"금칙어 {row['bad_hits']}"
+    if not row.get("foreign_ok", True):
+        return f"영문·가나·한자가 섞임 '{line}'"
+    problem = content_problem(line, row.get("action"), scene, persona)
+    if problem:
+        return problem
     if row.get("action") in PLAIN_CHECKED_ACTIONS and len(PUNCT_RE.sub("", line)) < MIN_GREETING_CORE:
         # 인사는 부르는 말을 붙여 쓴다 (C# NpcOutputValidator 와 같다). 붙인 대사도 아래의 반복 검사를 거친다
         called = complete_plain(line, row.get("action"), scene, persona, max_len, forbidden_groups)
@@ -2869,16 +2879,16 @@ def speech_fixed(said, action, scene, persona, no_record_variant=0):
 
 def complete_plain(line, action, scene, persona, max_len, forbidden_groups=None):
     """인사말뿐인 인사(greet·wander_greet)에 부르는 말을 붙인 대사. 붙일 수 없거나 붙인 대사가 검사에 걸리면 None.
-    붙인 대사는 그 앞의 검사를 지나지 않았으므로 닉네임이 끌어올 수 있는 것을 다시 본다: 금칙어, 호칭 규칙, 영문·가나·한자, 자기 이름.
+    붙인 대사도 모델이 쓴 대사와 같은 검사(금칙어·외국어 + content_problem)를 모두 거친다: 금칙어, 호칭 규칙, 영문·가나·한자, 자기 이름, 말투 등.
     C# NpcOutputValidator.CompletePlain 과 같다 (CodeRabbit 리뷰)."""
     if scene is None or action not in CALLED_PLAIN_ACTIONS:
         return None
     called = call_plain(line, address_name(scene), max_len)
+    # 붙인 대사도 모델이 쓴 대사와 같은 검사(금칙어·외국어 + content_problem)를 모두 거친다 — 하나라도 걸리면 붙이지 않는다
     if (called is None or len(PUNCT_RE.sub("", called)) < MIN_GREETING_CORE
             or (forbidden_groups is not None and forbidden_hits(called, forbidden_groups))
-            or address_contradiction(called, scene)
             or FOREIGN_RE.search(called) is not None
-            or (persona is not None and self_name_hit(called, persona["name"]))):
+            or (persona is not None and content_problem(called, action, scene, persona))):
         return None
     return called
 
