@@ -91,6 +91,8 @@ public static class Program
         CheckContextBuilder(personas, actions, lines, forbidden);
         CheckStoryReturn(personas, actions, lines, forbidden);
         CheckReviewCases(forbidden, personas, actions, lines);
+        CheckVer8Greetings(forbidden, personas);
+        CheckVer8Rules(forbidden, personas, actions, lines);
         if (args.Length > 3 && args[3] == "--live-store")
         {
             int liveRepeat;
@@ -106,6 +108,167 @@ public static class Program
 
         Console.WriteLine(failures == 0 ? "모두 통과" : "실패 " + failures + "건");
         return failures == 0 ? 0 : 1;
+    }
+
+    // ---------- 2026-11-26 기기 시험(ver8): 탭 인사(S01·S22·S23·S24) 실패 줄이기 ----------
+    // 인사 장면 네 곳이 SLM 실패 57건 중 29건이었다. 그중 금칙어 '어서왔'(첫 낱말 '어서' 뒤에 다듬기 목록에 없던 어미)과 인사말뿐("어서 와!", "왔구나!")은
+    // 모델이 쓴 맞는 인사를 코드가 버린 것이다. 고침을 되돌리면(Arrive 의 어미 목록·CallPlain) 이 검사가 실패한다
+    private static void CheckVer8Greetings(ForbiddenCatalog forbidden, PersonaCatalog personas)
+    {
+        Console.WriteLine("=== ver8 탭 인사 ===");
+        var validator = new NpcOutputValidator(new NpcLineFilter(forbidden), personas);
+        Func<List<string>, ReactionRequest> tap = recent =>
+        {
+            // 기기 시험이 보낸 요청과 같은 모양: 말발굽(8) 탭 인사, 닉네임 '하늘'(친밀), 저녁
+            ReactionRequest request = Request(8, InteractionMode.Owner, NpcInputs.Tap, NpcActions.Greet);
+            request.Nickname = "하늘";
+            request.Intimacy = NpcAddress.NicknameLevel;
+            request.Situation = "하늘이 저녁에 너를 보러 찾아왔다.";
+            request.Facts.Add(new Fact(NpcFactKeys.TimeOfDay, "저녁"));
+            request.RecentLines = recent ?? new List<string>();
+            return request;
+        };
+        string[][] passes =
+        {
+            new[] { "어서 왔니?", "어서 와, 하늘아!" },   // 다듬으면 "어서 와!"(인사말뿐) → 부르는 말을 붙인다
+            new[] { "어서 왔군, 하늘아!", "어서 와, 하늘아!" },
+            new[] { "어서 왔다니, 반가워!", "어서 와, 반가워!" },
+            new[] { "어서 왔으니 반가워!", "어서 와, 반가워!" },
+            new[] { "어서 왔잖아! 기다렸어.", "어서 와! 기다렸어." },
+            new[] { "어서 와라, 하늘아!", "어서 와, 하늘아!" },
+            new[] { "왔구나!", "왔구나, 하늘아!" },
+            new[] { "어서 왔네!", "어서 와, 하늘아!" },
+            new[] { "안녕.", "안녕, 하늘아." },
+        };
+        foreach (string[] pair in passes)
+        {
+            OutputCheck check = validator.Check(Out("greet", "player", pair[0]), tap(null));
+            Check(check.IsValid && check.Line == pair[1], "탭 인사 '" + pair[0] + "' → '" + pair[1] + "' ← " + check.Line + " " + check.Problem + " " + check.Detail);
+        }
+        // 붙인 대사도 반복 검사를 거친다 — 최근에 띄운 대사와 같으면 예전처럼 반복으로 걸러 기본 대사로
+        Expect(validator, Out("greet", "player", "왔구나!"), tap(new List<string> { "왔구나, 하늘아!" }), OutputProblem.Repeated, "부르는 말을 붙인 인사도 최근 대사와 같으면 반복");
+        // 붙이면 길이 제한을 넘으면 붙이지 않는다 (검사기의 탭 제한은 40 + 5 자라 실제로는 아주 긴 닉네임만)
+        Check(NpcLineChecks.CallPlain("왔구나!", "가나다라마바사아자차카타파하", 20) == null && NpcLineChecks.CallPlain("왔구나!", "하늘", 20) == "왔구나, 하늘아!",
+                "붙이면 길이를 넘으면 null");
+        // 손님 첫 방문 인사도 같다 (wander_greet). 대상 없이 손님 장면
+        ReactionRequest visit = Request(8, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet);
+        visit.Situation = "처음 온 친구가 너를 구경하러 왔다.";
+        OutputCheck visitCheck = validator.Check(Out("wander_greet", "player", "환영해!"), visit);
+        Check(visitCheck.IsValid && visitCheck.Line == "환영해, 발굴자!", "손님 인사말뿐도 부르는 말을 붙임 ← " + visitCheck.Line + " " + visitCheck.Problem + " " + visitCheck.Detail);
+
+        // 2026-11-26 PC 기기 흐름 시험(npc_device_test_20261126_213919.csv): '오랜만에'를 지우기만 해 "와, 찾아왔네."처럼 꾸밈말 자리가 빈 토막이 검사를 통과했다.
+        // 같은 모델 출력이 이제 '이렇게'로 자리를 채워 나오는지 (고침을 되돌리면 예전 토막이 나와 실패한다)
+        string[][] absencePairs =
+        {
+            new[] { "와, 오랜만에 찾아왔네.", "와, 이렇게 찾아왔네." },                              // S22 반복3 (예전 '와, 찾아왔네.')
+            new[] { "드디어 왔구나, 오랜만에 내 친구를 만나네.", "드디어 왔구나, 이렇게 내 친구를 만나네." },   // S22 반복1
+            new[] { "왔구나, 오랜만에 찾아줘서 고마워.", "왔구나, 이렇게 찾아줘서 고마워." },              // S24 반복3
+            new[] { "왔구나, 반갑다, 오랜만에 찾아와줘서 고마워.", "왔구나, 반갑다, 이렇게 찾아와줘서 고마워." },   // S23 반복2
+            new[] { "와, 오랜만에 하늘이 찾아왔네?", "와, 이렇게 찾아왔네." },                        // ver8 기기 시험 S23 반복2 (예전 '와, 찾아왔네.')
+        };
+        foreach (string[] pair in absencePairs)
+        {
+            OutputCheck check = validator.Check(Out("greet", "player", pair[0]), tap(null));
+            Check(check.IsValid && check.Line == pair[1], "'오랜만에' 자리 채움: '" + pair[0] + "' → '" + pair[1] + "' ← " + check.Line + " " + check.Problem + " " + check.Detail);
+        }
+        // 2026-11-26 리뷰 점검 (지난 CodeRabbit 리뷰와 같은 갈래)
+        // ① 낱말 경계: '싶어서'의 '어서'를 "어서 와"로 바꾸지 않는다 (예전 '전날'의 '날'을 '나'로 본 리뷰와 같다)
+        string missed = NpcLineChecks.NormalizeSpeech("보고 싶어서 왔니?", "반말");
+        Check(!missed.Contains("싶어서 와"), "'싶어서 왔니'의 '어서'는 따로 선 낱말이 아니라 고치지 않음 ← " + missed);
+        // ② 줄바꿈을 삼키지 않는다 (예전 StarterComma 가 '\n'을 삼켜 줄바꿈 검사를 빠져나간 리뷰와 같다)
+        Check(NpcLineChecks.NormalizeSpeech("어서\n왔어!", "반말").Contains("\n")
+                && validator.Check(Out("greet", "player", "어서\\n왔어!"), tap(null)).Problem == OutputProblem.Newline,
+                "'어서' 뒤의 줄바꿈은 그대로 두어 줄바꿈 검사가 거름");
+        // ③ 붙인 부르는 말도 금칙어 검사를 거친다 (붙인 대사는 그 앞의 검사를 지나지 않았다)
+        ReactionRequest badName = tap(null);
+        badName.Nickname = "바보";
+        Expect(validator, Out("greet", "player", "왔구나!"), badName, OutputProblem.TooPlain, "닉네임이 금칙어면 부르는 말을 붙이지 않고 인사말뿐");
+        // ④ '。'도 끝 부호, 길이는 코드 포인트로 (run.py 와 같은 규칙 함수 예문에도 있다)
+        Check(NpcLineChecks.CallPlain("왔구나。", "하늘", 20) == "왔구나, 하늘아。", "'。'로 끝난 인사에도 부르는 말을 끝 부호 앞에 붙임");
+
+        // S06 반복1 (손님 단골, 최근 방문 3일 전): 이미 '또'가 있어 '오랜만에'를 '또'로 바꾸지 않는 갈래
+        Check(NpcLineChecks.FixLongAbsence("또 왔네, 오랜만에 찾아줘서 고마워!", "오늘, 3일 전") == "또 왔네, 이렇게 찾아줘서 고마워!",
+                "손님 단골의 '또 왔네, 오랜만에 찾아줘서' → '또 왔네, 이렇게 찾아줘서' (예전 '또 왔네, 찾아줘서')");
+    }
+
+    // ---------- 2026-11-26 기기 시험(ver8) 뒤: 첫 낱말 무작위·문법으로 시작, S04 할 일, 두 문장 대사의 토큰 한도 ----------
+    // 관리 감사·선명한 안부의 첫 낱말 (PromptAssembler.StartersClear 와 같아야 한다)
+    private static readonly string[] ClearStarters = { "깨끗하게", "훨씬", "몸이", "덕분에", "정말", "개운하게" };
+
+    private static void CheckVer8Rules(ForbiddenCatalog forbidden, PersonaCatalog personas, ActionCatalog actions, DefaultLineCatalog lines)
+    {
+        Console.WriteLine("=== ver8 뒤 규칙 ===");
+        var assembler = new PromptAssembler(personas, actions);
+        var validator = new NpcOutputValidator(new NpcLineFilter(forbidden), personas);
+        var rule = new RuleBasedReactionGenerator(lines, new Random(3));
+        Func<NpcPrompt, string> starterOf = prompt =>
+        {
+            string found = prompt == null ? null : prompt.User.Split('\n').FirstOrDefault(l => l.StartsWith(PromptAssembler.StarterLabel + ": ", StringComparison.Ordinal));
+            return found != null ? found.Substring(PromptAssembler.StarterLabel.Length + 2).Trim() : null;
+        };
+
+        // 1) 관리 감사의 첫 낱말은 차례로 돌지 않고 무작위다 — 바로 앞과 같은 것만 피한다. 차례로 돌면(최근 셋을 피하면) i 번째와 i-2 번째가 같을 수 없다
+        var backend = new FakeBackend();
+        var slm = new SlmReactionGenerator(backend, assembler, validator) { MaxAttempts = 1 };
+        slm.LoadAsync(CancellationToken.None).Wait();
+        var manager = new NpcRequestManager(slm, rule) { SlmTimeout = TimeSpan.FromSeconds(5), RecentLineCount = 0, StarterRandom = new Random(11) };
+        backend.Reply = Out("thank_calm", "player", "고마워, 한결 개운해!");
+        var picked = new List<string>();
+        for (int i = 0; i < 30; i++)
+        {
+            Ask(manager, Care(8));   // 늘 Variation 0
+            picked.Add(starterOf(backend.LastPrompt));
+        }
+        bool noImmediateRepeat = Enumerable.Range(1, picked.Count - 1).All(i => picked[i] != picked[i - 1]);
+        bool notRotation = Enumerable.Range(2, picked.Count - 2).Any(i => picked[i] == picked[i - 2]);
+        Check(picked.All(w => ClearStarters.Contains(w)) && picked.Distinct().Count() == ClearStarters.Length && noImmediateRepeat && notRotation,
+                "관리 감사 첫 낱말: 여섯 가운데 무작위(바로 앞과 같은 것만 피함) ← " + string.Join("/", picked.ToArray()));
+        Check(!PromptAssembler.PicksStarterAtRandom(Tap(8)) && PromptAssembler.PicksStarterAtRandom(Care(8)), "무작위 첫 낱말은 관리 감사·선명한 안부만 (탭 인사는 예전처럼 차례로)");
+
+        // 2) 문법이 대사를 그 첫 낱말로 시작하게 한다 (한 문장 대사·두 문장 대사·문장 문법을 끈 대사)
+        ReactionRequest status = Request(5, InteractionMode.Owner, NpcInputs.AskStatus, NpcActions.AnswerStatus);
+        status.Situation = "발굴자가 안부를 물었다. 너는 2일 전에 닦아 관리를 받았다. 고마움을 전한다.";
+        status.Facts.Add(new Fact(NpcFactKeys.Clarity, "선명"));
+        status.Facts.Add(new Fact(NpcFactKeys.LastCareDaysAgo, "2"));
+        for (int variation = 0; variation < ClearStarters.Length; variation++)
+        {
+            status.Variation = variation;
+            string word = PromptAssembler.Starter(status);
+            string one = assembler.Build(status).Grammar.Split('\n').First(l => l.StartsWith("one ::="));
+            int more = Math.Max(1, PromptAssembler.OneSentenceMinCore - NpcLineChecks.Core(word).Length);
+            Check(one.StartsWith("one ::= \"" + word + "\"") && !one.Contains("\"…\"") && one.Split(' ').Count(w => w == "k") == more,
+                    "선명한 안부: 문법이 '" + word + "'(으)로 시작하고 뒤에 글자 " + more + "개 이상 ← " + one.Substring(0, Math.Min(60, one.Length)));
+        }
+        ReactionRequest care2 = Care(8);
+        NpcPrompt carePrompt = assembler.Build(care2);
+        Check(carePrompt.Grammar.Contains("first ::= \"" + PromptAssembler.Starter(care2) + "\" b"), "관리 감사: 첫 문장이 첫 낱말로 시작");
+        Check(!assembler.Build(Tap(8)).Grammar.Contains("first ::=") && assembler.Build(Tap(8)).Grammar.Contains("one ::= \"…\"?"), "탭 인사의 문법은 그대로 (첫 낱말을 문법으로 정하지 않음)");
+        var freeAssembler = new PromptAssembler(personas, actions, new PromptOptions { SentenceGrammar = false });
+        Check(freeAssembler.Build(care2).Grammar.Contains("line ::= \"\\\"\" \"" + PromptAssembler.Starter(care2) + "\" char*"), "문장 문법을 끈 문법도 첫 낱말로 시작");
+
+        // 3) S04(최근 관리를 떠올리는 안부): '할 일'에 말할 거리(닦아 준 덕분에 선명함·고마움)를 적는다. 최근이 아니면·흐려졌으면 예전 그대로
+        status.Variation = 0;
+        string statusUser = assembler.Build(status).User;
+        Check(statusUser.Contains("할 일: 닦아 준 덕분에 지금 내 몸이 선명하다고 말하며 고마워하는 한 문장을 말한다") && !statusUser.Contains("상황에 적힌 내 이야기"),
+                "S04: 구체적인 할 일 ← " + statusUser.Split('\n').First(l => l.StartsWith("할 일")));
+        ReactionRequest oldCare = Request(5, InteractionMode.Owner, NpcInputs.AskStatus, NpcActions.AnswerStatus);
+        oldCare.Situation = "발굴자가 안부를 물었다.";
+        oldCare.Facts.Add(new Fact(NpcFactKeys.Clarity, "선명"));
+        oldCare.Facts.Add(new Fact(NpcFactKeys.LastCareDaysAgo, "5"));
+        Check(PromptAssembler.RecentCareTask(oldCare) == null && assembler.Build(oldCare).User.Contains("할 일: 상황에 적힌 내 이야기를 한 문장으로 말한다"), "마지막 관리가 3일보다 오래면 예전 할 일");
+        Check(PromptAssembler.RecentCareTask(Status(5, "흐려짐", "2")) == null, "흐려진 안부는 부탁 할 일 (최근 관리 할 일이 아님)");
+        ReactionRequest unknownClarity = Request(5, InteractionMode.Owner, NpcInputs.AskStatus, NpcActions.AnswerStatus);
+        unknownClarity.Facts.Add(new Fact(NpcFactKeys.LastCareDaysAgo, "2"));
+        Check(PromptAssembler.RecentCareTask(unknownClarity) == null && PromptAssembler.RecentCareTask(Status(5, "CLEAR", "1")) != null,
+                "선명도를 모르면 '선명하다'고 말하게 하지 않음 (선명·CLEAR 만)");
+
+        // 4) 두 문장 대사만 토큰 한도를 올리고, LLMUnity 는 GBNF 일 때만 따른다
+        Check(carePrompt.MaxTokens == PromptAssembler.TwoSentenceMaxTokens && assembler.Build(Tap(8)).MaxTokens == 0 && assembler.Build(status).MaxTokens == 0
+                && freeAssembler.Build(care2).MaxTokens == 0, "두 문장 대사(관리 감사)만 토큰 한도 " + PromptAssembler.TwoSentenceMaxTokens + ", 한 문장·문장 문법을 끈 대사는 기본값");
+        var gbnf = new LlmUnityModelBackend(new FakeLlmRuntime("{}"), new LlmUnityOptions { Grammar = LlmUnityGrammar.Gbnf }, null);
+        var schema = new LlmUnityModelBackend(new FakeLlmRuntime("{}"), new LlmUnityOptions { Grammar = LlmUnityGrammar.JsonSchema }, null);
+        Check(gbnf.MaxTokensFor(carePrompt) == PromptAssembler.TwoSentenceMaxTokens && gbnf.MaxTokensFor(assembler.Build(Tap(8))) == 40 && schema.MaxTokensFor(carePrompt) == 40,
+                "LLMUnity: GBNF 의 두 문장 대사만 " + PromptAssembler.TwoSentenceMaxTokens + " (JSON 스키마는 길이를 막지 못해 40)");
     }
 
     // ---------- 지난 대화: 꺼냈음 표시(T/F)·오래된 것부터·꺼낸 뒤 한 번 쉬기 (2026-11-24) ----------
@@ -1050,10 +1213,10 @@ public static class Program
                 "대답 '네?'·'네 알겠어'는 그대로, '네 생각'·'너의 손길'은 상대 이름 없이 지움");
         // 2026-11-17 시험(64건): 기록 없는 탭 인사의 "오랜만이야"·"또 왔구나"는 거르지 않고 고치고(탭 인사 16건 중 4건이 이것으로 다시 만들었다), "덕분에 관리해 줘서"는 줄인다
         Check(NpcLineChecks.NormalizeSpeech("왔구나, 오랜만이야!", "반말", "말발굽", null, null, null, "발굴자", true) == "왔구나, 반가워!"
-                && NpcLineChecks.NormalizeSpeech("오랜만에 왔구나, 반가워!", "반말", "말발굽", null, null, null, "발굴자", true) == "왔구나, 반가워!"
+                && NpcLineChecks.NormalizeSpeech("오랜만에 왔구나, 반가워!", "반말", "말발굽", null, null, null, "발굴자", true) == "이렇게 왔구나, 반가워!"
                 && NpcLineChecks.NormalizeSpeech("또 왔구나! 오랜만이야.", "반말", "말발굽", null, null, null, "발굴자", true) == "왔구나! 반가워."
                 && NpcLineChecks.NormalizeSpeech("왔구나, 오랜만이야!", "반말", "말발굽", null, null, null, "발굴자", false) == "왔구나, 오랜만이야!",
-                "기록이 없는 주인 장면: '오랜만이야'→'반가워', '오랜만에'·'또 왔구나'→'왔구나' (기록이 있으면 그대로)");
+                "기록이 없는 주인 장면: '오랜만이야'→'반가워', '오랜만에'→'이렇게'(2026-11-26), '또 왔구나'→'왔구나' (기록이 있으면 그대로)");
         Check(NpcLineChecks.NoRecordApplies(false, false, "주인이 아침에 너를 보러 찾아왔다.") && !NpcLineChecks.NoRecordApplies(false, true, "주인이 아침에 너를 보러 찾아왔다.")
                 && !NpcLineChecks.NoRecordApplies(true, false, "최근 30일 동안 4번 온 친구가 전시관을 둘러보고 있다.")
                 && !NpcLineChecks.NoRecordApplies(false, false, "주인이 오랜만에 관리하기를 골랐고, 주인이 너를 관리해 주었다."),
@@ -1153,10 +1316,11 @@ public static class Program
                 && PromptAssembler.SimilarLine("어서 와, 반가워!", "어서 와, 반가워!") != null && PromptAssembler.SimilarLine("어서 와, 반가워!", "드디어 찾았네!") == null,
                 "SimilarLine: 같은 앞 문장은 부탁 부분끼리(전체로 보면 '시작이 같음'으로 걸리던 것), 다른 앞 문장은 전체끼리, 흐려진 안부가 아니면 Similar 와 같음");
         // 2026-11-17 22:27 시험 뒤(2): 플레이어에게 플레이어를 남 얘기하지 않음, 자기 것을 '그 자개'라고 하지 않음
-        Check(NpcLineChecks.NormalizeSpeech("오랜만에 도윤을 찾아줘서 고마워!", "반말", "밤바다", null, "도윤", null, "도윤", true) == "찾아줘서 고마워!"
-                && NpcLineChecks.NormalizeSpeech("오랜만에 너를 찾아줘서 고마워!", "반말", "밤바다", null, "도윤", null, "도윤", true) == "찾아줘서 고마워!"
+        string droppedName = NpcLineChecks.NormalizeSpeech("오랜만에 도윤을 찾아줘서 고마워!", "반말", "밤바다", null, "도윤", null, "도윤", true);
+        string droppedYou = NpcLineChecks.NormalizeSpeech("오랜만에 너를 찾아줘서 고마워!", "반말", "밤바다", null, "도윤", null, "도윤", true);
+        Check(droppedName == "이렇게 찾아줘서 고마워!" && droppedYou == "이렇게 찾아줘서 고마워!"
                 && NpcLineChecks.NormalizeSpeech("발굴자가 날 관리해줘서 고마워!", "반말", "밤바다", null, null, null, "발굴자") == "날 관리해줘서 고마워!",
-                "\"오랜만에 도윤을 찾아줘서\": 플레이어 이름·2인칭이 주어·목적어로 들어가면 이름으로 바꾸지 않고 지움 (지운 뒤 '오랜만에' 기록 고침도 다시)");
+                "\"오랜만에 도윤을 찾아줘서\": 플레이어 이름·2인칭이 주어·목적어로 들어가면 이름으로 바꾸지 않고 지움, '오랜만에'는 '이렇게'로 (2026-11-26) ← " + droppedName + " / " + droppedYou);
         Check(NpcLineChecks.DropPlayerReference("고마워, 도윤!", "도윤") == "고마워, 도윤!" && NpcLineChecks.DropPlayerReference("도윤아 안녕, 반가워.", "도윤") == "도윤아 안녕, 반가워."
                 && NpcLineChecks.DropPlayerReference("도윤이 보고 싶었어.", "도윤") == "보고 싶었어." && NpcLineChecks.DropPlayerReference("도윤이야, 반가워.", "도윤") == "도윤이야, 반가워.",
                 "부르는 말(도윤아·도윤이야·고마워, 도윤!)은 두고, 이어지는 말이 있는 주어·목적어만 지움");
@@ -1193,7 +1357,7 @@ public static class Program
                 && !NpcLineChecks.IsCleanAsk("괜찮으면 도와줄래?") && !NpcLineChecks.IsCleanAsk("조심조심 들어와, 내 마음을 좀 닦아줄래?") && !NpcLineChecks.IsCleanAsk("이왕이면 닦아줄게, 몸이 많이 흐려 보여서 걱정이야.")
                 && !NpcLineChecks.IsCleanAsk("조심조심 찾아와 줘서 고마워, 잠깐 깨워줄 수 있을까?"),
                 "부탁 문장은 '(말머리) 닦아·깨워 줄래?' 꼴만 통과, 그 밖은 코드가 채움");
-        Check(NpcLineChecks.FixTypos(NpcLineChecks.FixLongAbsence("또 왔네, 오랜만에 와서 반갑아!", "어제")) == "또 왔네, 와서 반가워!", "이미 '또'가 있으면 '오랜만에'를 '또'로 바꾸지 않고 지움 (\"또 왔네, 또 와서\" 겹침 방지)");
+        Check(NpcLineChecks.FixTypos(NpcLineChecks.FixLongAbsence("또 왔네, 오랜만에 와서 반갑아!", "어제")) == "또 왔네, 이렇게 와서 반가워!", "이미 '또'가 있으면 '오랜만에'를 '또'로 바꾸지 않고 '이렇게'로 (\"또 왔네, 또 와서\" 겹침 방지, 2026-11-26 전에는 지웠다)");
         Check(NpcLineChecks.ReversedCall("드디어 도윤을 만나러 왔다니 정말 반갑다!", "도윤") != null && NpcLineChecks.ReversedCall("발굴자를 보러 왔구나.", "발굴자") != null && NpcLineChecks.ReversedCall("도윤이 만나러 왔구나.", "도윤") == null,
                 "도깨비가 플레이어를 '만나러 왔다'고 하면 주체가 뒤바뀐 말");
         // 2026-11-17 22:07 시험 뒤: 전시관 인상 말하기·부탁 빠짐
@@ -1207,11 +1371,16 @@ public static class Program
                 && NpcLineChecks.DiscoveryEnding("왔구나, 반가워!", NpcActions.Greet) == null && NpcLineChecks.DiscoveryEnding("관리해 줘서 고마워!", NpcActions.ThankJoyful) == null
                 && NpcLineChecks.DiscoveryEnding("너도 정성들여 만들었구나.", NpcActions.RecallTalk) != null,
                 "감사·안부·기억(자기 이야기)에 '~구나'를 쓰면 거름, 인사('왔구나')는 통과");
-        Check(NpcLineChecks.NormalizeSpeech("어서 왔구나! 오랜만에 보네, 도윤아.", "반말", "말발굽", null, "도윤", null, "도윤", true) == "어서 와! 반가워, 도윤아."
-                && NpcLineChecks.NormalizeSpeech("오랜만에 왔구나, 반가워!", "반말", "말발굽", null, null, null, "발굴자", true) == "왔구나, 반가워!"
-                && NpcLineChecks.NormalizeSpeech("오랜만에 보니 좋아.", "반말", "말발굽", null, null, null, "발굴자", true) == "만나니 좋아."
-                && NpcLineChecks.NormalizeSpeech("오랜만에 만나서 반가워!", "반말", "말발굽", null, null, null, "발굴자", true) == "만나서 반가워!",
-                "'오랜만에'는 움직임말 앞에서만 지우고, \"오랜만에 보네\"는 \"반가워\"로 바꿔 토막(\"보네\")을 남기지 않음 (22:07 시험: 남겨 두자 거르고 다시 만들어 시도가 늘었다)");
+        string[] absenceGot =
+        {
+            NpcLineChecks.NormalizeSpeech("어서 왔구나! 오랜만에 보네, 도윤아.", "반말", "말발굽", null, "도윤", null, "도윤", true),
+            NpcLineChecks.NormalizeSpeech("오랜만에 왔구나, 반가워!", "반말", "말발굽", null, null, null, "발굴자", true),
+            NpcLineChecks.NormalizeSpeech("오랜만에 보니 좋아.", "반말", "말발굽", null, null, null, "발굴자", true),
+            NpcLineChecks.NormalizeSpeech("오랜만에 만나서 반가워!", "반말", "말발굽", null, null, null, "발굴자", true)
+        };
+        Check(absenceGot[0] == "어서 와! 반가워, 도윤아." && absenceGot[1] == "이렇게 왔구나, 반가워!" && absenceGot[2] == "만나니 좋아." && absenceGot[3] == "이렇게 만나서 반가워!",
+                "'오랜만에'는 움직임말 앞에서 '이렇게'로 바꾸고(2026-11-26), \"오랜만에 보네\"는 \"반가워\"로 바꿔 토막(\"보네\")을 남기지 않음 (22:07 시험: 남겨 두자 거르고 다시 만들어 시도가 늘었다) ← "
+                + string.Join(" / ", absenceGot));
         Check(!new PromptAssembler(personas, actions).SystemFor(8).Contains("감정 표현:") && !new PromptAssembler(personas, actions).SystemFor(9).Contains("감정 표현:"),
                 "시스템 메시지에 '감정 표현' 줄이 없음 (어흠·히힛을 말 가운데에 끼우거나 몸짓을 서술하게 하던 줄)");
         // 2026-11-17 21:27 시험: 어색한 대사 3종과 재시도(어미 섞임 '께서')를 줄이는 고침
@@ -1355,7 +1524,13 @@ public static class Program
         Check(NpcLineChecks.CollapseDoubleVerb("닦아줘 줘") == "닦아줘" && NpcLineChecks.CollapseDoubleVerb("와 줘") == "와 줘" && NpcLineChecks.CollapseDoubleVerb("고마워") == "고마워",
                 "끝말 되풀이만 합치고 '와 줘'·'고마워'는 그대로");
         Check(NpcLineChecks.NormalizeSpeech("도시는 마시고 주시면", "반말", "말발굽") == "도시는 마시고 주면", "'도시'·'마시고'의 시는 지키고 높임만 뺌");
-        Expect(strict, Out("greet", "player", "안녕!"), Tap(8), OutputProblem.TooPlain, "인사 행동의 대사가 인사말뿐이면 걸림");
+        // 인사말뿐인 인사는 버리지 않고 지금 상대를 부르는 말을 붙여 쓴다 (2026-11-26 기기 시험 ver8). 부를 수 없으면·감사는 예전처럼 걸림
+        OutputCheck plainHello = strict.Check(Out("greet", "player", "안녕!"), Tap(8));
+        Check(plainHello.IsValid && plainHello.Line == "안녕, 발굴자!" && plainHello.ToResult("x").Note.Contains("'안녕!' → '안녕, 발굴자!'"),
+                "인사말뿐인 인사에 부르는 말을 붙여 통과, 메모에 남김 ← " + plainHello.Line + " " + plainHello.Problem + " " + plainHello.Detail);
+        Expect(strict, Out("greet", "player", "발굴자!"), Tap(8), OutputProblem.TooPlain, "이미 부른 인사말뿐인 대사는 또 부르지 않고 걸림");
+        Expect(strict, Out("thank_calm", "player", "고마워!"), Request(8, InteractionMode.Owner, NpcInputs.Care, NpcActions.ThankCalm), OutputProblem.TooPlain,
+                "감사는 부르는 말을 붙이지 않고 인사말뿐으로 걸림");
         Expect(strict, Out("greet", "player", "주인님!"), Tap(8), OutputProblem.EmptyLine, "호칭만 있던 대사는 지우고 나면 빈 대사로 걸림");
         Expect(strict, Out("wander_greet", "player", "반가워! 다음에 또 와."), Request(8, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet), OutputProblem.None, "첫 방문에 '다음에 또 와'(초대)는 통과");
         ReactionRequest regularVisit = Request(8, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderRecall);
@@ -1371,7 +1546,7 @@ public static class Program
         Check(NpcLineChecks.NormalizeSpeech("내일 또 뵙겠습니다.", "반말", "말발굽") == "내일 또 볼게." && NpcLineChecks.NormalizeSpeech("주인님을 뵈러 왔어요.", "반말", "말발굽") == "너를 보러 왔어.",
                 "뵙다·뵈다 높임은 반말로 고쳐 살림 (실기기 S12 #2)");
         // 실기기 S05 #2: 처음 온 친구(방문한 날이 오늘뿐)에게 "오랜만"이라고 한 말은 거르지 않고 고친다
-        Check(NpcLineChecks.NormalizeSpeech("오랜만에 와 줘서 고마워!", "반말", "향산이", null, null, "오늘") == "와 줘서 고마워!"
+        Check(NpcLineChecks.NormalizeSpeech("오랜만에 와 줘서 고마워!", "반말", "향산이", null, null, "오늘") == "이렇게 와 줘서 고마워!"
                 && NpcLineChecks.NormalizeSpeech("오랜만이야!", "반말", "향산이", null, null, "오늘") == "반가워!"
                 && NpcLineChecks.NormalizeSpeech("오랜만에 왔네.", "반말", "향산이", null, null, "오늘, 3일 전") == "또 왔네.",
                 "처음 온 친구의 '오랜만'은 고치고, 최근에 온 단골의 '오랜만에'는 '또'로");
@@ -1417,7 +1592,8 @@ public static class Program
                 "꼴이 달라 지우지 못한 되풀이('관리해'·'관리가')는 걸림 (두 문장은 첫 문장 하나로 줄어든다)");
         Check(NpcLineChecks.InnerRepeat("고마워, 관리해줘서 고마웠어") == "고마웠어" && NpcLineChecks.InnerRepeat("나는 나는 좋아") == null
                 && NpcLineChecks.InnerRepeat("안녕? 오늘도 순찰 잘 다녀왔어?") == null, "한 대사 안의 반복 찾기");
-        Expect(strict, Out("greet", "player", "안녕."), Tap(8), OutputProblem.TooPlain, "부호만 달라도 인사말뿐이면 걸림");
+        OutputCheck plainDot = strict.Check(Out("greet", "player", "안녕."), Tap(8));
+        Check(plainDot.IsValid && plainDot.Line == "안녕, 발굴자.", "부호는 그대로 두고 부르는 말을 붙임 ← " + plainDot.Line + " " + plainDot.Problem);
         Expect(loose, Out("wander_greet", "player", "향산이가 인사하네."), Request(2, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderGreet),
                 OutputProblem.None, "페르소나를 안 받은 검사기는 이름·어미를 보지 않음");
         // 말투 다듬기: 흔한 어미는 검사 전에 고치고, 고치지 못한 것만 어미 검사가 거른다
@@ -1506,7 +1682,7 @@ public static class Program
         given.RecentLines = new List<string> { "저장해 둔 대사" };
         Ask(manager, given);
         Check(given.RecentLines[0] == "저장해 둔 대사" && given.RecentLines.Contains("앗, 같이 놀자!"), "게임이 넣어 둔 최근 대사는 두고 뒤에 붙임");
-        Check(manager.RecentLineCount == 10, "시나리오마다 최근 대사 10개를 기억 (기본)");
+        Check(manager.RecentLineCount == 5, "시나리오마다 최근 대사 5개를 기억 (기본, 2026-11-26 에 10 → 5)");
         foreach (string fresh in new[] { "참새 잡으러 갈래?", "킁킁, 맛있는 냄새가 나!", "공 굴리기 하자!", "숨바꼭질 어때?",
                                          "히힛, 꼬리 잡기 놀이야!", "폴짝 뛰어 볼까?", "구름 위에서 뒹굴고 싶어!", "나비 따라 달리자!",
                                          "고양이 춤을 보여 줄게!", "오늘은 어디 탐험할까?", "수염이 간질거려!", "발톱 갈기 놀이 하자!" })
@@ -1514,7 +1690,7 @@ public static class Program
             backend.Reply = Out("greet", "player", fresh);
             Ask(manager, Tap(9));
         }
-        Check(manager.RecentLinesOf(9).Count == manager.RecentLineCount, "최근 대사는 RecentLineCount(10)개만 기억");
+        Check(manager.RecentLinesOf(9).Count == manager.RecentLineCount, "최근 대사는 RecentLineCount(5)개만 기억");
 
         // 기본 대사도 최근 대사와 다른 것을 고른다
         List<string> greetLines = lines.spirits.First(s => s.relicId == 9).pools.First(p => p.actionId == NpcActions.Greet).lines;
@@ -1650,7 +1826,9 @@ public static class Program
         Expect(rawValidator, Out("greet", "player", "오랜만이야, 순찰 중이었어."), noRecord, OutputProblem.WrongHistory, "말투 다듬기를 끄면 기록 없는 주인 탭에 '오랜만이야'는 WrongHistory");
         Expect(validator, Out("greet", "player", "어, 또 왔네? 반가워."), noRecord, OutputProblem.None, "기록 없는 주인에게 '또 왔네'는 '왔네'로 고쳐 통과");
         Expect(rawValidator, Out("greet", "player", "어, 또 왔네? 반가워."), noRecord, OutputProblem.WrongHistory, "말투 다듬기를 끄면 '또 왔네'도 WrongHistory");
-        Expect(validator, Out("greet", "player", "오래간만이네, 반가워."), noRecord, OutputProblem.TooPlain, "'오래간만이네'는 '반가워'로 고쳐져 '반가워, 반가워.'→'반가워.' 인사말뿐");
+        OutputCheck longAbsencePlain = validator.Check(Out("greet", "player", "오래간만이네, 반가워."), noRecord);
+        Check(longAbsencePlain.IsValid && longAbsencePlain.Line == "반가워, 발굴자.",
+                "'오래간만이네'는 '반가워'로 고쳐져 '반가워.'만 남고, 인사말뿐이라 부르는 말을 붙임 ← " + longAbsencePlain.Line + " " + longAbsencePlain.Problem);
         Expect(rawValidator, Out("greet", "player", "오래간만이네, 반가워."), noRecord, OutputProblem.WrongHistory, "말투 다듬기를 끄면 '오래간만'도 WrongHistory");
         Expect(validator, Out("greet", "player", "왔구나, 순찰은 내가 했어."), noRecord, OutputProblem.None, "기록 없는 주인에게 평범한 인사는 통과");
         // 2026-11-18 22:16 시험: '오랜만'을 늘 "반가워"로 바꾸자 다른 인사들이 같은 대사로 모여 최근 대사와 같다고 걸렸다 (말발굽 탭 S23 #1·#2·#4·S24 #3).
@@ -1670,17 +1848,19 @@ public static class Program
         // 2026-11-24 기기 시험: 문장 안에 남은 다른 꼴의 '오랜만'이 인사 실패(기록과 어긋남)의 첫째 원인이었다 — 지우거나 바꾼다
         var absenceCases = new[]
         {
-            new[] { "드디어 오랜만에 하늘이 나를 찾았네.", "드디어 하늘이 나를 찾았네." },
+            new[] { "드디어 오랜만에 하늘이 나를 찾았네.", "드디어 이렇게 하늘이 나를 찾았네." },   // 2026-11-26: 꾸밈말 '오랜만에'는 지우지 않고 '이렇게'로
             new[] { "오랜만이라 반가워!", "반가워!" },
             new[] { "오랜만인데 잘 지냈어?", "잘 지냈어?" },
             new[] { "와, 정말 오랜만!", "와, 반가워!" },
             new[] { "왔구나! 오랜만이네요.", "왔구나! 반가워." },
             new[] { "오랜만이구나, 기다렸어.", "반가워, 기다렸어." },
-            new[] { "오랜만에 반가워!", "반가워!" },
+            new[] { "오랜만에 반가워!", "이렇게 반가워!" },
             new[] { "오랜만에 봤네!", "반가워!" },
-            new[] { "오랫만에 왔네!", "왔네!" },
+            new[] { "오랫만에 왔네!", "이렇게 왔네!" },
             new[] { "오랜만이라고 해야겠다.", "오랜만이라고 해야겠다." }, // 지우면 "고 해야겠다" 토막이 남아 그대로 둔다 (출력 검사가 거른다)
-            new[] { "오랜만에 보러 왔구나.", "오랜만에 보러 왔구나." },  // 지우면 "보러 왔구나"만 남아 그대로 둔다
+            new[] { "오랜만에 보러 왔구나.", "이렇게 보러 왔구나." },  // 예전에는 지우면 "보러 왔구나"만 남아 그대로 두고 거렀다. '이렇게'로 자리를 채운다 (2026-11-26)
+            new[] { "오랜만에, 반가워!", "반가워!" },                  // 꾸밀 말이 없으면(쉼표 앞) 예전처럼 지운다
+            new[] { "오랜만에 이렇게 와 줘서 고마워.", "이렇게 와 줘서 고마워." },   // '이렇게 이렇게'가 되지 않게
             new[] { "오랜만에야 왔구나.", "오랜만에야 왔구나." },      // 뒤에 글자가 붙은 꼴: 지우면 "야 왔구나" 토막이 남아 그대로 둔다
             new[] { "오랜만이라 그런지 반가워!", "반가워!" },          // 마디 뒤의 이어 주는 말까지 지운다 ("그런지 반가워!" 토막이 남지 않게)
             new[] { "오랜만이어서 그래서, 기다렸어.", "기다렸어." }
@@ -2222,7 +2402,7 @@ public static class Program
         var slm = new SlmReactionGenerator(backend, assembler, validator);
         slm.LoadAsync(CancellationToken.None).Wait();
         var manager = new NpcRequestManager(slm, new RuleBasedReactionGenerator(lines, new Random(7))) { SlmTimeout = TimeSpan.FromSeconds(5) };
-        Check(manager.RecentLineCount == 10 && slm.MaxAttempts == 2, "최근 대사 10개, 만들기 2번이 기본");
+        Check(manager.RecentLineCount == 5 && slm.MaxAttempts == 2, "최근 대사 5개, 만들기 2번이 기본");
         backend.Replies.Enqueue(Out("thank_calm", "player", "관리해 줘서 고마워, 덕분에 더 선명해졌어."));
         NpcResponse first = Ask(manager, Care(6));
         backend.Replies.Enqueue(Out("thank_calm", "player", "관리해 줘서 고마워, 덕분에 더 선명해졌어, 정말."));   // 90% 이상 겹침 → 한 번 더
@@ -2469,13 +2649,15 @@ public static class Program
             care.Situation = "주인이 관리하기를 골랐고, 주인이 너를 관리해 주었다.";
             var starters = new List<string>();
             var prompts = new HashSet<string>();
-            for (int variation = 0; variation < 6; variation++)
+            for (int variation = 0; variation < ClearStarters.Length; variation++)
             {
                 care.Variation = variation;
                 starters.Add(PromptAssembler.Starter(care));
                 prompts.Add(assembler.Build(care).User);
             }
-            Check(starters.Distinct().Count() == 6 && prompts.Count == 6, persona.name + " 관리 감사: 여섯 번 부르면 첫 낱말·프롬프트가 모두 다름 ← " + string.Join("/", starters.ToArray()));
+            // 2026-11-26: 관리 감사의 첫 낱말은 여섯이다 (요청 관리자가 무작위로 고른다)
+            Check(starters.Distinct().Count() == ClearStarters.Length && prompts.Count == ClearStarters.Length && starters.All(w => ClearStarters.Contains(w)),
+                    persona.name + " 관리 감사: 번호 여섯이면 첫 낱말(깨끗하게·훨씬·몸이·덕분에·정말·개운하게)·프롬프트가 모두 다름 ← " + string.Join("/", starters.ToArray()));
             care.Variation = 2;
             string user = assembler.Build(care).User;
             Check(user.Contains(PromptAssembler.StarterLabel + ": " + PromptAssembler.Starter(care) + "\n") || user.Contains(PromptAssembler.StarterLabel + ": " + PromptAssembler.Starter(care) + "\n\n"),
@@ -2635,8 +2817,13 @@ public static class Program
         // 관리 감사·지난 대화 꺼내기는 두 문장까지 (고마움이 든 뒤 문장·기억의 내용이 담긴 뒤 문장을 출력 검사가 남긴다)
         foreach (string twoAction in new[] { NpcActions.ThankCalm, NpcActions.ThankJoyful, NpcActions.RecallTalk })
         {
-            string twoGrammar = assembler.Build(Request(8, InteractionMode.Owner, twoAction == NpcActions.RecallTalk ? NpcInputs.AskStatus : NpcInputs.Care, twoAction)).Grammar;
-            Check(twoGrammar.Contains("line ::= \"\\\"\" sentence ( \" \" sentence )? \"\\\"\"") && !twoGrammar.Contains("one ::="), twoAction + ": 두 문장까지 쓰는 문법");
+            ReactionRequest twoRequest = Request(8, InteractionMode.Owner, twoAction == NpcActions.RecallTalk ? NpcInputs.AskStatus : NpcInputs.Care, twoAction);
+            string twoGrammar = assembler.Build(twoRequest).Grammar;
+            // 관리 감사는 첫 문장이 첫 낱말로 시작한다(first, 2026-11-26). 지난 대화 꺼내기는 첫 낱말이 없다
+            string twoLine = twoAction == NpcActions.RecallTalk
+                    ? "line ::= \"\\\"\" sentence ( \" \" sentence )? \"\\\"\""
+                    : "line ::= \"\\\"\" first ( \" \" sentence )? \"\\\"\"";
+            Check(twoGrammar.Contains(twoLine) && !twoGrammar.Contains("one ::="), twoAction + ": 두 문장까지 쓰는 문법");
             string sentenceRule = twoGrammar.Split('\n').First(l => l.StartsWith("sentence ::="));
             Check(sentenceRule.Count(c => c == 'b') >= PromptAssembler.SentenceMaxChars && !sentenceRule.Contains("{"),
                     twoAction + ": 문장 규칙은 글자 " + PromptAssembler.SentenceMaxChars + "개까지 펼쳐 둠 (반복 범위 {m,n} 을 못 읽는 런타임에서도 돈다)");
@@ -2699,7 +2886,8 @@ public static class Program
         Check(NpcLineChecks.FixLongAbsence("또 왔구나! 오랜만에 보니 너무 반가워!", "오늘, 어제") == "또 왔구나! 다시 보니 너무 반가워!"
                 && NpcLineChecks.FixLongAbsence("오랜만에 보니 반가워!", "오늘") == "만나니 반가워!",
                 "'오랜만에 보니'는 '보니'만 남기지 않고 '다시 보니'(단골)·'만나니'(처음 온 친구)로");
-        Check(NpcLineChecks.FixLongAbsence("오랜만에 또 와 줘서 고마워.", "오늘, 2일 전") == "또 와 줘서 고마워.", "'또 또'는 하나로");
+        Check(NpcLineChecks.FixLongAbsence("오랜만에 또 와 줘서 고마워.", "오늘, 2일 전") == "이렇게 또 와 줘서 고마워." && NpcLineChecks.FixLongAbsence("오랜만에 와 줘서 또 고마워.", "오늘, 2일 전") == "이렇게 와 줘서 또 고마워.",
+                "이미 '또'가 있으면 '오랜만에'는 '또'가 아니라 '이렇게'로 ('또 또'가 되지 않게)");
         Check(NpcLineChecks.FixLongAbsence("오랜만에 와 줘서 고마워.", "오늘, 12일 전") == "오랜만에 와 줘서 고마워." && NpcLineChecks.FixLongAbsence("오랜만이야.", null) == "오랜만이야.",
                 "7일 넘게 비었거나 기록이 없으면 그대로");
         ReactionRequest regular = Request(8, InteractionMode.Visitor, NpcInputs.Visit, NpcActions.WanderRecall);
@@ -3978,6 +4166,7 @@ public static class Program
                 case "bareOwn": got = NpcLineChecks.FixBareOwnThing(line, new List<string> { "자개", "옻칠", "몸", "무늬", "반짝임", "빛", "모습" }); break;
                 case "recallFragment": got = NpcLineChecks.FixRecallFragment(line); break;
                 case "pronouns": got = NpcLineChecks.DropPlayerReference(NpcLineChecks.PlayerPronounsToName(line, arg), arg); break;
+                case "callPlain": got = NpcLineChecks.CallPlain(line, arg, 15 + NpcOutputValidator.LengthTolerance) ?? ""; break;
                 default: got = "(알 수 없는 함수 " + fn + ")"; break;
             }
             if (got == want)
@@ -4012,6 +4201,14 @@ public static class Program
             new[] { "반말", "닦아달라고 부탁해.", "닦아 줘." },
             new[] { "반말", "한 번 더 닦아 달라고 부탁드려요.", "한 번 더 닦아 줘." },
             new[] { "반말", "어서 왔어!", "어서 와!" },
+            // 2026-11-26 기기 시험(ver8): 목록에 없던 어미 — 고치지 못하면 금칙어(어서왔)로 버려졌다
+            new[] { "반말", "어서 왔니?", "어서 와!" },
+            new[] { "반말", "어서 왔군, 하늘아!", "어서 와, 하늘아!" },
+            new[] { "반말", "어서 왔다니, 반가워!", "어서 와, 반가워!" },
+            new[] { "반말", "어서 왔으니 반가워!", "어서 와, 반가워!" },
+            new[] { "반말", "어서 왔잖아!", "어서 와!" },
+            new[] { "반말", "어서 와라, 하늘아!", "어서 와, 하늘아!" },
+            new[] { "반말", "어서 왔지만 반가워.", "어서 왔지만 반가워." },
             new[] { "반말", "한 번 더 닦아 달라고 부탁했다.", "한 번 더 닦아 줘." },
             new[] { "반말", "닦아 달라고 말했어.", "닦아 줘." },
             new[] { "반말", "닦아 달라고 부탁드립니다.", "닦아 줘." },
