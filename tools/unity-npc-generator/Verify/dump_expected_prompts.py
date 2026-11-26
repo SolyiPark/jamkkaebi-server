@@ -116,6 +116,12 @@ SPEECH_SAMPLES = [
     ("반말", "나는 좋아, 너는 안 좋아. 좋아, 정말 안 좋아."),
     ("반말", "몸이 가벼워。 마음도 가벼워! 고마워… 정말 고마워!"),
     ("반말", "참 고마워, 😀 고마워!"),
+    # 2026-11-26 기기 시험(ver8): 첫 낱말 '어서' 뒤에 목록에 없던 어미가 와 금칙어(어서왔)로 버렸다 — 맺는 어미는 "어서 와", 잇는 어미는 "어서 와,"
+    ("반말", "어서 왔니?"), ("반말", "어서 왔군, 하늘아!"), ("반말", "어서 왔다니, 반가워!"), ("반말", "어서 왔으니 반가워!"),
+    ("반말", "어서 왔잖아!"), ("반말", "어서 왔구먼!"), ("반말", "어서 왔다!"), ("반말", "어서 와라, 하늘아!"), ("반말", "어서 왔는데 반가워."),
+    ("반말", "어서 왔지만 반가워."), ("반말", "어서 왔다니!"),
+    # 2026-11-26 리뷰 점검: '어서'는 따로 선 낱말만("싶어서"는 두고), 줄바꿈은 삼키지 않는다
+    ("반말", "보고 싶어서 왔니?"), ("반말", "어서\n왔어!"), ("반말", "어서 왔다니\n반가워!"),
 ]
 expected["_speechSamples"] = [
     {"label": label, "line": line, "want": run.normalize_speech(line, label)} for label, line in SPEECH_SAMPLES
@@ -208,6 +214,10 @@ FN_SAMPLES = [
     ("probe", "날 찾으러 왔구나!", "greet"), ("probe", "와! 나를 찾으러 왔네.", "greet"), ("probe", "보물 찾으러 왔어?", "greet"), ("probe", "나를  찾으러 왔구나!", "greet"), ("probe", "뭘   찾으러 왔어?", "greet"),
     # CodeRabbit 리뷰: 날·나를이 따로 선 낱말일 때만 반가움 — "전날"·"하나를"은 나가 아니다
     ("probe", "전날 찾으러 왔구나.", "greet"), ("probe", "하나를 찾으러 왔어?", "greet"), ("probe", "어, 날 찾으러 왔구나!", "greet"), ("probe", "그날  찾으러 왔어?", "greet"),
+    # 2026-11-26: 인사말뿐인 인사에 부르는 말 붙이기 (arg 는 부를 이름)
+    ("callPlain", "왔구나!", "하늘"), ("callPlain", "어서 와.", "발굴자"), ("callPlain", "안녕~", "미소"), ("callPlain", "와", "도윤"),
+    ("callPlain", "하늘아!", "하늘"), ("callPlain", "!!", "하늘"), ("callPlain", "안녕,!", "하늘"), ("callPlain", "왔구나!", "가나다라마바사아자차카타파하"),
+    ("callPlain", "왔구나。", "하늘"), ("callPlain", "와😀😀😀😀😀😀😀😀😀😀!", "하늘"),   # '。'도 끝 부호, 이모지는 코드 포인트로 센다
 ]
 
 
@@ -240,6 +250,8 @@ def run_fn(kind, line, arg):
         return "true" if run.narration_kept(line, arg) else "false"
     if kind == "pronouns":
         return run.drop_player_reference(run.player_pronouns_to_name(line, arg), arg)
+    if kind == "callPlain":
+        return run.call_plain(line, arg, 15 + run.LENGTH_TOLERANCE) or ""
     raise ValueError(kind)
 
 

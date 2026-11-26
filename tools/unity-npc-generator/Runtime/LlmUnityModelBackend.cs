@@ -65,8 +65,9 @@ namespace Jamkkaebi.Npc
         public float Temperature { get; set; }
 
         /// <summary>
-        /// 한 번에 생성할 최대 토큰. JSON 뼈대 약 20토큰 + 40자 대사 약 25토큰이라 64 로 둔다. 넘치면 대사 중간에서 끊기고,
+        /// 한 번에 생성할 최대 토큰. 기본 40 (2026-11-13: 64 → 40, JSON 뼈대 약 5 + 대사 약 30). 넘치면 대사 중간에서 끊기고,
         /// 출력 검사기가 끝난 문장까지만 쓴다. 줄이면 생성 시간의 상한이 줄지만 끊기는 대사가 는다.
+        /// 두 문장까지 쓰는 대사(관리 감사·지난 대화)는 GBNF 를 쓸 때 프롬프트의 한도(PromptAssembler.TwoSentenceMaxTokens 80)를 따른다 (MaxTokensFor, 2026-11-26).
         /// </summary>
         public int MaxTokens { get; set; }
 
@@ -640,7 +641,16 @@ namespace Jamkkaebi.Npc
             {
                 throw new ArgumentNullException("prompt");
             }
-            return Run(prompt.System, prompt.User, GrammarFor(prompt), options.MaxTokens, false, prompt.Background, ct);
+            return Run(prompt.System, prompt.User, GrammarFor(prompt), MaxTokensFor(prompt), false, prompt.Background, ct);
+        }
+
+        /// <summary>
+        /// 이 프롬프트의 출력 토큰 한도. 프롬프트가 더 큰 한도(NpcPrompt.MaxTokens, 두 문장 대사)를 주면 GBNF 를 쓸 때만 따른다 — 문장 문법이 대사 끝에서 생성을 끝내 주므로
+        /// 40 안에 끝나는 대사는 그대로이고 40 에서 잘렸을 대사만 끝까지 쓴다. JSON 스키마·형식 제약 없음은 길이를 막지 못해 기본값(MaxTokens)을 쓴다 (2026-11-26).
+        /// </summary>
+        internal int MaxTokensFor(NpcPrompt prompt)
+        {
+            return options.Grammar == LlmUnityGrammar.Gbnf && prompt.MaxTokens > options.MaxTokens ? prompt.MaxTokens : options.MaxTokens;
         }
 
         /// <summary>

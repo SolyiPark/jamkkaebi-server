@@ -42,6 +42,12 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public string Grammar { get; set; }
 
+        /// <summary>
+        /// 이 프롬프트의 출력 토큰 한도. 0 이면 백엔드의 기본값(LlmUnityOptions.MaxTokens 40)을 쓴다. 문장 문법(GBNF)으로 두 문장까지 쓰는 대사(관리 감사·지난 대화)만
+        /// PromptAssembler.TwoSentenceMaxTokens 로 올린다 — LLMUnity 백엔드가 GBNF 를 쓸 때만 따른다 (2026-11-26).
+        /// </summary>
+        public int MaxTokens { get; set; }
+
         /// <summary>후보 행동 ID (처음 나온 순서).</summary>
         public List<string> ActionIds { get; set; }
 
@@ -167,7 +173,9 @@ namespace Jamkkaebi.Npc
         // 흐려진 안부 중 "마지막 관리가 며칠 전이었는지"를 말하는 요청(AskVariant == "days")의 첫 낱말
         private static readonly string[] StartersFadedDays = { "마지막 관리가", "마지막", "벌써", "어느새" }; // "마지막으로"는 "마지막으로 닦아주면 감사할 것 같아"(뜻이 뒤섞임)로 이어져 뺐다 (2026-11-17 21:09 시험 S03 #2)
         private static readonly string[] StartersFaded = { "살살", "괜찮으면", "시간 되면", "조심조심", "이왕이면" }; // 2026-11-17 21:45 시험 뒤: 흐려진 안부는 '이미 한 말'(상태·며칠 전) 뒤에 이어질 부탁의 말머리 // // 2026-11-17 18:21 시험: "점점"은 "점점 새로워지고 싶어", "혹시"는 "혹시, 오랜만에 깨워줘"처럼 뜬금없는 말로 이어져 "어느새"·"자꾸"로 바꿨다 // "조금"은 "조금 전 관리를 못 받아서"(금칙어)로 이어져 뺐다 (2026-11-17 시험 S03 #3)
-        private static readonly string[] StartersClear = { "덕분에", "정말", "훨씬", "몸이", "개운하게", "깨끗하게" }; // 2026-11-17 21:27 시험: "이제"는 "이제 관리해 줘서 고마워"(때가 뒤섞임)로 이어져 "정말"로 바꿨다 // 2026-11-17 18:21 시험: "깨끗해졌어"·"개운해"는 그것만 대사로 내 "~하게"로 이어 쓰게 했다 // "깨끗해져서"는 "깨끗해져서 닦아줘서 고마워"처럼 '~서'를 거듭 이었다 (2026-11-17 시험 S04 #1)
+        // 2026-11-26 기기 시험(ver8) 뒤: 요청 관리자가 차례로 돌리지 않고 무작위로 고른다(PicksStarterAtRandom). 같은 날 셋(깨끗하게·훨씬·몸이)으로 줄였다가 여섯으로 되돌렸다. 문법(GBNF)이 대사를 그 낱말로 시작하게 한다 —
+        // 프롬프트에 적기만 하면 모델이 따르지 않거나("나는 훨씬 더 조심스럽게 다가가야 할 것 같아…") 억지로 끼워 넣었다. 아래는 예전 기록
+        private static readonly string[] StartersClear = { "깨끗하게", "훨씬", "몸이", "덕분에", "정말", "개운하게" }; // 2026-11-17 21:27 시험: "이제"는 "이제 관리해 줘서 고마워"(때가 뒤섞임)로 이어져 "정말"로 바꿨다 // 2026-11-17 18:21 시험: "깨끗해졌어"·"개운해"는 그것만 대사로 내 "~하게"로 이어 쓰게 했다 // "깨끗해져서"는 "깨끗해져서 닦아줘서 고마워"처럼 '~서'를 거듭 이었다 (2026-11-17 시험 S04 #1)
         private static readonly string[] StartersVisit = { "안녕", "반가워", "와", "환영해", "마음껏 둘러봐", "천천히 둘러봐" }; // "편하게"는 "편하게 찾아와 줘서 고마워"처럼 이어졌다 (2026-11-17 19:43 시험 S05 #2) // "구경하러"는 "구경하러 온 친구를 반가이 맞아."처럼 상대를 남 얘기하듯 옮겼다 (2026-11-17 18:21 시험 S05 #4)
         // 단골에게는 "오랜만"을 부르는 말을 피한다 (3일 전에도 온 친구에게 "오랜만에 와 줘서"라고 해서 모두 거르고 기본 대사로 넘어갔다)
         private static readonly string[] StartersRecall = { "자주", "이번에도", "또", "다시", "반가워", "어서" }; // 2026-11-17 22:27 시험: "오늘도"는 "오늘도 정말 오래 만났네"(없는 일)·"오늘도 또 와줘서"(겹침)로 이어져 "어서"로 바꿨다
@@ -186,6 +194,15 @@ namespace Jamkkaebi.Npc
                     : request.Candidates != null && request.Candidates.Any(c => c != null && c.ActionId == NpcActions.WanderRecall) ? StartersRecall
                     : StartersVisit;
             return list[(((request.Variation + request.RelicId) % list.Length) + list.Length) % list.Length];
+        }
+
+        /// <summary>
+        /// 첫 낱말을 무작위로 고르는 요청인지 (관리 감사·선명한 안부 — 깨끗하게·훨씬·몸이·덕분에·정말·개운하게). 요청 관리자는 이 요청의 첫 낱말을 차례로 돌리지 않고, 최근 대사의 첫머리·바로 앞에 준 첫 낱말과
+        /// 겹치지 않는 것 가운데 무작위로 고른다. 문법(GBNF)은 대사가 그 낱말로 시작하게 한다 (2026-11-26).
+        /// </summary>
+        public static bool PicksStarterAtRandom(ReactionRequest request)
+        {
+            return request != null && StarterKey(request) == "clear";
         }
 
         /// <summary>곁들일 거리 번호를 variation 으로 두었을 때의 첫 낱말 (request 는 그대로 둔다). 요청 관리자가 최근에 쓴 첫 낱말을 피해 번호를 고를 때 쓴다.</summary>
@@ -343,7 +360,8 @@ namespace Jamkkaebi.Npc
                 User = user,
                 Background = request.Background,
                 JsonSchema = Schema(actionIds, targetIds, shape),
-                Grammar = Grammar(request.Candidates, shape, options.SentenceGrammar),
+                Grammar = Grammar(request.Candidates, shape, options.SentenceGrammar, PicksStarterAtRandom(request) ? starter : null),
+                MaxTokens = options.SentenceGrammar && AllowsTwoSentences(request.Candidates) ? TwoSentenceMaxTokens : 0,
                 ActionIds = actionIds,
                 TargetIds = targetIds
             };
@@ -710,6 +728,33 @@ namespace Jamkkaebi.Npc
             return "이어서 " + (clarity == "재봉인" || clarity == "RESEALED" ? "깨워" : PartlyRestoredAsk(request) ? "마저 닦아" : "닦아") + " 달라고 부탁하는 말을 한다";
         }
 
+        /// <summary>
+        /// 최근 관리를 떠올리는 안부(선명하고 마지막 관리가 RecentCareDays 일 안, S04)의 '할 일' 줄. 그 밖의 요청은 null (행동의 뜻을 쓴다). run.py 의 recent_care_task 와 같다.
+        /// <para>2026-11-26 기기 시험(ver8): 행동의 뜻 "상황에 적힌 내 이야기를 한 문장으로 말한다"만 주자 무엇을 말할지 몰라 "나는 훨씬 더 조심스럽게 다가가야 할 것 같아…"처럼
+        /// 목적 없는 말을 했고, 안부 장면 가운데 실패가 가장 많았다(16번 중 5번 기본 대사). 말할 거리 둘(닦아 준 일 덕분에 지금 내 몸이 선명함 · 그래서 고마움)을 정해 준다.
+        /// 며칠 전은 상황 문장에 있어 여기서 또 말하게 하지 않는다 — 16자에 날·상태·고마움을 다 넣으려다 길어진다</para>
+        /// </summary>
+        public static string RecentCareTask(ReactionRequest request)
+        {
+            if (request.Candidates == null || request.Candidates.Count != 1 || request.Candidates[0] == null
+                    || request.Candidates[0].ActionId != NpcActions.AnswerStatus || NpcLineChecks.NeedsAsk(request))
+            {
+                return null;
+            }
+            // '내 몸이 선명하다'고 말하게 하므로 선명하다고 적힌 요청만 (선명도를 모르면 지어내지 않게 행동의 뜻을 쓴다)
+            string clarity = request.FindFact(NpcFactKeys.Clarity);
+            if (clarity != "선명" && clarity != "CLEAR")
+            {
+                return null;
+            }
+            int days;
+            if (!int.TryParse(request.FindFact(NpcFactKeys.LastCareDaysAgo), out days) || days < 0 || days > RuleBasedReactionGenerator.RecentCareDays)
+            {
+                return null;
+            }
+            return "닦아 준 덕분에 지금 내 몸이 선명하다고 말하며 고마워하는 한 문장을 말한다";
+        }
+
         // 모델이 부탁을 빼먹거나 사실을 또 말하면 코드가 부탁 문장을 채운다 (2026-11-17 22:07 시험). run.py 의 ASK_FALLBACKS·ask_fallback 과 같다
         private static readonly string[] AskFallbacks = { "살살 {v} 줄래?", "시간 되면 {v} 줄래?", "조심조심 {v} 줘.", "괜찮으면 {v} 줄래?", "이왕이면 {v} 줘." };
 
@@ -831,7 +876,7 @@ namespace Jamkkaebi.Npc
             if (shape == 0)
             {
                 // 행동이 하나뿐이면 고를 것이 없다 — 후보 목록 대신 할 일 한 줄 (행동 ID 도 대상 줄도 싣지 않는다)
-                return "할 일: " + (AskTask(request) ?? Meaning(request.Candidates[0].ActionId));
+                return "할 일: " + (AskTask(request) ?? RecentCareTask(request) ?? Meaning(request.Candidates[0].ActionId));
             }
             string head = shape == 2 ? (options.DescribeFormat ? CandidatesHeadFree : CandidatesHead) : (options.DescribeFormat ? CandidatesHeadAction : CandidatesHead);
             var lines = new List<string> { head };
@@ -973,6 +1018,15 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public const int OneSentenceMinCore = 5;
 
+        /// <summary>
+        /// 두 문장까지 쓰는 대사(관리 감사·지난 대화)의 출력 토큰 한도 (NpcPrompt.MaxTokens). 문장 문법이 허용하는 가장 긴 대사(문장 둘 × SentenceMaxChars 30자 + 끝 부호)와
+        /// JSON 틀을 글자마다 한 토큰으로 쳐도 넘지 않는 수다.
+        /// <para>2026-11-26 기기 시험(ver8) S08: 기본 한도 40 에서 둘째 문장이 끊겨("…정말~ 고마") 앞 문장 "…정말~"만 남았다. 문법이 문장 끝에서 따옴표를 닫아 생성을 스스로 끝내므로,
+        /// 한도를 올려도 40 안에 끝나는 대사는 그대로이고 <b>40 에서 잘렸을 대사만</b> 끝까지 쓴다 — 잘린 뒤 다시 만드는 것(생성 한 번 더, 폰에서 10초 안팎)보다 싸다.
+        /// 한 문장 대사(30자 + 끝 부호)는 40 안에 끝나 그대로 둔다.</para>
+        /// </summary>
+        public const int TwoSentenceMaxTokens = 80;
+
         // 지난 대화 꺼내기·관리 감사는 두 문장까지 쓴다 (출력 검사가 둘째 문장을 버리지 않는 대사). 후보에 하나라도 있으면 그렇다
         private static bool AllowsTwoSentences(List<ActionCandidate> candidates)
         {
@@ -992,8 +1046,11 @@ namespace Jamkkaebi.Npc
             return chain;
         }
 
-        private static string Grammar(List<ActionCandidate> candidates, int shape, bool sentenceGrammar)
+        // lead: 대사가 반드시 이 낱말로 시작한다 (관리 감사·선명한 안부의 첫 낱말, PicksStarterAtRandom). null 이면 아무 말로나 시작한다.
+        // 2026-11-26: 프롬프트의 "첫 낱말로 시작"만으로는 모델이 "나는 훨씬 더 …"처럼 따르지 않았다. 문법이 그 낱말을 먼저 쓰게 하고 모델은 뒤를 잇는다
+        private static string Grammar(List<ActionCandidate> candidates, int shape, bool sentenceGrammar, string lead)
         {
+            string leadLiteral = string.IsNullOrEmpty(lead) ? null : GbnfLiteral(lead);
             var grammar = new StringBuilder();
             if (shape == 0)
             {
@@ -1032,7 +1089,16 @@ namespace Jamkkaebi.Npc
             {
                 // 지난 대화 꺼내기·관리 감사: 끝 부호로 끝나는 문장 하나, 또는 둘. 부호가 오기 전에는 따옴표를 닫지 못하므로 문장 중간에서 끊기지 않는다.
                 // 출력 검사가 줄이지 않거나(기억의 내용이 뒤 문장에 있을 수 있다) 고마움이 든 문장을 골라 남겨서(뒤 문장일 수 있다) 둘째 문장을 버리지 않는다
-                grammar.Append("line ::= \"\\\"\" sentence ( \" \" sentence )? \"\\\"\"\n");
+                if (leadLiteral != null)
+                {
+                    // 첫 문장은 첫 낱말 뒤로 이어 쓴다 (첫 낱말까지 SentenceMaxChars 안)
+                    grammar.Append("line ::= \"\\\"\" first ( \" \" sentence )? \"\\\"\"\n");
+                    grammar.Append("first ::= ").Append(leadLiteral).Append(" ").Append(SentenceChain(Math.Max(1, SentenceMaxChars - lead.Length))).Append(" term term? term?\n");
+                }
+                else
+                {
+                    grammar.Append("line ::= \"\\\"\" sentence ( \" \" sentence )? \"\\\"\"\n");
+                }
                 grammar.Append("sentence ::= \"…\"? ").Append(SentenceChain(SentenceMaxChars)).Append(" term term? term?\n");
                 grammar.Append("b ::= [^\"\\\\\\n\\r.!?~…。]\n");
                 grammar.Append("term ::= [.!?~…。]\n");
@@ -1044,12 +1110,26 @@ namespace Jamkkaebi.Npc
                 // 첫 문장이 너무 짧으면(5글자 미만) 출력 검사가 둘째 문장과 함께 남기므로, 첫 문장을 그만큼은 쓰게 해 "왔구나!"에서 멈추지 않고 "왔구나, 하늘아!"처럼 잇게 한다.
                 // 따옴표는 끝 부호 뒤에만 닫혀 모델이 스스로 생성을 끝낸다 — 도중에 멈추라고 하지 않으므로 읽는 중 취소의 결함(LlamaLib 2.0.5)도 건드리지 않는다
                 grammar.Append("line ::= \"\\\"\" one \"\\\"\"\n");
-                grammar.Append("one ::= \"…\"?");
-                for (int i = 0; i < OneSentenceMinCore; i++)
+                if (leadLiteral != null)
                 {
-                    grammar.Append(i == 0 ? " k" : " s k");
+                    // 첫 낱말 뒤에 글자를 이어 OneSentenceMinCore 를 채운다 (첫 낱말의 글자도 센다, 적어도 한 글자는 잇는다)
+                    int more = Math.Max(1, OneSentenceMinCore - NpcLineChecks.Core(lead).Length);
+                    grammar.Append("one ::= ").Append(leadLiteral);
+                    for (int i = 0; i < more; i++)
+                    {
+                        grammar.Append(" s k");
+                    }
+                    grammar.Append(" (").Append(SentenceChain(Math.Max(1, SentenceMaxChars - lead.Length - more))).Append(")? term term? term?\n");
                 }
-                grammar.Append(" (").Append(SentenceChain(SentenceMaxChars - OneSentenceMinCore)).Append(")? term term? term?\n");
+                else
+                {
+                    grammar.Append("one ::= \"…\"?");
+                    for (int i = 0; i < OneSentenceMinCore; i++)
+                    {
+                        grammar.Append(i == 0 ? " k" : " s k");
+                    }
+                    grammar.Append(" (").Append(SentenceChain(SentenceMaxChars - OneSentenceMinCore)).Append(")? term term? term?\n");
+                }
                 // 출력 검사가 세는 글자 (NpcLineChecks.Core 가 빼는 부호·띄어쓰기가 아닌 것). '。'도 끝 부호다 — 글자(k·b)에 두면 "왔구나。 정말 반가워!"처럼
                 // 한 문장 안에 문장 끝이 들어가 NpcLineChecks.SentenceEnds 가 두 문장으로 나눴다 (CodeRabbit 리뷰)
                 grammar.Append("k ::= [^\"\\\\\\n\\r.!?~…。 \\t,·'‘’“”]\n");
@@ -1059,11 +1139,21 @@ namespace Jamkkaebi.Npc
             }
             else
             {
-                grammar.Append("line ::= \"\\\"\" char+ \"\\\"\"\n");
+                grammar.Append(leadLiteral != null ? "line ::= \"\\\"\" " + leadLiteral + " char* \"\\\"\"\n" : "line ::= \"\\\"\" char+ \"\\\"\"\n");
                 grammar.Append("char ::= [^\"\\\\\\n\\r]\n");
             }
             grammar.Append("ws ::= [ \\t]*\n");
             return grammar.ToString();
+        }
+
+        // 대사 안에 그대로 쓰는 GBNF 리터럴 (첫 낱말): 몸이 → "몸이". 대사에는 따옴표·역슬래시가 오지 않으므로(문법이 막는다) 그런 낱말은 받지 않는다
+        private static string GbnfLiteral(string text)
+        {
+            if (text.IndexOf('"') >= 0 || text.IndexOf('\\') >= 0)
+            {
+                throw new ArgumentException("첫 낱말에 따옴표·역슬래시를 쓸 수 없다: " + text);
+            }
+            return "\"" + text + "\"";
         }
 
         // GBNF 안에서 JSON 문자열 하나를 그대로 내는 리터럴: "\"greet\""

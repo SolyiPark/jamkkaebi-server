@@ -345,7 +345,7 @@ namespace Jamkkaebi.Npc
                 // 견주는 것은 길이에 맞춰 줄인 뒤의 대사(마지막 반복 검사와 같은 글)이고, 인사에 지어낸 사정이 남는 말은 건너뛴다 (CodeRabbit 리뷰)
                 int fitLimit = LimitFor(request.Input) + LengthTolerance;
                 if (noRecord && NpcLineChecks.HasLongAbsenceWord(line) && request.RecentLines != null && request.RecentLines.Count > 0
-                        && NpcLineChecks.FindSimilar(Comparable(fixedLine, fitLimit, truncated), request.RecentLines).HasValue)
+                        && NpcLineChecks.FindSimilar(AsShown(Comparable(fixedLine, fitLimit, truncated), rawLine, action, request, persona, fitLimit), request.RecentLines).HasValue)
                 {
                     for (int variant = 1; variant < NpcLineChecks.NoRecordGreetings.Length; variant++)
                     {
@@ -355,7 +355,9 @@ namespace Jamkkaebi.Npc
                         {
                             continue; // 길이에 맞지 않는 말은 고르면 뒤에서 TooLong 으로 걸린다 (CodeRabbit 리뷰)
                         }
-                        if (NpcLineChecks.GreetingProbe(otherFitted, action) == null && !NpcLineChecks.FindSimilar(otherFitted, request.RecentLines).HasValue)
+                        // 인사말뿐이면 뒤에서 부르는 말이 붙는다 — 붙인 대사로 견주어야 "반가워!" → "반가워, 발굴자!"가 최근 대사와 같아지는 것을 미리 안다 (CodeRabbit 리뷰)
+                        if (NpcLineChecks.GreetingProbe(otherFitted, action) == null
+                                && !NpcLineChecks.FindSimilar(AsShown(otherFitted, rawLine, action, request, persona, fitLimit), request.RecentLines).HasValue)
                         {
                             fixedLine = other;
                             break;
@@ -423,6 +425,105 @@ namespace Jamkkaebi.Npc
                         : "첫 문장부터 제한을 넘는다 (" + line.Length + "자, 제한 " + limit + "자)";
                 return new OutputCheck(OutputProblem.TooLong, why, action, target, line, line, truncated);
             }
+            OutputCheck content = ContentCheck(fitted, rawLine, action, target, line, truncated, request, persona);
+            if (content != null)
+            {
+                return content;
+            }
+            if (persona != null)
+            {
+                if (Array.IndexOf(PlainCheckedActions, action) >= 0 && NpcLineChecks.Core(fitted).Length < MinGreetingCore)
+                {
+                    // 인사("왔구나!", "어서 와.")는 버리지 않고 지금 상대를 부르는 말을 붙여 쓴다 — "왔구나, 하늘아!" (2026-11-26 기기 시험: 탭 인사 실패의 한 갈래).
+                    // 붙인 대사도 아래의 반복 검사를 거친다. 감사(thank_*)는 붙여도 고마운 까닭이 없어 그대로 거른다
+                    string called = CompletePlain(fitted, rawLine, action, request, persona, limit);
+                    if (called == null)
+                    {
+                        return new OutputCheck(OutputProblem.TooPlain, "인사말뿐 '" + fitted + "'", action, target, fitted, line, truncated);
+                    }
+                    said = said ?? fitted; // 메모에 "다듬어 바로 씀 ('왔구나!' → '왔구나, 하늘아!')"로 남는다
+                    if (line == fitted)
+                    {
+                        line = called; // 자르지 않은 대사면 붙인 것을 자른 것으로 적지 않는다 (잘랐으면 모델이 쓴 전체 대사를 그대로 둔다)
+                    }
+                    fitted = called;
+                }
+            }
+            string repeatedWord = persona != null ? NpcLineChecks.InnerRepeat(fitted) : null;
+            if (repeatedWord != null)
+            {
+                return new OutputCheck(OutputProblem.InnerRepeat, "한 대사 안의 반복 '" + repeatedWord + "'", action, target, fitted, line, truncated);
+            }
+            // 흐려진 안부: 코드가 정한 앞 문장("마지막 관리가 9일 전이었어.")까지 포함한 전체 대사로 견준다 — 앞 문장이 같으면 부탁 부분끼리(앞 문장만 같아 거르던 것을 막는다),
+            // 앞 문장이 다르면 전체끼리. 예전에는 늘 부탁 부분만 견주어, 앞 문장이 달라 다른 대사인데도 '반복'으로 걸렀다 (PromptAssembler.SimilarLine, 2026-11-24)
+            KeyValuePair<string, string>? same = PromptAssembler.FindRepeat(fitted, request.RecentLines);
+            if (same.HasValue && linePrefix != null && !replacingAsk)
+            {
+                // 흐려진 안부의 부탁 부분이 최근 대사와 같으면, 버리고 기본 대사로 넘어가는 대신 코드의 부탁 문장 중 최근 대사와 겹치지 않는 것으로 바꾼다 (2026-11-25).
+                // 부탁은 첫 낱말 + '닦아/깨워 줄래' 꼴이라 모델이 써도 코드가 채운 것(AskFallback, 모델이 부탁을 빼먹었을 때 이미 쓰는 문장)과 다르지 않다.
+                // 기본 대사로 넘어가면 그 상황의 기본 대사가 둘뿐이라 오히려 같은 대사가 잦다 (2026-11-25 PC 시험 S03 #4: 부탁 부분까지 같아 기본 대사).
+                // 바꾼 대사는 모델이 쓴 것처럼 처음부터 모든 검사(길이·호칭·금칙어·반복…)를 다시 거쳐, 통과한 첫 것만 쓴다. 다 걸리면 반복으로 거른다.
+                // 다듬기(LineBeforeSpeechFix)·자르기(FullLine)는 바꾼 대사의 것으로 두고, 모델이 쓴 대사와 겹친 최근 대사는 메모(Detail)에 따로 남긴다
+                string modelLine = said ?? rawLine; // 모델이 쓴 그대로 (다듬기 전)
+                foreach (string ask in PromptAssembler.AskFallbackCandidates(request, linePrefix, request.RecentLines, limit))
+                {
+                    string replacedSaid;
+                    OutputCheck replaced = Inspect(AskJson(action, target, ask), request, out replacedSaid, true);
+                    if (replaced.IsValid)
+                    {
+                        said = replacedSaid;
+                        return new OutputCheck(OutputProblem.None,
+                                OutputCheck.AskReplacedNote + " ('" + modelLine + "' → '" + replaced.Line + "', 겹친 최근 대사 '" + same.Value.Key + "')",
+                                replaced.ActionId, replaced.TargetId, replaced.Line, replaced.FullLine, truncated);   // 토큰 한도에 끊겼는지는 모델 출력의 것 (run.py 와 같다)
+                    }
+                }
+            }
+            if (same.HasValue)
+            {
+                return new OutputCheck(OutputProblem.Repeated, "최근 대사 '" + same.Value.Key + "' 와 같음 (" + same.Value.Value + ")",
+                        action, target, fitted, line, truncated);
+            }
+            return new OutputCheck(OutputProblem.None, null, action, target, fitted, line, truncated);
+        }
+
+        /// <summary>
+        /// 인사말뿐인 인사(greet·wander_greet)에 지금 상대를 부르는 말을 붙인 대사. 붙일 수 없거나, 붙인 대사가 부르는 말이 들여올 수 있는 문제에 걸리면 null.
+        /// 붙인 대사는 모델이 쓴 대사와 같은 내용 검사(ContentCheck)를 모두 거친다: 금칙어('바보'), 호칭 규칙, 영문·가나·한자('Alice'), 자기 이름, 말투('셔니') 등.
+        /// 바꿔 넣을 말 고르기(AsShown)와 마지막 검사가 같은 함수를 쓴다. run.py 의 complete_plain 과 같다 (CodeRabbit 리뷰).
+        /// </summary>
+        private string CompletePlain(string fitted, string rawLine, string action, ReactionRequest request, Persona persona, int limit)
+        {
+            if (action != NpcActions.Greet && action != NpcActions.WanderGreet)
+            {
+                return null; // 감사(thank_*)는 붙여도 고마운 까닭이 없어 그대로 거른다
+            }
+            string called = NpcLineChecks.CallPlain(fitted, request.AddressName, limit);
+            // 붙인 대사도 모델이 쓴 대사와 같은 내용 검사(ContentCheck)를 모두 거친다 — 하나라도 걸리면 붙이지 않는다
+            if (called == null || NpcLineChecks.Core(called).Length < MinGreetingCore || ContentCheck(called, rawLine, action, null, called, false, request, persona) != null)
+            {
+                return null;
+            }
+            return called;
+        }
+
+        // 마지막 반복 검사가 견줄 대사: 인사말뿐이면 부르는 말을 붙인 것 (붙일 수 없으면 그대로 — 뒤에서 인사말뿐으로 걸린다)
+        private string AsShown(string fitted, string rawLine, string action, ReactionRequest request, Persona persona, int limit)
+        {
+            if (string.IsNullOrEmpty(fitted) || Array.IndexOf(PlainCheckedActions, action) < 0 || NpcLineChecks.Core(fitted).Length >= MinGreetingCore)
+            {
+                return fitted;
+            }
+            return CompletePlain(fitted, rawLine, action, request, persona, limit) ?? fitted;
+        }
+
+        /// <summary>
+        /// 내보낼 대사(fitted)의 내용 검사: 발견 어미·인사 사정·금칙어·외국어·부탁·오타·끊긴 말·기록·상황 옮김·시간대·호칭·주체·페르소나 옮김·자기 이름·솜씨 칭찬·말투.
+        /// 걸리면 그 결과, 통과하면 null. 모델이 쓴 대사와, 인사말뿐인 인사에 부르는 말을 붙인 대사(CompletePlain)가 <b>같은 검사</b>를 거치게 한 곳에 모았다 —
+        /// 붙인 대사에 검사를 하나씩 더하다 보면 빠진 것이 생겼다 (CodeRabbit·Copilot 리뷰: 영문 닉네임 'Alice', 도깨비 이름과 같은 닉네임, 말투 검사가 막는 닉네임 '셔니').
+        /// rawLine 은 말투 다듬기 전 대사 (탓하는 말·설명문은 다듬기 전에도 본다). run.py 의 content_problem 과 같다.
+        /// </summary>
+        private OutputCheck ContentCheck(string fitted, string rawLine, string action, string target, string line, bool truncated, ReactionRequest request, Persona persona)
+        {
             string discovered = NpcLineChecks.DiscoveryEnding(fitted, action);
             if (discovered != null)
             {
@@ -536,46 +637,8 @@ namespace Jamkkaebi.Npc
                     return new OutputCheck(OutputProblem.SpeechMismatch,
                             (persona.endingHint.label ?? "말투") + " 어미가 아닌 문장 '" + wrong + "'", action, target, fitted, line, truncated);
                 }
-                if (Array.IndexOf(PlainCheckedActions, action) >= 0 && NpcLineChecks.Core(fitted).Length < MinGreetingCore)
-                {
-                    return new OutputCheck(OutputProblem.TooPlain, "인사말뿐 '" + fitted + "'", action, target, fitted, line, truncated);
-                }
             }
-            string repeatedWord = persona != null ? NpcLineChecks.InnerRepeat(fitted) : null;
-            if (repeatedWord != null)
-            {
-                return new OutputCheck(OutputProblem.InnerRepeat, "한 대사 안의 반복 '" + repeatedWord + "'", action, target, fitted, line, truncated);
-            }
-            // 흐려진 안부: 코드가 정한 앞 문장("마지막 관리가 9일 전이었어.")까지 포함한 전체 대사로 견준다 — 앞 문장이 같으면 부탁 부분끼리(앞 문장만 같아 거르던 것을 막는다),
-            // 앞 문장이 다르면 전체끼리. 예전에는 늘 부탁 부분만 견주어, 앞 문장이 달라 다른 대사인데도 '반복'으로 걸렀다 (PromptAssembler.SimilarLine, 2026-11-24)
-            KeyValuePair<string, string>? same = PromptAssembler.FindRepeat(fitted, request.RecentLines);
-            if (same.HasValue && linePrefix != null && !replacingAsk)
-            {
-                // 흐려진 안부의 부탁 부분이 최근 대사와 같으면, 버리고 기본 대사로 넘어가는 대신 코드의 부탁 문장 중 최근 대사와 겹치지 않는 것으로 바꾼다 (2026-11-25).
-                // 부탁은 첫 낱말 + '닦아/깨워 줄래' 꼴이라 모델이 써도 코드가 채운 것(AskFallback, 모델이 부탁을 빼먹었을 때 이미 쓰는 문장)과 다르지 않다.
-                // 기본 대사로 넘어가면 그 상황의 기본 대사가 둘뿐이라 오히려 같은 대사가 잦다 (2026-11-25 PC 시험 S03 #4: 부탁 부분까지 같아 기본 대사).
-                // 바꾼 대사는 모델이 쓴 것처럼 처음부터 모든 검사(길이·호칭·금칙어·반복…)를 다시 거쳐, 통과한 첫 것만 쓴다. 다 걸리면 반복으로 거른다.
-                // 다듬기(LineBeforeSpeechFix)·자르기(FullLine)는 바꾼 대사의 것으로 두고, 모델이 쓴 대사와 겹친 최근 대사는 메모(Detail)에 따로 남긴다
-                string modelLine = said ?? rawLine; // 모델이 쓴 그대로 (다듬기 전)
-                foreach (string ask in PromptAssembler.AskFallbackCandidates(request, linePrefix, request.RecentLines, limit))
-                {
-                    string replacedSaid;
-                    OutputCheck replaced = Inspect(AskJson(action, target, ask), request, out replacedSaid, true);
-                    if (replaced.IsValid)
-                    {
-                        said = replacedSaid;
-                        return new OutputCheck(OutputProblem.None,
-                                OutputCheck.AskReplacedNote + " ('" + modelLine + "' → '" + replaced.Line + "', 겹친 최근 대사 '" + same.Value.Key + "')",
-                                replaced.ActionId, replaced.TargetId, replaced.Line, replaced.FullLine, truncated);   // 토큰 한도에 끊겼는지는 모델 출력의 것 (run.py 와 같다)
-                    }
-                }
-            }
-            if (same.HasValue)
-            {
-                return new OutputCheck(OutputProblem.Repeated, "최근 대사 '" + same.Value.Key + "' 와 같음 (" + same.Value.Value + ")",
-                        action, target, fitted, line, truncated);
-            }
-            return new OutputCheck(OutputProblem.None, null, action, target, fitted, line, truncated);
+            return null;
         }
 
         private static bool HasCandidateWithoutTargets(ReactionRequest request, string action)
