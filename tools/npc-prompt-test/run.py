@@ -2791,12 +2791,8 @@ def game_problem(row, persona, recent, scene=None, variation=0, max_len=None, re
         return f"어미 섞임 '{wrong}'"
     if row.get("action") in PLAIN_CHECKED_ACTIONS and len(PUNCT_RE.sub("", line)) < MIN_GREETING_CORE:
         # 인사는 부르는 말을 붙여 쓴다 (C# NpcOutputValidator 와 같다). 붙인 대사도 아래의 반복 검사를 거친다
-        called = (call_plain(line, address_name(scene), max_len)
-                  if scene is not None and row.get("action") in CALLED_PLAIN_ACTIONS else None)
-        # 붙인 대사는 그 앞의 검사를 지나지 않았다 — 금칙어·호칭 규칙만 다시 본다 (C# NpcOutputValidator 와 같다)
-        if (called is None or len(PUNCT_RE.sub("", called)) < MIN_GREETING_CORE
-                or (forbidden_groups is not None and forbidden_hits(called, forbidden_groups))
-                or address_contradiction(called, scene)):
+        called = complete_plain(line, row.get("action"), scene, persona, max_len, forbidden_groups)
+        if called is None:
             return f"인사말뿐 '{line}'"
         # 대사에 매긴 칸(길이·다듬기 전 대사)도 붙인 대사의 것으로 바꾼다 — CSV 의 길이가 붙이기 전 대사로 남지 않게 (흐려진 안부의 부탁 바꾸기와 같은 CodeRabbit 리뷰)
         row["speech_fixed"] = row.get("speech_fixed") or line
@@ -2871,7 +2867,30 @@ def speech_fixed(said, action, scene, persona, no_record_variant=0):
     return line
 
 
-def pick_no_record_variant(said, action, scene, persona, recent, limit=None, truncated=False):
+def complete_plain(line, action, scene, persona, max_len, forbidden_groups=None):
+    """인사말뿐인 인사(greet·wander_greet)에 부르는 말을 붙인 대사. 붙일 수 없거나 붙인 대사가 검사에 걸리면 None.
+    붙인 대사는 그 앞의 검사를 지나지 않았으므로 닉네임이 끌어올 수 있는 것을 다시 본다: 금칙어, 호칭 규칙, 영문·가나·한자, 자기 이름.
+    C# NpcOutputValidator.CompletePlain 과 같다 (CodeRabbit 리뷰)."""
+    if scene is None or action not in CALLED_PLAIN_ACTIONS:
+        return None
+    called = call_plain(line, address_name(scene), max_len)
+    if (called is None or len(PUNCT_RE.sub("", called)) < MIN_GREETING_CORE
+            or (forbidden_groups is not None and forbidden_hits(called, forbidden_groups))
+            or address_contradiction(called, scene)
+            or FOREIGN_RE.search(called) is not None
+            or (persona is not None and self_name_hit(called, persona["name"]))):
+        return None
+    return called
+
+
+def as_shown(line, action, scene, persona, max_len, forbidden_groups=None):
+    """마지막 반복 검사가 견줄 대사: 인사말뿐이면 부르는 말을 붙인 것 (붙일 수 없으면 그대로). C# NpcOutputValidator.AsShown 과 같다."""
+    if not line or action not in PLAIN_CHECKED_ACTIONS or len(PUNCT_RE.sub("", line)) >= MIN_GREETING_CORE:
+        return line
+    return complete_plain(line, action, scene, persona, max_len, forbidden_groups) or line
+
+
+def pick_no_record_variant(said, action, scene, persona, recent, limit=None, truncated=False, forbidden_groups=None):
     """기록 없는 '오랜만'을 바꿔 넣은 말 때문에 최근 대사와 같아지면 다른 말(NO_RECORD_GREETINGS)을 고른다. 고칠 '오랜만'이 없거나 다 겹치면 0. C# NpcOutputValidator 와 같다.
     견주는 것은 길이에 맞춰 줄인 뒤의 대사(마지막 반복 검사와 같은 글)이고, 인사에 지어낸 사정이 남는 말은 건너뛴다 (CodeRabbit 리뷰)."""
     if not recent or not no_record_applies(scene) or not LONG_ABSENCE_RE.search(said or ""):
@@ -2882,14 +2901,16 @@ def pick_no_record_variant(said, action, scene, persona, recent, limit=None, tru
         fitted = fit_sentences(line, limit + LENGTH_TOLERANCE, truncated) if limit is not None and line else None
         return fitted if fitted is not None else line
 
-    if find_similar(comparable(0), recent) is None:
+    # 인사말뿐이면 뒤에서 부르는 말이 붙는다 — 붙인 대사로 견주어야 "반가워!" → "반가워, 발굴자!"가 최근 대사와 같아지는 것을 미리 안다 (CodeRabbit 리뷰)
+    shown_len = limit + LENGTH_TOLERANCE if limit is not None else None
+    if find_similar(as_shown(comparable(0), action, scene, persona, shown_len, forbidden_groups), recent) is None:
         return 0
     for variant in range(1, len(NO_RECORD_GREETINGS)):
         line = speech_fixed(said, action, scene, persona, variant)
         fitted = fit_sentences(line, limit + LENGTH_TOLERANCE, truncated) if limit is not None and line else line
         if fitted is None:
             continue  # 길이에 맞지 않는 말은 고르면 뒤에서 길이X 로 걸린다 (CodeRabbit 리뷰)
-        if greeting_probe(fitted, action) is None and find_similar(fitted, recent) is None:
+        if greeting_probe(fitted, action) is None and find_similar(as_shown(fitted, action, scene, persona, shown_len, forbidden_groups), recent) is None:
             return variant
     return 0
 
@@ -2909,7 +2930,7 @@ def evaluate(obj, scene, persona, limit, forbidden_groups, truncated=False, norm
             target = only_targets[0]
     said = clean_line(obj.get("line", ""))
     # 게임처럼 검사 전에 흔한 어미를 그 도깨비 말투로 고친다 (--no-normalize 면 고치지 않는다)
-    full_line = speech_fixed(said, action, scene, persona, pick_no_record_variant(said, action, scene, persona, recent, limit, truncated)) if normalize else said
+    full_line = speech_fixed(said, action, scene, persona, pick_no_record_variant(said, action, scene, persona, recent, limit, truncated, forbidden_groups)) if normalize else said
     prefix = ask_prefix(scene, variation)
     ask_filled = False
     if prefix and full_line:

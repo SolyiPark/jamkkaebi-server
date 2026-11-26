@@ -345,7 +345,7 @@ namespace Jamkkaebi.Npc
                 // 견주는 것은 길이에 맞춰 줄인 뒤의 대사(마지막 반복 검사와 같은 글)이고, 인사에 지어낸 사정이 남는 말은 건너뛴다 (CodeRabbit 리뷰)
                 int fitLimit = LimitFor(request.Input) + LengthTolerance;
                 if (noRecord && NpcLineChecks.HasLongAbsenceWord(line) && request.RecentLines != null && request.RecentLines.Count > 0
-                        && NpcLineChecks.FindSimilar(Comparable(fixedLine, fitLimit, truncated), request.RecentLines).HasValue)
+                        && NpcLineChecks.FindSimilar(AsShown(Comparable(fixedLine, fitLimit, truncated), action, request, persona, fitLimit), request.RecentLines).HasValue)
                 {
                     for (int variant = 1; variant < NpcLineChecks.NoRecordGreetings.Length; variant++)
                     {
@@ -355,7 +355,9 @@ namespace Jamkkaebi.Npc
                         {
                             continue; // 길이에 맞지 않는 말은 고르면 뒤에서 TooLong 으로 걸린다 (CodeRabbit 리뷰)
                         }
-                        if (NpcLineChecks.GreetingProbe(otherFitted, action) == null && !NpcLineChecks.FindSimilar(otherFitted, request.RecentLines).HasValue)
+                        // 인사말뿐이면 뒤에서 부르는 말이 붙는다 — 붙인 대사로 견주어야 "반가워!" → "반가워, 발굴자!"가 최근 대사와 같아지는 것을 미리 안다 (CodeRabbit 리뷰)
+                        if (NpcLineChecks.GreetingProbe(otherFitted, action) == null
+                                && !NpcLineChecks.FindSimilar(AsShown(otherFitted, action, request, persona, fitLimit), request.RecentLines).HasValue)
                         {
                             fixedLine = other;
                             break;
@@ -540,11 +542,8 @@ namespace Jamkkaebi.Npc
                 {
                     // 인사("왔구나!", "어서 와.")는 버리지 않고 지금 상대를 부르는 말을 붙여 쓴다 — "왔구나, 하늘아!" (2026-11-26 기기 시험: 탭 인사 실패의 한 갈래).
                     // 붙인 대사도 아래의 반복 검사를 거친다. 감사(thank_*)는 붙여도 고마운 까닭이 없어 그대로 거른다
-                    string called = action == NpcActions.Greet || action == NpcActions.WanderGreet
-                            ? NpcLineChecks.CallPlain(fitted, request.AddressName, limit) : null;
-                    // 붙인 대사는 그 앞의 검사를 지나지 않았다 — 붙인 부르는 말이 금칙어에 걸리거나(닉네임이 '바보') 호칭 규칙과 어긋나면 붙이지 않는다 (run.py 와 같다)
-                    if (called == null || NpcLineChecks.Core(called).Length < MinGreetingCore || filter.Find(called) != null
-                            || NpcLineChecks.AddressContradiction(called, request.Nickname, request.Familiar) != null)
+                    string called = CompletePlain(fitted, action, request, persona, limit);
+                    if (called == null)
                     {
                         return new OutputCheck(OutputProblem.TooPlain, "인사말뿐 '" + fitted + "'", action, target, fitted, line, truncated);
                     }
@@ -591,6 +590,37 @@ namespace Jamkkaebi.Npc
                         action, target, fitted, line, truncated);
             }
             return new OutputCheck(OutputProblem.None, null, action, target, fitted, line, truncated);
+        }
+
+        /// <summary>
+        /// 인사말뿐인 인사(greet·wander_greet)에 지금 상대를 부르는 말을 붙인 대사. 붙일 수 없거나, 붙인 대사가 부르는 말이 들여올 수 있는 문제에 걸리면 null.
+        /// 붙인 대사는 그 앞의 검사를 지나지 않았으므로 닉네임이 끌어올 수 있는 것을 다시 본다: 금칙어('바보'), 호칭 규칙, 영문·가나·한자('Alice'), 자기 이름(닉네임이 도깨비 이름).
+        /// 바꿔 넣을 말 고르기(AsShown)와 마지막 검사가 같은 함수를 쓴다. run.py 의 complete_plain 과 같다 (CodeRabbit 리뷰).
+        /// </summary>
+        private string CompletePlain(string fitted, string action, ReactionRequest request, Persona persona, int limit)
+        {
+            if (action != NpcActions.Greet && action != NpcActions.WanderGreet)
+            {
+                return null; // 감사(thank_*)는 붙여도 고마운 까닭이 없어 그대로 거른다
+            }
+            string called = NpcLineChecks.CallPlain(fitted, request.AddressName, limit);
+            if (called == null || NpcLineChecks.Core(called).Length < MinGreetingCore || filter.Find(called) != null
+                    || NpcLineChecks.AddressContradiction(called, request.Nickname, request.Familiar) != null
+                    || NpcLineChecks.HasForeign(called) || (persona != null && NpcLineChecks.ContainsSelfName(called, persona.name)))
+            {
+                return null;
+            }
+            return called;
+        }
+
+        // 마지막 반복 검사가 견줄 대사: 인사말뿐이면 부르는 말을 붙인 것 (붙일 수 없으면 그대로 — 뒤에서 인사말뿐으로 걸린다)
+        private string AsShown(string fitted, string action, ReactionRequest request, Persona persona, int limit)
+        {
+            if (string.IsNullOrEmpty(fitted) || Array.IndexOf(PlainCheckedActions, action) < 0 || NpcLineChecks.Core(fitted).Length >= MinGreetingCore)
+            {
+                return fitted;
+            }
+            return CompletePlain(fitted, action, request, persona, limit) ?? fitted;
         }
 
         private static bool HasCandidateWithoutTargets(ReactionRequest request, string action)

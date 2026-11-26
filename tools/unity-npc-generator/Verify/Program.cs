@@ -183,6 +183,20 @@ public static class Program
         ReactionRequest badName = tap(null);
         badName.Nickname = "바보";
         Expect(validator, Out("greet", "player", "왔구나!"), badName, OutputProblem.TooPlain, "닉네임이 금칙어면 부르는 말을 붙이지 않고 인사말뿐");
+        // ⑤ 붙인 대사는 닉네임이 끌어올 수 있는 영문·자기 이름도 다시 본다 (CodeRabbit 리뷰: "안녕, Alice야!"·도깨비 이름과 같은 닉네임)
+        ReactionRequest foreignName = tap(null);
+        foreignName.Nickname = "Alice";
+        Expect(validator, Out("greet", "player", "안녕!"), foreignName, OutputProblem.TooPlain, "영문 닉네임이면 부르는 말을 붙이지 않고 인사말뿐");
+        ReactionRequest selfName = tap(null);
+        selfName.Nickname = personas.Find(8).name;
+        Expect(validator, Out("greet", "player", "안녕!"), selfName, OutputProblem.TooPlain, "닉네임이 도깨비 이름이면 부르는 말을 붙이지 않고 인사말뿐 (" + selfName.Nickname + ")");
+        OutputCheck hanulHello = validator.Check(Out("greet", "player", "안녕!"), tap(null));
+        Check(hanulHello.IsValid && hanulHello.Line == "안녕, 하늘아!", "알맞은 닉네임은 그대로 붙임 ← " + hanulHello.Line + " " + hanulHello.Problem);
+        // ⑥ '오랜만' 바꿔 넣을 말은 부르는 말을 붙인 대사로 견준다 (CodeRabbit 리뷰: "반가워!" → "반가워, 하늘아!"가 최근 대사와 같은데 그대로 골랐다)
+        OutputCheck absenceCalled = validator.Check(Out("greet", "player", "오랜만이야!"), tap(new List<string> { "반가워, 하늘아!" }));
+        Check(absenceCalled.IsValid && absenceCalled.Line == "기다렸어!",   // '기다렸어'는 글자가 넷이라 인사말뿐이 아니어서 부르는 말을 붙이지 않는다
+                "최근 대사 '반가워, 하늘아!'와 같아질 '반가워'를 건너뛰고 '기다렸어'를 고름 ← " + absenceCalled.Line + " " + absenceCalled.Problem + " " + absenceCalled.Detail);
+
         // ④ '。'도 끝 부호, 길이는 코드 포인트로 (run.py 와 같은 규칙 함수 예문에도 있다)
         Check(NpcLineChecks.CallPlain("왔구나。", "하늘", 20) == "왔구나, 하늘아。", "'。'로 끝난 인사에도 부르는 말을 끝 부호 앞에 붙임");
 
