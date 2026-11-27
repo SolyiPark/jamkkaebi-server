@@ -61,7 +61,8 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
         // 3페이즈 — 오염 관리. 완료하면 도깨비 이름까지 공개된다.
         clearPhase(player, relicId, null)
                 .andExpect(jsonPath("$.data.status").value("COMPLETED"))
-                .andExpect(jsonPath("$.data.revealed").value("NAMED"))
+                // 이름은 기억 회복에서 이미 공개됐으므로 새로 오른 공개 단계는 없다.
+                .andExpect(jsonPath("$.data.revealed").doesNotExist())
                 .andExpect(jsonPath("$.data.relic.realName").isNotEmpty())
                 .andExpect(jsonPath("$.data.relic.spiritName").isNotEmpty())
                 .andExpect(jsonPath("$.data.next.action").value("DONE"))

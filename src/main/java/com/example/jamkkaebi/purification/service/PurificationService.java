@@ -312,8 +312,9 @@ public class PurificationService {
                 new PurificationResultResponse.Rewards(session.getJeongseongEarned()),
                 RelicCard.of(master, userRelic),
                 userRelic.getStatus(),
-                // 관리 플레이(!first)는 공개 단계가 오르지 않는다.
-                success && first ? userRelic.revealLevel() : null,
+                // 관리 플레이(!first)는 공개 단계가 오르지 않는다. 오염 관리는 기억 회복에서 이미 이름까지
+                // 공개된 뒤라 새로 오르는 단계가 없다.
+                success && first && !session.getPhase().isLast() ? userRelic.revealLevel() : null,
                 nextStep(session, userRelic, success, clarity),
                 userRelic.restorePhaseFor(clarity),
                 userRelic.isCompleted() ? userRelic.getCareCount() : null,
