@@ -286,6 +286,24 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
+    @DisplayName("다음 페이즈를 진행한 뒤 이전 판을 다시 보고해도 그 판에서 새로 열린 공개 단계를 그대로 준다")
+    void 정산_멱등_공개_단계() throws Exception {
+        Player player = player("늦은재시도");
+        give(player, 1);
+        String unseal = startPurification(player, 1, null);
+        clock.advance(Duration.ofMinutes(1));
+        post(player, "/api/purifications/{token}/result", SUCCESS_BODY, unseal)
+                .andExpect(jsonPath("$.data.revealed").value("FORM"));
+
+        // 기억 회복까지 진행해 지금 공개 단계는 NAMED다.
+        clearPhase(player, 1, null).andExpect(jsonPath("$.data.revealed").value("NAMED"));
+
+        post(player, "/api/purifications/{token}/result", SUCCESS_BODY, unseal)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.revealed").value("FORM"));
+    }
+
+    @Test
     @DisplayName("정산한 세션에 다른 내용으로 보고하면 충돌이다")
     void 정산_후_다른_내용() throws Exception {
         Player player = player("변덕");

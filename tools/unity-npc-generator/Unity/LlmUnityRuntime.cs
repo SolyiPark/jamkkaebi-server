@@ -1,5 +1,6 @@
 #if UNITY_5_3_OR_NEWER && JAMKKAEBI_LLMUNITY
 using System;
+using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using LLMUnity;
@@ -125,6 +126,9 @@ namespace Jamkkaebi.Npc
 
         private sealed class Session : ILlmUnitySession, ILlmUnityStateStore
         {
+            // DestroyAsync 가 오브젝트가 지워지기를 기다리는 최대 시간. 보통 다음 프레임에 지워진다 (모델 서비스를 지우는 데 1초 안팎)
+            private const float DestroyWaitSeconds = 10f;
+
             private readonly GameObject holder;
             private readonly LLMAgent agent;
 
@@ -141,7 +145,7 @@ namespace Jamkkaebi.Npc
                 agent.grammar = string.IsNullOrEmpty(grammar) ? "" : grammar; // 빈 문자열 = 형식 제약 없음
                 agent.temperature = options.Temperature;
                 agent.numPredict = maxTokens;
-                agent.seed = options.Seed.HasValue ? options.Seed.Value : 0; // 0 = 무작위
+                agent.seed = options.SeedForCall(); // 생성마다 새 seed — 0 은 '무작위'가 아니라 늘 같은 seed 라 같은 프롬프트에 같은 대사가 나온다
                 // 대화 기록을 남기지 않는다. 지난 요청의 대사가 다음 프롬프트에 섞이면 안 된다 (기억은 프롬프트의 요약으로 준다)
                 await agent.ClearHistory();
                 bool first = true;
@@ -158,64 +162,198 @@ namespace Jamkkaebi.Npc
             }
 
             // ---------- 시스템 메시지 기억(KV 캐시) 저장·복원 ----------
-            // LLMUnity 의 LLMAgent.Save / Load(이름) 으로 대화 기록과 llama.cpp 슬롯의 캐시를 파일로 남기고 되살린다 (파일은
-            // Application.persistentDataPath). 앱 버전이 바뀌면 내장 llama.cpp 도 바뀌었을 수 있어 이름에 앱 버전을 붙여 옛 기억을 쓰지 않는다.
-            // 저장 여부는 PlayerPrefs 표시로 알아, 없는 파일을 읽으려 하지 않는다.
-            // 기본은 꺼져 있다(항상 false 라서 백엔드는 그냥 시스템 메시지를 읽는다). LLMUnity 3.0.3 의 LLMAgent 에는 Save(이름)·Load(이름)이 없고(SaveHistory·LoadHistory 는 대화 기록만 저장한다)
-            // 컴파일이 깨지므로, 사용 중인 LLMUnity 가 llama.cpp 의 KV 상태를 저장하는 API 를 줄 때만 Scripting Define Symbols 에 JAMKKAEBI_KVSTATE 를 넣어 켜고 아래 두 메서드를 그 API 에 맞게 고친다.
+            // 모델의 기억 칸(llama.cpp 슬롯)은 하나라 마지막에 읽은 도깨비의 시스템 메시지만 남는다 — 도깨비가 A→B→A 로만 바뀌어도 A 를 처음부터 다시 읽는다
+            // (2026-11-24 기기 시험: 바뀔 때마다 15~20초). 슬롯을 늘리면 슬롯마다 문맥 2048토큰 ≈ 256MB 가 더 들어(토큰당 KV 약 128KB: 32층 × KV 헤드 8 × 128 × K·V × 2바이트)
+            // 앱이 이미 1.7~2.1GB 를 쓰는 폰에 부담이라, 시스템 메시지를 읽은 슬롯을 파일로 남겼다가 다음에 그 도깨비를 미리 읽을 때 되살린다 (메모리는 그대로, 파일은 프롬프트 토큰 수 × 128KB).
+            // LLMUnity 3.0.3 의 바깥 LLMAgent 에는 Save·Load 가 없지만(SaveHistory·LoadHistory 는 대화 기록만), 안쪽 LlamaLib 에이전트(agent.llmAgent)의
+            // SaveSlot(경로)·LoadSlot(경로) 가 그 에이전트의 슬롯으로 llama.cpp 의 슬롯 저장·복원을 부른다 (LlamaLib 은 경로를 그대로 쓰고, 실패하면 예외를 던진다).
+            // 파일은 persistentDataPath/npc_kv/ 에 둔다. 이름에 앱 버전을 붙여(내장 llama.cpp 가 바뀌었을 수 있다) 옛 기억은 쓰지 않고, 오래 안 쓴 파일부터 지워 MaxStateFiles 개만 둔다.
+            // 네이티브 호출은 끝날 때까지 막으므로 LLMUnity 의 ChatAsync 처럼 작업 스레드에서 부른다 (화면이 멈추지 않게)
 
-            private static string FileName(string key)
+            /// <summary>남겨 둘 기억 파일 수. 도깨비 다섯 + 프롬프트가 바뀐 직후의 옛 파일 몇 개. 넘으면 오래 안 쓴 것부터 지운다.</summary>
+            private const int MaxStateFiles = 8;
+
+            private static string StateFolder
             {
-                return key + "-" + new string(Application.version.Where(char.IsLetterOrDigit).ToArray());
+                get { return Path.Combine(Application.persistentDataPath, "npc_kv"); }
             }
 
-            private static string Marker(string name)
+            private static string StatePath(string key)
             {
-                return "jamkkaebi.npc.kv." + name;
+                return Path.Combine(StateFolder, key + "-" + new string(Application.version.Where(char.IsLetterOrDigit).ToArray()) + ".bin");
             }
 
             public async Task<bool> SaveStateAsync(string key)
             {
-#if !JAMKKAEBI_KVSTATE
-                await Task.CompletedTask;
-                return false;
-#else
+                UndreamAI.LlamaLib.LLMAgent inner = agent != null ? agent.llmAgent : null;
+                if (inner == null || string.IsNullOrEmpty(key))
+                {
+                    return false;
+                }
+                string path = StatePath(key);
+                string temp = path + ".tmp";
                 try
                 {
-                    string name = FileName(key);
-                    await agent.Save(name);
-                    PlayerPrefs.SetInt(Marker(name), 1);
+                    Directory.CreateDirectory(StateFolder);
+                    // 임시 파일에 쓴 뒤 옮긴다 — 쓰는 도중에 앱이 꺼지면 반쪽 파일이 남아 다음에 되살리다 실패한다
+                    string written = await Task.Run(() => inner.SaveSlot(temp));
+                    if (string.IsNullOrEmpty(written) || !File.Exists(temp) || new FileInfo(temp).Length == 0)
+                    {
+                        TryDelete(temp);
+                        return false;
+                    }
+                    Commit(temp, path);
+                    PruneStates(path);
                     return true;
                 }
                 catch (Exception)
                 {
+                    TryDelete(temp); // 옮기지 못했으면 예전 파일(path)은 그대로 남아 있다 — Commit 참고
                     return false;
                 }
-#endif
+            }
+
+            // 임시 파일을 기억 파일 자리로 옮긴다. 예전 파일은 새 파일이 자리를 잡을 때까지 지우지 않는다 —
+            // 예전에는 먼저 지우고 옮겨서, 옮기다 실패하면 멀쩡하던 기억 파일까지 잃고 다음 미리 읽기가 시스템 메시지를 처음부터 다시 읽었다 (CodeRabbit 리뷰).
+            // 같은 폴더 안의 File.Replace 는 한 번에 바꿔 넣는다(Windows ReplaceFile, 그 밖은 rename). 그것을 못 쓰는 대상이면 예전 파일을 .bak 으로 옮겨 두고 바꾸며,
+            // 실패하면 되돌린다. 처음 저장(예전 파일 없음)은 그대로 옮긴다
+            private static void Commit(string temp, string path)
+            {
+                if (!File.Exists(path))
+                {
+                    File.Move(temp, path);
+                    return;
+                }
+                try
+                {
+                    File.Replace(temp, path, null);
+                    return;
+                }
+                catch (PlatformNotSupportedException)
+                {
+                }
+                catch (NotSupportedException)
+                {
+                }
+                string backup = path + ".bak";
+                TryDelete(backup);
+                File.Move(path, backup);
+                try
+                {
+                    File.Move(temp, path);
+                }
+                catch (Exception)
+                {
+                    if (!File.Exists(path))
+                    {
+                        File.Move(backup, path);
+                    }
+                    throw;
+                }
+                TryDelete(backup);
+            }
+
+            // .bak 으로 옮겨 둔 뒤 바꾸기 전에 앱이 꺼졌으면 기억 파일이 .bak 에만 있다 — 되살린다
+            private static void RecoverBackup(string path)
+            {
+                string backup = path + ".bak";
+                try
+                {
+                    if (!File.Exists(path) && File.Exists(backup))
+                    {
+                        File.Move(backup, path);
+                    }
+                }
+                catch (Exception)
+                {
+                }
             }
 
             public async Task<bool> LoadStateAsync(string key)
             {
-#if !JAMKKAEBI_KVSTATE
-                await Task.CompletedTask;
-                return false;
-#else
-                string name = FileName(key);
-                if (PlayerPrefs.GetInt(Marker(name), 0) != 1)
+                UndreamAI.LlamaLib.LLMAgent inner = agent != null ? agent.llmAgent : null;
+                if (inner == null || string.IsNullOrEmpty(key))
                 {
                     return false;
                 }
+                string path = StatePath(key);
+                RecoverBackup(path);
+                if (!File.Exists(path))
+                {
+                    return false;
+                }
+                string restored;
                 try
                 {
-                    await agent.Load(name);
-                    return true;
+                    restored = await Task.Run(() => inner.LoadSlot(path));
                 }
                 catch (Exception)
                 {
-                    PlayerPrefs.DeleteKey(Marker(name)); // 깨졌거나 모델이 달라 못 읽는 파일은 다시 만들게 한다
+                    TryDelete(path); // 깨졌거나 모델이 달라 못 읽는 파일은 지워 다음 미리 읽기가 새로 만들게 한다
                     return false;
                 }
-#endif
+                if (string.IsNullOrEmpty(restored))
+                {
+                    TryDelete(path);
+                    return false;
+                }
+                // 오래 안 쓴 파일부터 지울 때 쓴 때로 본다. 되살리기는 이미 됐으니 여기서 실패해도(읽기 전용 저장소 등) 파일을 지우거나 실패로 돌려주지 않는다
+                try
+                {
+                    File.SetLastWriteTimeUtc(path, DateTime.UtcNow);
+                }
+                catch (Exception)
+                {
+                }
+                return true;
+            }
+
+            // 오래 안 쓴 기억 파일부터 지워 MaxStateFiles 개만 남긴다 (프롬프트·모델·앱 버전이 바뀌면 옛 파일은 다시 쓰이지 않는다). 방금 쓴 파일은 남긴다
+            private static void PruneStates(string keep)
+            {
+                try
+                {
+                    // 쓰는 도중에 앱이 꺼져 남은 임시 파일(파일 하나가 수십 MB)도 지운다. 모델 안의 일은 한 번에 하나라, 방금 쓴 것은 이미 옮겼고 지금 쓰는 것은 없다
+                    foreach (FileInfo stale in new DirectoryInfo(StateFolder).GetFiles("npc-kv-*.tmp"))
+                    {
+                        TryDelete(stale.FullName);
+                    }
+                    // 바꾸고 남은 .bak 은 지운다. 기억 파일이 없으면 .bak 이 유일한 것이라 다음 되살리기(RecoverBackup)를 위해 남긴다
+                    foreach (FileInfo backup in new DirectoryInfo(StateFolder).GetFiles("npc-kv-*.bin.bak"))
+                    {
+                        if (File.Exists(backup.FullName.Substring(0, backup.FullName.Length - ".bak".Length)))
+                        {
+                            TryDelete(backup.FullName);
+                        }
+                    }
+                    FileInfo[] files = new DirectoryInfo(StateFolder).GetFiles("npc-kv-*.bin");
+                    if (files.Length <= MaxStateFiles)
+                    {
+                        return;
+                    }
+                    foreach (FileInfo old in files.Where(f => f.FullName != Path.GetFullPath(keep))
+                                 .OrderBy(f => f.LastWriteTimeUtc).Take(files.Length - MaxStateFiles))
+                    {
+                        TryDelete(old.FullName);
+                    }
+                }
+                catch (Exception)
+                {
+                }
+            }
+
+            private static void TryDelete(string path)
+            {
+                try
+                {
+                    if (File.Exists(path))
+                    {
+                        File.Delete(path);
+                    }
+                }
+                catch (Exception)
+                {
+                }
             }
 
             public void CancelRequests()
@@ -226,11 +364,25 @@ namespace Jamkkaebi.Npc
                 }
             }
 
-            public void Destroy()
+            public async Task DestroyAsync()
             {
-                if (holder != null)
+                if (holder == null)
                 {
-                    Object.Destroy(holder); // LLM 의 OnDestroy 가 모델 서비스를 멈추고 정리한다
+                    return;
+                }
+                Object.Destroy(holder); // LLM 의 OnDestroy 가 모델 서비스를 멈추고 정리한다
+                // Object.Destroy 는 이 프레임 끝에 지운다. 그 전에 끝내면 다음 StartAsync 가 같은 프레임에 새 LLM 을 만들어
+                // 앞 모델이 메모리에 남은 채로 하나를 더 올리고, 앞 모델의 OnDestroy 가 새 모델을 올리는 동안 LLMUnity 의 잠금을 기다리며
+                // 메인 스레드를 멈춘다. 지워질 때까지(Unity 의 == null) 프레임을 넘기며 기다린다.
+                // 끝없이 기다리지는 않는다 — 안 지워지면 실패로 알려, 백엔드가 다시 올리지 않고 '지우지 못했다'고 알리게 한다
+                float giveUpAt = Time.realtimeSinceStartup + DestroyWaitSeconds;
+                while (holder != null)
+                {
+                    if (Time.realtimeSinceStartup > giveUpAt)
+                    {
+                        throw new InvalidOperationException("LLM 오브젝트가 " + DestroyWaitSeconds + "초 안에 지워지지 않았다");
+                    }
+                    await Task.Yield();
                 }
             }
         }

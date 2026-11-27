@@ -17,7 +17,8 @@ import java.util.List;
  * 한 판의 정산 결과.
  *
  * @param perfectStreak    이 도깨비의 연속 완벽 정화 수. 최초 정화면 {@code null}
- * @param revealed         이번 판에서 <b>새로</b> 도달한 공개 단계
+ * @param revealed         이번 판에서 <b>새로</b> 도달한 공개 단계. 최초 정화의 봉인 해제({@code FORM})·기억 회복({@code NAMED})
+ *                         성공에만 있고, 오염 관리 성공·실패·관리 플레이에는 없다
  * @param careCount        관리 플레이 성공 횟수. 완료 전이면 {@code null}
  * @param clarity          정산 뒤 지금 선명도. 완료 전이면 {@code null}
  * @param lastPurifiedAt   마지막으로 정화에 성공한 시각. 완료 전이면 {@code null}

@@ -4,6 +4,7 @@ rem Needs: the C# compiler bundled with Windows (.NET Framework 4.x) and Python 
 rem   PowerShell / cmd : .\verify.bat
 rem   Git Bash         : ./verify.bat
 rem Real model run (LM Studio server on): verify.bat --live [url] [model]
+rem Device test on PC (LM Studio, no checks): verify.bat --device [--repeat 4] [--gap 30] [--seed 0] [--fresh] ... (see DeviceRun.cs)
 setlocal
 cd /d "%~dp0"
 set PYTHONIOENCODING=utf-8
@@ -19,7 +20,7 @@ python dump_expected_prompts.py ..\..\npc-prompt-test bin\expected_prompts.json
 if errorlevel 1 exit /b 1
 
 echo [2/3] compile (C# 5)
-"%CSC%" -nologo -codepage:65001 -langversion:5 -r:System.Web.Extensions.dll -r:System.Net.Http.dll -out:bin\verify.exe Program.cs ..\Runtime\*.cs
+"%CSC%" -nologo -codepage:65001 -langversion:5 -r:System.Web.Extensions.dll -r:System.Net.Http.dll -out:bin\verify.exe Program.cs DeviceRun.cs ..\Runtime\*.cs
 if errorlevel 1 exit /b 1
 
 echo [3/3] verify

@@ -43,6 +43,17 @@ for scene in content["scenes"]:
     _, user_days, _, _ = run.build_prompts(args, "single", scene, persona, content, 1)
     expected["_askDays"][scene["id"]] = user_days
 
+# 재봉인에서 한 칸 올라 흐려짐이 된 정령의 안부(마지막 관리 2일 전): 아직 덜 나았다고 말하고 며칠 전 변형을 쓰지 않는다 (variation 0·1)
+# 날 수는 앞뒤 공백이 붙은 " 2 " 로 준다 — C# int.TryParse 는 읽고 str.isdigit() 는 못 읽어 갈렸다 (CodeRabbit 리뷰)
+expected["_askPartly"] = {}
+for scene in content["scenes"]:
+    if run.is_fixed(scene) or not run.needs_ask(scene) or run.fact_of(scene, "clarity") != "흐려짐":
+        continue
+    partly = json.loads(json.dumps(scene))
+    partly["facts"] = [f for f in partly["facts"] if f["key"] != "last_care_days_ago"] + [{"key": "last_care_days_ago", "value": " 2 "}]
+    persona = content["personas"][scene["relicId"]]
+    expected["_askPartly"][scene["id"]] = [run.build_prompts(args, "single", partly, persona, content, v)[1] for v in (0, 1)]
+
 prompt_count = len(expected)
 
 # 말투 다듬기(normalize_speech)를 C# NpcLineChecks.NormalizeSpeech 와 비교할 예문. 2026-11-11 시험에서 어미 검사에 걸린 대사들이다.
@@ -105,6 +116,12 @@ SPEECH_SAMPLES = [
     ("반말", "나는 좋아, 너는 안 좋아. 좋아, 정말 안 좋아."),
     ("반말", "몸이 가벼워。 마음도 가벼워! 고마워… 정말 고마워!"),
     ("반말", "참 고마워, 😀 고마워!"),
+    # 2026-11-26 기기 시험(ver8): 첫 낱말 '어서' 뒤에 목록에 없던 어미가 와 금칙어(어서왔)로 버렸다 — 맺는 어미는 "어서 와", 잇는 어미는 "어서 와,"
+    ("반말", "어서 왔니?"), ("반말", "어서 왔군, 하늘아!"), ("반말", "어서 왔다니, 반가워!"), ("반말", "어서 왔으니 반가워!"),
+    ("반말", "어서 왔잖아!"), ("반말", "어서 왔구먼!"), ("반말", "어서 왔다!"), ("반말", "어서 와라, 하늘아!"), ("반말", "어서 왔는데 반가워."),
+    ("반말", "어서 왔지만 반가워."), ("반말", "어서 왔다니!"),
+    # 2026-11-26 리뷰 점검: '어서'는 따로 선 낱말만("싶어서"는 두고), 줄바꿈은 삼키지 않는다
+    ("반말", "보고 싶어서 왔니?"), ("반말", "어서\n왔어!"), ("반말", "어서 왔다니\n반가워!"),
 ]
 expected["_speechSamples"] = [
     {"label": label, "line": line, "want": run.normalize_speech(line, label)} for label, line in SPEECH_SAMPLES
@@ -126,6 +143,9 @@ NO_RECORD_SAMPLES = [
     "왔구나, 오랜만이야!", "오랜만에 왔구나, 반가워!", "또 왔구나! 오랜만이야.", "다시 왔네, 기다렸어.", "덕분에 관리해 줘서 고마워.", "덕분에 닦아 주셔서 개운해요.",
     "왔구나, 오랜만에 보자! 반갑다.",  # 2026-11-18 22:16 시험 S22 #3
     "오랜만에 보자고 했지.",  # CodeRabbit 리뷰: '보자'는 온전한 꼴만 ("반가워고 했지"가 되지 않게)
+    # 2026-11-24: 문장 안의 다른 꼴의 '오랜만'도 고친다 (기기 시험에서 인사 실패의 첫째 원인)
+    "드디어 오랜만에 하늘이 나를 찾았네.", "오랜만이라 반가워!", "오랜만인데 잘 지냈어?", "와, 정말 오랜만!", "왔구나! 오랜만이네요.",
+    "오랜만이구나, 기다렸어.", "오랜만에 반가워!", "오랜만에 봤네!", "오랜만이라고 해야겠다.", "오랜만에 보러 왔구나.", "오랫만에 왔네!", "오랜만에야 왔구나.", "오랜만이라 그런지 반가워!",
 ]
 for line in NO_RECORD_SAMPLES:
     expected["_speechSamples"].append({"label": "반말", "line": line, "noRecord": True, "want": run.normalize_speech(line, "반말", None, None, None, None, "발굴자", True)})
@@ -191,6 +211,13 @@ FN_SAMPLES = [
     ("bareOwn", "내 자개는 공들였어. 무늬도 정성껏 새겼지.", ""), ("bareOwn", "자개 반짝이는 거 좋아했지?", ""),
     ("recallFragment", "기억난다, 내 자개 공들여 만들었다고 자랑했던 일", ""), ("recallFragment", "기억나, 그때 자개 자랑했던 일!", ""), ("recallFragment", "그때 일 기억나?", ""),
     ("probe", "안녕, 오늘은 좀 일찍 왔구나.", "greet"), ("probe", "어서 와, 반가워!", "greet"), ("probe", "무슨 일이야?", "thank_calm"), ("probe", "뭘 찾으러 왔어?", "wander_greet"),
+    ("probe", "날 찾으러 왔구나!", "greet"), ("probe", "와! 나를 찾으러 왔네.", "greet"), ("probe", "보물 찾으러 왔어?", "greet"), ("probe", "나를  찾으러 왔구나!", "greet"), ("probe", "뭘   찾으러 왔어?", "greet"),
+    # CodeRabbit 리뷰: 날·나를이 따로 선 낱말일 때만 반가움 — "전날"·"하나를"은 나가 아니다
+    ("probe", "전날 찾으러 왔구나.", "greet"), ("probe", "하나를 찾으러 왔어?", "greet"), ("probe", "어, 날 찾으러 왔구나!", "greet"), ("probe", "그날  찾으러 왔어?", "greet"),
+    # 2026-11-26: 인사말뿐인 인사에 부르는 말 붙이기 (arg 는 부를 이름)
+    ("callPlain", "왔구나!", "하늘"), ("callPlain", "어서 와.", "발굴자"), ("callPlain", "안녕~", "미소"), ("callPlain", "와", "도윤"),
+    ("callPlain", "하늘아!", "하늘"), ("callPlain", "!!", "하늘"), ("callPlain", "안녕,!", "하늘"), ("callPlain", "왔구나!", "가나다라마바사아자차카타파하"),
+    ("callPlain", "왔구나。", "하늘"), ("callPlain", "와😀😀😀😀😀😀😀😀😀😀!", "하늘"),   # '。'도 끝 부호, 이모지는 코드 포인트로 센다
 ]
 
 
@@ -223,6 +250,8 @@ def run_fn(kind, line, arg):
         return "true" if run.narration_kept(line, arg) else "false"
     if kind == "pronouns":
         return run.drop_player_reference(run.player_pronouns_to_name(line, arg), arg)
+    if kind == "callPlain":
+        return run.call_plain(line, arg, 15 + run.LENGTH_TOLERANCE) or ""
     raise ValueError(kind)
 
 

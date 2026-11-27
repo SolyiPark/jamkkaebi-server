@@ -25,6 +25,12 @@ namespace Jamkkaebi.Npc
         public string User { get; set; }
 
         /// <summary>
+        /// 뒤에서 만드는 생성(ReactionRequest.Background)의 프롬프트인지. 백엔드는 플레이어의 요청·미리 읽기를 먼저 모델에 넣고,
+        /// 이 생성은 프롬프트를 짧게 나눠 읽어 그 사이에 플레이어의 일이 오면 바로 비켜 준다 (LlmUnityModelBackend).
+        /// </summary>
+        public bool Background { get; set; }
+
+        /// <summary>
         /// JSON 스키마 형식 제약 (LM Studio · llama.cpp 서버의 response_format). 행동·대상은 후보 안의 값만 허용한다.
         /// </summary>
         public string JsonSchema { get; set; }
@@ -35,6 +41,12 @@ namespace Jamkkaebi.Npc
         /// 시험에서 제약 없이도 형식이 지켜졌다.
         /// </summary>
         public string Grammar { get; set; }
+
+        /// <summary>
+        /// 이 프롬프트의 출력 토큰 한도. 0 이면 백엔드의 기본값(LlmUnityOptions.MaxTokens 40)을 쓴다. 문장 문법(GBNF)으로 두 문장까지 쓰는 대사(관리 감사·지난 대화)만
+        /// PromptAssembler.TwoSentenceMaxTokens 로 올린다 — LLMUnity 백엔드가 GBNF 를 쓸 때만 따른다 (2026-11-26).
+        /// </summary>
+        public int MaxTokens { get; set; }
 
         /// <summary>후보 행동 ID (처음 나온 순서).</summary>
         public List<string> ActionIds { get; set; }
@@ -74,9 +86,10 @@ namespace Jamkkaebi.Npc
         public bool DescribeFormat { get; set; }
 
         /// <summary>
-        /// GBNF 의 대사 규칙을 "문장 단위"로 둘지 (기본 true). 문장마다 30자 안에 끝나는 부호(. ! ? ~ …)가 반드시 오고 문장은 둘까지다 — 대사가 문장 중간에서
-        /// 끊기지 않고(토큰 한도로 자르는 대신 문법이 끝맺게 한다), 길게 늘어놓지 않아 쓰는 토큰도 준다. false 면 예전처럼 따옴표 안을 길이 제한 없이 쓴다
-        /// (llama.cpp 가 이 문법을 못 읽는 기기에서 되돌리는 용도).
+        /// GBNF 의 대사 규칙을 "문장 단위"로 둘지 (기본 true). 문장마다 30자 안에 끝나는 부호(. ! ? ~ …)가 반드시 오고, 지난 대화 꺼내기·관리 감사는 문장이 둘까지,
+        /// 그 밖의 대사는 한 문장(끝 부호 전에 부호·띄어쓰기를 뺀 글자 OneSentenceMinCore 개 이상)이다 — 대사가 문장 중간에서 끊기지 않고(토큰 한도로 자르는 대신
+        /// 문법이 끝맺게 한다), 출력 검사가 버릴 둘째 문장을 만들지 않아 쓰는 토큰도 준다 (2026-11-25). false 면 예전처럼 따옴표 안을 길이 제한 없이 쓴다
+        /// (llama.cpp 가 이 문법을 못 읽는 기기에서 되돌리는 용도). LM Studio(PC 시험)는 JSON 스키마를 써서 이 문법이 닿지 않는다.
         /// </summary>
         public bool SentenceGrammar { get; set; }
 
@@ -160,7 +173,9 @@ namespace Jamkkaebi.Npc
         // 흐려진 안부 중 "마지막 관리가 며칠 전이었는지"를 말하는 요청(AskVariant == "days")의 첫 낱말
         private static readonly string[] StartersFadedDays = { "마지막 관리가", "마지막", "벌써", "어느새" }; // "마지막으로"는 "마지막으로 닦아주면 감사할 것 같아"(뜻이 뒤섞임)로 이어져 뺐다 (2026-11-17 21:09 시험 S03 #2)
         private static readonly string[] StartersFaded = { "살살", "괜찮으면", "시간 되면", "조심조심", "이왕이면" }; // 2026-11-17 21:45 시험 뒤: 흐려진 안부는 '이미 한 말'(상태·며칠 전) 뒤에 이어질 부탁의 말머리 // // 2026-11-17 18:21 시험: "점점"은 "점점 새로워지고 싶어", "혹시"는 "혹시, 오랜만에 깨워줘"처럼 뜬금없는 말로 이어져 "어느새"·"자꾸"로 바꿨다 // "조금"은 "조금 전 관리를 못 받아서"(금칙어)로 이어져 뺐다 (2026-11-17 시험 S03 #3)
-        private static readonly string[] StartersClear = { "덕분에", "정말", "훨씬", "몸이", "개운하게", "깨끗하게" }; // 2026-11-17 21:27 시험: "이제"는 "이제 관리해 줘서 고마워"(때가 뒤섞임)로 이어져 "정말"로 바꿨다 // 2026-11-17 18:21 시험: "깨끗해졌어"·"개운해"는 그것만 대사로 내 "~하게"로 이어 쓰게 했다 // "깨끗해져서"는 "깨끗해져서 닦아줘서 고마워"처럼 '~서'를 거듭 이었다 (2026-11-17 시험 S04 #1)
+        // 2026-11-26 기기 시험(ver8) 뒤: 요청 관리자가 차례로 돌리지 않고 무작위로 고른다(PicksStarterAtRandom). 같은 날 셋(깨끗하게·훨씬·몸이)으로 줄였다가 여섯으로 되돌렸다. 문법(GBNF)이 대사를 그 낱말로 시작하게 한다 —
+        // 프롬프트에 적기만 하면 모델이 따르지 않거나("나는 훨씬 더 조심스럽게 다가가야 할 것 같아…") 억지로 끼워 넣었다. 아래는 예전 기록
+        private static readonly string[] StartersClear = { "깨끗하게", "훨씬", "몸이", "덕분에", "정말", "개운하게" }; // 2026-11-17 21:27 시험: "이제"는 "이제 관리해 줘서 고마워"(때가 뒤섞임)로 이어져 "정말"로 바꿨다 // 2026-11-17 18:21 시험: "깨끗해졌어"·"개운해"는 그것만 대사로 내 "~하게"로 이어 쓰게 했다 // "깨끗해져서"는 "깨끗해져서 닦아줘서 고마워"처럼 '~서'를 거듭 이었다 (2026-11-17 시험 S04 #1)
         private static readonly string[] StartersVisit = { "안녕", "반가워", "와", "환영해", "마음껏 둘러봐", "천천히 둘러봐" }; // "편하게"는 "편하게 찾아와 줘서 고마워"처럼 이어졌다 (2026-11-17 19:43 시험 S05 #2) // "구경하러"는 "구경하러 온 친구를 반가이 맞아."처럼 상대를 남 얘기하듯 옮겼다 (2026-11-17 18:21 시험 S05 #4)
         // 단골에게는 "오랜만"을 부르는 말을 피한다 (3일 전에도 온 친구에게 "오랜만에 와 줘서"라고 해서 모두 거르고 기본 대사로 넘어갔다)
         private static readonly string[] StartersRecall = { "자주", "이번에도", "또", "다시", "반가워", "어서" }; // 2026-11-17 22:27 시험: "오늘도"는 "오늘도 정말 오래 만났네"(없는 일)·"오늘도 또 와줘서"(겹침)로 이어져 "어서"로 바꿨다
@@ -179,6 +194,30 @@ namespace Jamkkaebi.Npc
                     : request.Candidates != null && request.Candidates.Any(c => c != null && c.ActionId == NpcActions.WanderRecall) ? StartersRecall
                     : StartersVisit;
             return list[(((request.Variation + request.RelicId) % list.Length) + list.Length) % list.Length];
+        }
+
+        /// <summary>
+        /// 첫 낱말을 무작위로 고르는 요청인지 (관리 감사·선명한 안부 — 깨끗하게·훨씬·몸이·덕분에·정말·개운하게). 요청 관리자는 이 요청의 첫 낱말을 차례로 돌리지 않고, 최근 대사의 첫머리·바로 앞에 준 첫 낱말과
+        /// 겹치지 않는 것 가운데 무작위로 고른다. 문법(GBNF)은 대사가 그 낱말로 시작하게 한다 (2026-11-26).
+        /// </summary>
+        public static bool PicksStarterAtRandom(ReactionRequest request)
+        {
+            return request != null && StarterKey(request) == "clear";
+        }
+
+        /// <summary>곁들일 거리 번호를 variation 으로 두었을 때의 첫 낱말 (request 는 그대로 둔다). 요청 관리자가 최근에 쓴 첫 낱말을 피해 번호를 고를 때 쓴다.</summary>
+        public static string StarterAt(ReactionRequest request, int variation)
+        {
+            int saved = request.Variation;
+            try
+            {
+                request.Variation = variation;
+                return Starter(request);
+            }
+            finally
+            {
+                request.Variation = saved;
+            }
         }
 
         // 작은 모델은 예시 대사와 사용자 메시지의 페르소나 칸·상황 문장을 그대로 옮겨, 같은 상황마다 같은 대사를 냈다
@@ -319,8 +358,10 @@ namespace Jamkkaebi.Npc
             {
                 System = SystemFor(persona),
                 User = user,
+                Background = request.Background,
                 JsonSchema = Schema(actionIds, targetIds, shape),
-                Grammar = Grammar(request.Candidates, shape, options.SentenceGrammar),
+                Grammar = Grammar(request.Candidates, shape, options.SentenceGrammar, PicksStarterAtRandom(request) ? starter : null),
+                MaxTokens = options.SentenceGrammar && AllowsTwoSentences(request.Candidates) ? TwoSentenceMaxTokens : 0,
                 ActionIds = actionIds,
                 TargetIds = targetIds
             };
@@ -335,12 +376,45 @@ namespace Jamkkaebi.Npc
             return persona != null ? SystemFor(persona) : null;
         }
 
+        /// <summary>
+        /// 시스템 메시지의 앞부분: 모든 도깨비에 똑같은 소개와 규칙 (SharedSystemHead). 도깨비마다 다른 정체·성격·말투·예시는 그 뒤에 둔다.
+        /// llama.cpp 는 앞 프롬프트와 글자 하나까지 같은 앞부분을 다시 읽지 않으므로, 다른 도깨비로 넘어가도 이 부분은 다시 읽지 않고
+        /// 도깨비마다 다른 뒷부분만 읽는다 (2026-11-24 기기 시험: 도깨비가 바뀔 때마다 시스템 메시지를 처음부터 읽는 데 15~20초, 반복마다 아홉 번 안팎).
+        /// 예전에는 도깨비마다 다른 출신 문장이 첫 줄에 있어 같은 앞부분이 '너는 모바일 게임 …의 도깨비다.' 뿐이었다. run.py 의 shared_system_head 와 같다
+        /// </summary>
+        public string SharedSystemHead
+        {
+            get
+            {
+                var lines = new List<string>
+                {
+                    "너는 모바일 게임 '잠깨비'의 도깨비다.",
+                    "",
+                    "규칙:",
+                    RuleBond,
+                    RuleFacts,
+                    RuleRole,
+                    RuleLine,
+                    RuleSpeech,
+                    RuleOrder,
+                    RuleVary
+                };
+                if (options.IncludeExamples)
+                {
+                    lines.Add(RuleExamples);
+                }
+                return string.Join("\n", lines.ToArray());
+            }
+        }
+
         private string SystemFor(Persona p)
         {
             var lines = new List<string>
             {
+                SharedSystemHead,
+                "",
                 // 이름은 싣지 않는다: 이름을 읽은 모델이 "훨씬 선명해진 향산이,"·"향산이가 인사해"처럼 자기 이름을 말했다 (자기 이름은 검사가 지운다). 성격·말씨로 도깨비가 갈린다
-                "너는 모바일 게임 '잠깨비'의 도깨비다. " + p.origin + "에 깃든 정령이다.",
+                "너는 " + p.origin + "에 깃든 정령이다.",
                 "성격: " + p.traits
             };
             // '감정 표현' 줄은 싣지 않는다 (2026-11-17 21:45 시험): "기쁘면 말 앞에 '어흠'을 붙인다"를 읽은 모델이 "다시 와 줘서 어흠, 고마워!"·"오늘 또 보니 어흠."처럼 말 가운데에 끼웠고,
@@ -350,19 +424,6 @@ namespace Jamkkaebi.Npc
             {
                 lines.Add("대사 예시:");
                 lines.AddRange(p.examples.Take(PromptExamples).Select(e => "- " + e));
-            }
-            lines.Add("");
-            lines.Add("규칙:");
-            lines.Add(RuleBond);
-            lines.Add(RuleFacts);
-            lines.Add(RuleRole);
-            lines.Add(RuleLine);
-            lines.Add(RuleSpeech);
-            lines.Add(RuleOrder);
-            lines.Add(RuleVary);
-            if (options.IncludeExamples)
-            {
-                lines.Add(RuleExamples);
             }
             return string.Join("\n", lines.ToArray());
         }
@@ -378,7 +439,7 @@ namespace Jamkkaebi.Npc
 
         private static IEnumerable<string> PartnerLines(Persona p, ReactionRequest request)
         {
-            // 호칭은 친밀도 3단계(30일에 12번 이상 방문)부터 닉네임, 아니면 '발굴자'. 꼭 부르지 않아도 된다 (모든 대사에 넣으면 부담스럽다)
+            // 호칭은 친밀도 3단계(주인은 관리 12번, 손님은 30일에 12번 이상 방문)부터 닉네임, 아니면 '발굴자'. 꼭 부르지 않아도 된다 (모든 대사에 넣으면 부담스럽다)
             // 닉네임·'발굴자'를 대사에 꼭 넣을 필요는 없지만 가끔은 나와야 정이 든다: 세 번에 한 번(Variation 0·3·6…)은 "한 번 불러 준다"고 적고,
             // 나머지는 호칭만 알려 준다 (적어 두면 모델이 부르기도 한다). "도윤님"처럼 '님'을 붙이면 출력 직전에 뗀다(NpcLineChecks.NormalizeSpeech)
             string address = "호칭: " + request.AddressName + (request.Variation % 3 == 0 ? "(한 번 불러 준다)" : "");
@@ -505,9 +566,29 @@ namespace Jamkkaebi.Npc
                 string n = request.FindFact(NpcFactKeys.LastCareDaysAgo);
                 return pick == 0 ? "마지막 관리가 " + n + "일 전이었어." : "관리받은 지 " + n + "일이 지났어.";
             }
+            if (PartlyRestoredAsk(request))
+            {
+                return pick == 0 ? "아직 몸이 좀 흐려." : "아직 다 맑아지지 않았어.";
+            }
             string clarity = request.FindFact(NpcFactKeys.Clarity);
             bool resealed = clarity == "재봉인" || clarity == "RESEALED";
             return resealed ? (pick == 0 ? "몸이 흐려지다 못해 봉인됐어." : "다시 봉인될 만큼 흐려졌어.") : (pick == 0 ? "몸이 흐려졌어." : "몸이 많이 흐려졌어.");
+        }
+
+        /// <summary>
+        /// 재봉인에서 한 칸 올라 흐려짐이 된 정령의 안부인지 (사실 칸이 흐려짐이고 마지막 관리가 7일 안). NpcContextBuilder.PartlyRestored 와 같다.
+        /// 방금 관리받았으므로 "몸이 흐려졌어"(나빠졌다)·"마지막 관리가 0일 전이었어"가 아니라 아직 덜 나았다고 말한다. run.py 의 partly_restored_ask 와 같다.
+        /// </summary>
+        public static bool PartlyRestoredAsk(ReactionRequest request)
+        {
+            if (!NpcLineChecks.NeedsAsk(request))
+            {
+                return false;
+            }
+            string clarity = request.FindFact(NpcFactKeys.Clarity);
+            int days;
+            return (clarity == "흐려짐" || clarity == "FADED")
+                    && int.TryParse(request.FindFact(NpcFactKeys.LastCareDaysAgo), out days) && days >= 0 && days < NpcContextBuilder.LongGapDays;
         }
 
         /// <summary>이 요청이 쓸 수 있는 '이미 한 말'(코드가 정한 앞 문장) 전부. 최근 대사에서 앞 문장을 떼어 부탁 부분끼리 견줄 때 쓴다. 흐려진 안부가 아니면 빈 목록.</summary>
@@ -528,7 +609,96 @@ namespace Jamkkaebi.Npc
             list.Add("몸이 많이 흐려졌어.");
             list.Add("몸이 흐려지다 못해 봉인됐어.");
             list.Add("다시 봉인될 만큼 흐려졌어.");
+            list.Add("아직 몸이 좀 흐려.");
+            list.Add("아직 다 맑아지지 않았어.");
             return list;
+        }
+
+        // 흐려진 안부의 '이미 한 말' 꼴 전부 — 날 수는 어느 값이든(다른 날 띄운 최근 대사), 칸('{날수}')이어도 맞는다. LinePrefix·AskPrefixes 와 같은 문장이다
+        private static readonly Regex AnyAskPrefix = new Regex(
+                "^(?:마지막 관리가 (?:[0-9]+|\\{날수\\})일 전이었어\\.|관리받은 지 (?:[0-9]+|\\{날수\\})일이 지났어\\.|몸이 흐려졌어\\.|몸이 많이 흐려졌어\\.|몸이 흐려지다 못해 봉인됐어\\.|다시 봉인될 만큼 흐려졌어\\."
+                + "|아직 몸이 좀 흐려\\.|아직 다 맑아지지 않았어\\.)\\s*",
+                RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 대사 앞의 '이미 한 말'(흐려진 안부의 상태·며칠 전 문장)을 날 수와 상관없이 뗀다. 없으면 그대로. 요청 관리자가 첫 낱말을 고를 때
+        /// 최근 대사의 부탁 말머리("몸이 흐려졌어. 살살 닦아 줄래?"의 '살살')를 보려고 쓴다.
+        /// </summary>
+        public static string StripAnyAskPrefix(string line)
+        {
+            return string.IsNullOrEmpty(line) ? line : AnyAskPrefix.Replace(line, "", 1);
+        }
+
+        private static readonly Regex AskDays = new Regex("(?:[0-9]+|\\{날수\\})일", RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 흐려진 안부 대사의 '이미 한 말'(코드가 붙인 앞 문장)의 꼴과 뒤의 부탁 부분. 날 수는 '{날수}일'로 바꿔 꼴을 견준다 (9일 전·12일 전은 같은 꼴).
+        /// 앞 문장이 없으면 null 이고 rest 는 대사 그대로.
+        /// </summary>
+        public static string AskPrefixShape(string line, out string rest)
+        {
+            rest = line;
+            if (string.IsNullOrEmpty(line))
+            {
+                return null;
+            }
+            Match match = AnyAskPrefix.Match(line);
+            if (!match.Success)
+            {
+                return null;
+            }
+            rest = line.Substring(match.Length);
+            return AskDays.Replace(match.Value.Trim(), "{날수}일");
+        }
+
+        /// <summary>
+        /// 두 대사가 같은 대사인지 (NpcLineChecks.Similar 의 이유 글, 아니면 null). 흐려진 안부 대사는 <b>앞 문장까지 포함한 전체 대사</b>로 본다:
+        /// 앞 문장의 꼴이 같으면 부탁 부분끼리 견주고(앞 문장은 코드가 쓴 같은 글이라, 전체로 견주면 앞부분만 같아도 '시작이 같음'으로 걸린다),
+        /// 꼴이 다르거나 한쪽에만 있으면 전체 대사끼리 견준다 — "몸이 흐려졌어. 살살 닦아 줄래?"와 "마지막 관리가 9일 전이었어. 살살 닦아 줄래?"는 다른 대사다.
+        /// <para>2026-11-24 기기 시험: 부탁 부분만 견주자 첫 낱말 다섯 × '닦아/깨워 줄래' 정도라 최근 대사 10개에 금방 다 걸려, 재봉인 안부(S12)가 다섯 판 모두
+        /// 반복 2~4에서 '반복'으로 실패했다. 그렇다고 모델을 건너뛰고 기본 대사로 가면 그 상황의 기본 대사가 둘뿐이라 같은 대사가 더 잦아진다.
+        /// 흐려진 안부가 아닌 대사는 Similar 와 같다.</para>
+        /// </summary>
+        public static string SimilarLine(string a, string b)
+        {
+            string restA;
+            string restB;
+            string shapeA = AskPrefixShape(a, out restA);
+            string shapeB = AskPrefixShape(b, out restB);
+            return shapeA != null && shapeA == shapeB ? NpcLineChecks.Similar(restA, restB) : NpcLineChecks.Similar(a, b);
+        }
+
+        /// <summary>최근 대사 중 같은 대사(SimilarLine)가 있으면 (그 대사, 이유), 없으면 null. NpcLineChecks.FindSimilar 에 흐려진 안부의 앞 문장 처리를 더한 것.</summary>
+        public static KeyValuePair<string, string>? FindRepeat(string line, IEnumerable<string> recent)
+        {
+            if (recent == null)
+            {
+                return null;
+            }
+            foreach (string other in recent)
+            {
+                string why = SimilarLine(line, other);
+                if (why != null)
+                {
+                    return new KeyValuePair<string, string>(other, why);
+                }
+            }
+            return null;
+        }
+
+        /// <summary>곁들일 거리 번호를 variation 으로 두었을 때의 '이미 한 말' (request 는 그대로 둔다). 흐려진 안부가 아니면 null.</summary>
+        public static string LinePrefixAt(ReactionRequest request, int variation)
+        {
+            int saved = request.Variation;
+            try
+            {
+                request.Variation = variation;
+                return LinePrefix(request);
+            }
+            finally
+            {
+                request.Variation = saved;
+            }
         }
 
         /// <summary>대사 앞의 '이미 한 말'을 뗀다. 없으면 그대로.</summary>
@@ -555,11 +725,72 @@ namespace Jamkkaebi.Npc
                 return null;
             }
             string clarity = request.FindFact(NpcFactKeys.Clarity);
-            return "이어서 " + (clarity == "재봉인" || clarity == "RESEALED" ? "깨워" : "닦아") + " 달라고 부탁하는 말을 한다";
+            return "이어서 " + (clarity == "재봉인" || clarity == "RESEALED" ? "깨워" : PartlyRestoredAsk(request) ? "마저 닦아" : "닦아") + " 달라고 부탁하는 말을 한다";
+        }
+
+        /// <summary>
+        /// 최근 관리를 떠올리는 안부(선명하고 마지막 관리가 RecentCareDays 일 안, S04)의 '할 일' 줄. 그 밖의 요청은 null (행동의 뜻을 쓴다). run.py 의 recent_care_task 와 같다.
+        /// <para>2026-11-26 기기 시험(ver8): 행동의 뜻 "상황에 적힌 내 이야기를 한 문장으로 말한다"만 주자 무엇을 말할지 몰라 "나는 훨씬 더 조심스럽게 다가가야 할 것 같아…"처럼
+        /// 목적 없는 말을 했고, 안부 장면 가운데 실패가 가장 많았다(16번 중 5번 기본 대사). 말할 거리 둘(닦아 준 일 덕분에 지금 내 몸이 선명함 · 그래서 고마움)을 정해 준다.
+        /// 며칠 전은 상황 문장에 있어 여기서 또 말하게 하지 않는다 — 16자에 날·상태·고마움을 다 넣으려다 길어진다</para>
+        /// </summary>
+        public static string RecentCareTask(ReactionRequest request)
+        {
+            if (request.Candidates == null || request.Candidates.Count != 1 || request.Candidates[0] == null
+                    || request.Candidates[0].ActionId != NpcActions.AnswerStatus || NpcLineChecks.NeedsAsk(request))
+            {
+                return null;
+            }
+            // '내 몸이 선명하다'고 말하게 하므로 선명하다고 적힌 요청만 (선명도를 모르면 지어내지 않게 행동의 뜻을 쓴다)
+            string clarity = request.FindFact(NpcFactKeys.Clarity);
+            if (clarity != "선명" && clarity != "CLEAR")
+            {
+                return null;
+            }
+            int days;
+            if (!int.TryParse(request.FindFact(NpcFactKeys.LastCareDaysAgo), out days) || days < 0 || days > RuleBasedReactionGenerator.RecentCareDays)
+            {
+                return null;
+            }
+            return "닦아 준 덕분에 지금 내 몸이 선명하다고 말하며 고마워하는 한 문장을 말한다";
         }
 
         // 모델이 부탁을 빼먹거나 사실을 또 말하면 코드가 부탁 문장을 채운다 (2026-11-17 22:07 시험). run.py 의 ASK_FALLBACKS·ask_fallback 과 같다
         private static readonly string[] AskFallbacks = { "살살 {v} 줄래?", "시간 되면 {v} 줄래?", "조심조심 {v} 줘.", "괜찮으면 {v} 줄래?", "이왕이면 {v} 줘." };
+
+        /// <summary>
+        /// 코드의 부탁 문장(AskFallback 의 꼴들) 중, 앞 문장(linePrefix)을 붙인 전체 대사가 최근 대사와 겹치지 않고 maxLength 안에 드는 첫 것 (요청 번호에서부터 돌린다).
+        /// 다 겹치거나 길면 null. 출력 검사가 흐려진 안부의 반복을 기본 대사로 넘기지 않고 이것으로 바꾼다 — 바꾼 대사도 출력 검사의 길이 제한을 지키게 maxLength 를 넘긴다.
+        /// run.py 의 ask_fallback_avoiding 과 같다.
+        /// </summary>
+        public static string AskFallbackAvoiding(ReactionRequest request, string linePrefix, IEnumerable<string> recent, int maxLength)
+        {
+            List<string> candidates = AskFallbackCandidates(request, linePrefix, recent, maxLength);
+            return candidates.Count > 0 ? candidates[0] : null;
+        }
+
+        /// <summary>
+        /// AskFallbackAvoiding 이 고를 수 있는 부탁 문장 전부 (고르는 차례대로). 출력 검사는 이것을 차례로 모든 검사에 넣어 보고 통과한 첫 것을 쓴다.
+        /// run.py 의 ask_fallback_candidates 와 같다.
+        /// </summary>
+        public static List<string> AskFallbackCandidates(ReactionRequest request, string linePrefix, IEnumerable<string> recent, int maxLength)
+        {
+            var candidates = new List<string>();
+            string clarity = request.FindFact(NpcFactKeys.Clarity);
+            string verb = clarity == "재봉인" || clarity == "RESEALED" ? "깨워" : "닦아";
+            int n = AskFallbacks.Length;
+            int start = (((request.Variation + request.RelicId) % n) + n) % n;
+            for (int k = 0; k < n; k++)
+            {
+                string ask = AskFallbacks[(start + k) % n].Replace("{v}", verb);
+                string full = linePrefix + " " + ask;
+                if (full.Length <= maxLength && !FindRepeat(full, recent).HasValue)
+                {
+                    candidates.Add(ask);
+                }
+            }
+            return candidates;
+        }
 
         public static string AskFallback(ReactionRequest request)
         {
@@ -594,7 +825,8 @@ namespace Jamkkaebi.Npc
             {
                 return null;
             }
-            return ((request.Variation % 2) + 2) % 2 == 1 && request.FindFact(NpcFactKeys.LastCareDaysAgo) != null ? "days" : "state";
+            // 한 칸 올라 흐려짐이 된 정령은 며칠 전 문장을 쓰지 않는다 — "마지막 관리가 0일 전이었어"·"관리받은 지 2일이 지났어"는 방치된 것처럼 들린다
+            return ((request.Variation % 2) + 2) % 2 == 1 && request.FindFact(NpcFactKeys.LastCareDaysAgo) != null && !PartlyRestoredAsk(request) ? "days" : "state";
         }
 
         private IEnumerable<string> SituationLines(ReactionRequest request)
@@ -644,7 +876,7 @@ namespace Jamkkaebi.Npc
             if (shape == 0)
             {
                 // 행동이 하나뿐이면 고를 것이 없다 — 후보 목록 대신 할 일 한 줄 (행동 ID 도 대상 줄도 싣지 않는다)
-                return "할 일: " + (AskTask(request) ?? Meaning(request.Candidates[0].ActionId));
+                return "할 일: " + (AskTask(request) ?? RecentCareTask(request) ?? Meaning(request.Candidates[0].ActionId));
             }
             string head = shape == 2 ? (options.DescribeFormat ? CandidatesHeadFree : CandidatesHead) : (options.DescribeFormat ? CandidatesHeadAction : CandidatesHead);
             var lines = new List<string> { head };
@@ -780,20 +1012,45 @@ namespace Jamkkaebi.Npc
         /// <summary>문장 하나의 최대 글자 수 (끝 부호 앞). 이를 넘기 전에 문법이 끝 부호를 내게 한다. 프롬프트의 "20자 이내"보다 넉넉하다.</summary>
         public const int SentenceMaxChars = 30;
 
-        // 문장 규칙: 글자(끝 부호 아닌 것)를 1~30개 쓰고 끝 부호(. ! ? ~ …)를 1~3개 쓴다. GBNF 의 반복 범위({m,n})를 못 읽는 런타임에서도 돌게
-        // 선택 항목을 중첩해 펼친다: b (b (b …)?)? . 맨 앞의 '…'는 허용한다 (밤바다 "…고마워.")
-        private static string SentenceChain()
+        /// <summary>
+        /// 한 문장만 쓰는 대사(지난 대화 꺼내기·관리 감사 말고)가 끝 부호 전에 써야 하는 글자 수 (부호·띄어쓰기를 뺀 것, NpcLineChecks.Core).
+        /// 출력 검사의 한 문장 줄이기(NpcLineChecks.KeepOneSentence)가 첫 문장이 이보다 짧으면 둘째 문장과 함께 남기는 기준과 같다.
+        /// </summary>
+        public const int OneSentenceMinCore = 5;
+
+        /// <summary>
+        /// 두 문장까지 쓰는 대사(관리 감사·지난 대화)의 출력 토큰 한도 (NpcPrompt.MaxTokens). 문장 문법이 허용하는 가장 긴 대사(문장 둘 × SentenceMaxChars 30자 + 끝 부호)와
+        /// JSON 틀을 글자마다 한 토큰으로 쳐도 넘지 않는 수다.
+        /// <para>2026-11-26 기기 시험(ver8) S08: 기본 한도 40 에서 둘째 문장이 끊겨("…정말~ 고마") 앞 문장 "…정말~"만 남았다. 문법이 문장 끝에서 따옴표를 닫아 생성을 스스로 끝내므로,
+        /// 한도를 올려도 40 안에 끝나는 대사는 그대로이고 <b>40 에서 잘렸을 대사만</b> 끝까지 쓴다 — 잘린 뒤 다시 만드는 것(생성 한 번 더, 폰에서 10초 안팎)보다 싸다.
+        /// 한 문장 대사(30자 + 끝 부호)는 40 안에 끝나 그대로 둔다.</para>
+        /// </summary>
+        public const int TwoSentenceMaxTokens = 80;
+
+        // 지난 대화 꺼내기·관리 감사는 두 문장까지 쓴다 (출력 검사가 둘째 문장을 버리지 않는 대사). 후보에 하나라도 있으면 그렇다
+        private static bool AllowsTwoSentences(List<ActionCandidate> candidates)
+        {
+            return candidates != null && candidates.Any(c => c != null
+                    && (c.ActionId == NpcActions.RecallTalk || c.ActionId == NpcActions.ThankCalm || c.ActionId == NpcActions.ThankJoyful));
+        }
+
+        // 문장 규칙: 글자(끝 부호 아닌 것)를 1~length 개 쓴다. GBNF 의 반복 범위({m,n})를 못 읽는 런타임에서도 돌게
+        // 선택 항목을 중첩해 펼친다: b (b (b …)?)? . 끝 부호(. ! ? ~ …) 1~3개는 부르는 쪽이 붙인다. 맨 앞의 '…'는 허용한다 (밤바다 "…고마워.")
+        private static string SentenceChain(int length)
         {
             string chain = "b";
-            for (int i = 1; i < SentenceMaxChars; i++)
+            for (int i = 1; i < length; i++)
             {
                 chain = "b (" + chain + ")?";
             }
             return chain;
         }
 
-        private static string Grammar(List<ActionCandidate> candidates, int shape, bool sentenceGrammar)
+        // lead: 대사가 반드시 이 낱말로 시작한다 (관리 감사·선명한 안부의 첫 낱말, PicksStarterAtRandom). null 이면 아무 말로나 시작한다.
+        // 2026-11-26: 프롬프트의 "첫 낱말로 시작"만으로는 모델이 "나는 훨씬 더 …"처럼 따르지 않았다. 문법이 그 낱말을 먼저 쓰게 하고 모델은 뒤를 잇는다
+        private static string Grammar(List<ActionCandidate> candidates, int shape, bool sentenceGrammar, string lead)
         {
+            string leadLiteral = string.IsNullOrEmpty(lead) ? null : GbnfLiteral(lead);
             var grammar = new StringBuilder();
             if (shape == 0)
             {
@@ -828,21 +1085,75 @@ namespace Jamkkaebi.Npc
                 grammar.Append("root ::= \"{\" ws \"\\\"action\\\"\" ws \":\" ws pair ws \",\" ws \"\\\"line\\\"\" ws \":\" ws line ws \"}\"\n");
                 grammar.Append("pair ::= ").Append(string.Join(" | ", pairs.Select(p => "(" + p + ")").ToArray())).Append("\n");
             }
-            if (sentenceGrammar)
+            if (sentenceGrammar && AllowsTwoSentences(candidates))
             {
-                // 대사는 끝 부호로 끝나는 문장 하나, 또는 둘. 부호가 오기 전에는 따옴표를 닫지 못하므로 문장 중간에서 끊기지 않는다
-                grammar.Append("line ::= \"\\\"\" sentence ( \" \" sentence )? \"\\\"\"\n");
-                grammar.Append("sentence ::= \"…\"? ").Append(SentenceChain()).Append(" term term? term?\n");
-                grammar.Append("b ::= [^\"\\\\\\n\\r.!?~…]\n");
-                grammar.Append("term ::= [.!?~…]\n");
+                // 지난 대화 꺼내기·관리 감사: 끝 부호로 끝나는 문장 하나, 또는 둘. 부호가 오기 전에는 따옴표를 닫지 못하므로 문장 중간에서 끊기지 않는다.
+                // 출력 검사가 줄이지 않거나(기억의 내용이 뒤 문장에 있을 수 있다) 고마움이 든 문장을 골라 남겨서(뒤 문장일 수 있다) 둘째 문장을 버리지 않는다
+                if (leadLiteral != null)
+                {
+                    // 첫 문장은 첫 낱말 뒤로 이어 쓴다 (첫 낱말까지 SentenceMaxChars 안)
+                    grammar.Append("line ::= \"\\\"\" first ( \" \" sentence )? \"\\\"\"\n");
+                    grammar.Append("first ::= ").Append(leadLiteral).Append(" ").Append(SentenceChain(Math.Max(1, SentenceMaxChars - lead.Length))).Append(" term term? term?\n");
+                }
+                else
+                {
+                    grammar.Append("line ::= \"\\\"\" sentence ( \" \" sentence )? \"\\\"\"\n");
+                }
+                grammar.Append("sentence ::= \"…\"? ").Append(SentenceChain(SentenceMaxChars)).Append(" term term? term?\n");
+                grammar.Append("b ::= [^\"\\\\\\n\\r.!?~…。]\n");
+                grammar.Append("term ::= [.!?~…。]\n");
+            }
+            else if (sentenceGrammar)
+            {
+                // 그 밖의 대사는 한 문장만 쓰고, 끝 부호 전에 부호·띄어쓰기를 뺀 글자를 OneSentenceMinCore(5)개 이상 쓴다 (2026-11-25).
+                // 예전에는 문장을 둘까지 쓰게 해, 출력 검사가 첫 문장만 남기고 버린 둘째 문장(실기기 모델 대사 247개 중 약 88개, 중앙값 13자 ≈ 1.5~2초)을 만드는 데 시간을 썼다.
+                // 첫 문장이 너무 짧으면(5글자 미만) 출력 검사가 둘째 문장과 함께 남기므로, 첫 문장을 그만큼은 쓰게 해 "왔구나!"에서 멈추지 않고 "왔구나, 하늘아!"처럼 잇게 한다.
+                // 따옴표는 끝 부호 뒤에만 닫혀 모델이 스스로 생성을 끝낸다 — 도중에 멈추라고 하지 않으므로 읽는 중 취소의 결함(LlamaLib 2.0.5)도 건드리지 않는다
+                grammar.Append("line ::= \"\\\"\" one \"\\\"\"\n");
+                if (leadLiteral != null)
+                {
+                    // 첫 낱말 뒤에 글자를 이어 OneSentenceMinCore 를 채운다 (첫 낱말의 글자도 센다, 적어도 한 글자는 잇는다)
+                    int more = Math.Max(1, OneSentenceMinCore - NpcLineChecks.Core(lead).Length);
+                    grammar.Append("one ::= ").Append(leadLiteral);
+                    for (int i = 0; i < more; i++)
+                    {
+                        grammar.Append(" s k");
+                    }
+                    grammar.Append(" (").Append(SentenceChain(Math.Max(1, SentenceMaxChars - lead.Length - more))).Append(")? term term? term?\n");
+                }
+                else
+                {
+                    grammar.Append("one ::= \"…\"?");
+                    for (int i = 0; i < OneSentenceMinCore; i++)
+                    {
+                        grammar.Append(i == 0 ? " k" : " s k");
+                    }
+                    grammar.Append(" (").Append(SentenceChain(SentenceMaxChars - OneSentenceMinCore)).Append(")? term term? term?\n");
+                }
+                // 출력 검사가 세는 글자 (NpcLineChecks.Core 가 빼는 부호·띄어쓰기가 아닌 것). '。'도 끝 부호다 — 글자(k·b)에 두면 "왔구나。 정말 반가워!"처럼
+                // 한 문장 안에 문장 끝이 들어가 NpcLineChecks.SentenceEnds 가 두 문장으로 나눴다 (CodeRabbit 리뷰)
+                grammar.Append("k ::= [^\"\\\\\\n\\r.!?~…。 \\t,·'‘’“”]\n");
+                grammar.Append("s ::= [ \\t,·'‘’“”]? [ \\t]?\n");          // 그 사이의 쉼표·띄어쓰기 ("안녕, 하늘아")
+                grammar.Append("b ::= [^\"\\\\\\n\\r.!?~…。]\n");
+                grammar.Append("term ::= [.!?~…。]\n");
             }
             else
             {
-                grammar.Append("line ::= \"\\\"\" char+ \"\\\"\"\n");
+                grammar.Append(leadLiteral != null ? "line ::= \"\\\"\" " + leadLiteral + " char* \"\\\"\"\n" : "line ::= \"\\\"\" char+ \"\\\"\"\n");
                 grammar.Append("char ::= [^\"\\\\\\n\\r]\n");
             }
             grammar.Append("ws ::= [ \\t]*\n");
             return grammar.ToString();
+        }
+
+        // 대사 안에 그대로 쓰는 GBNF 리터럴 (첫 낱말): 몸이 → "몸이". 대사에는 따옴표·역슬래시가 오지 않으므로(문법이 막는다) 그런 낱말은 받지 않는다
+        private static string GbnfLiteral(string text)
+        {
+            if (text.IndexOf('"') >= 0 || text.IndexOf('\\') >= 0)
+            {
+                throw new ArgumentException("첫 낱말에 따옴표·역슬래시를 쓸 수 없다: " + text);
+            }
+            return "\"" + text + "\"";
         }
 
         // GBNF 안에서 JSON 문자열 하나를 그대로 내는 리터럴: "\"greet\""

@@ -908,7 +908,7 @@ namespace Jamkkaebi.Npc
         }
 
         /// <summary>
-        /// 호칭이 규칙과 다르면 그 말, 아니면 null. 친밀하면(3단계 이상 — 30일 방문 12번 이상) 닉네임으로 부르고 '발굴자'는 쓰지 않으며,
+        /// 호칭이 규칙과 다르면 그 말, 아니면 null. 친밀하면(3단계 이상 — 주인은 관리 12번, 손님은 30일 방문 12번 이상) 닉네임으로 부르고 '발굴자'는 쓰지 않으며,
         /// 아니면 '발굴자'로 부르고 닉네임은 쓰지 않는다. 둘 다 꼭 들어갈 필요는 없다. run.py 의 address_contradiction 과 같다.
         /// </summary>
         public static string AddressContradiction(string line, string nickname, bool familiar)
@@ -1250,6 +1250,27 @@ namespace Jamkkaebi.Npc
             return !string.IsNullOrEmpty(line) && Regex.IsMatch(line, "오(?:랜|래간)만", RegexOptions.CultureInvariant);
         }
 
+        /// <summary>
+        /// '오랜만'이 서술어·마디인 꼴을 고친다 (FixNoRecord·FixLongAbsence 가 함께 쓴다): "오랜만이야·오랜만이네요·오랜만이구나·오랜만인걸"과 말끝의 "(정말) 오랜만!"은
+        /// replacement 로 바꾸고, "오랜만이라(서)·오랜만인데·오랜만이니까"로 시작하는 마디는 마디째 지운다 ("오랜만이라 반가워" → "반가워").
+        /// 뒤에 글자가 붙은 꼴("오랜만이라고")은 지우면 토막이 남아 두고, '오랜만에'는 부르는 쪽이 따로 고친다. run.py 의 fix_absence_clause 와 같다.
+        /// <para>2026-11-24 기기 시험: "오랜만이야"만 고쳐, 문장 안에 남은 다른 꼴의 '오랜만'을 출력 검사가 기록과 어긋남으로 거르고 기본 대사로 넘어갔다 (인사 실패의 첫째 원인).</para>
+        /// </summary>
+        public static string FixAbsenceClause(string line, string replacement)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return line;
+            }
+            line = line.Replace("오랫만", "오랜만"); // 철자 고치기(FixTypos)는 이보다 뒤에 돈다
+            line = Regex.Replace(line, "오(?:랜|래간)만(?:이(?:네요|구나|군요|군|잖아)|인걸)", replacement, RegexOptions.CultureInvariant);
+            line = Regex.Replace(line, "오(?:랜|래간)만이(?:야|네|다|에요)", replacement, RegexOptions.CultureInvariant);
+            // 마디 뒤에 이어 주는 말("그런지·그래서·그런가·그런데")이 오면 함께 지운다 — "오랜만이라 그런지 반가워!"에서 '그런지'만 남지 않게
+            line = Regex.Replace(line, "오(?:랜|래간)만(?:이(?:라서|라|어서|니까|던데|라도)|인데)(?![가-힣]),? ?(?:(?:그런지|그래서|그런가|그런데)(?![가-힣]),? ?)?", "",
+                    RegexOptions.CultureInvariant);
+            return Regex.Replace(line, "(?:(?:정말|진짜|참|너무|되게) )?오(?:랜|래간)만(?=[!?.~…]|$)", replacement, RegexOptions.CultureInvariant);
+        }
+
         public static string FixNoRecord(string line, int variant)
         {
             if (string.IsNullOrEmpty(line))
@@ -1257,16 +1278,41 @@ namespace Jamkkaebi.Npc
                 return line;
             }
             string greeting = NoRecordGreetings[((variant % NoRecordGreetings.Length) + NoRecordGreetings.Length) % NoRecordGreetings.Length];
-            line = Regex.Replace(line, "오(?:랜|래간)만이(?:야|네|다|에요)", greeting, RegexOptions.CultureInvariant);
+            line = FixAbsenceClause(line, greeting);
             // '오랜만에'는 뒤가 혼자 문장이 되는 움직임말(왔·와·찾아·오·들렀·돌아…)일 때만 지운다. "오랜만에 보네"를 지우면 목적어 없는 "보네"가 남는다(2026-11-17 21:45 시험 S23 #1 "어서 와! 보네, 도윤아").
-            // 못 고치는 것은 그대로 두어 출력 검사가 기록과 어긋남으로 거른다
             // "오랜만에 보네"는 지우지 않고 뜻이 같은 말로 바꾼다 (22:07 시험: 남겨 두자 기록과 어긋남으로 거르고 다시 만들어 시도가 늘었다)
             // "오랜만에 보자"도 같다 (22:16 시험 S22 #3: 못 고쳐 기록과 어긋남으로 걸렸다)
-            line = Regex.Replace(line, "오(?:랜|래간)만에 ?(?:보는구나|보네|보는걸|보자(?![가-힣])|만났네|만났구나|마주쳤네)", greeting, RegexOptions.CultureInvariant);
+            line = Regex.Replace(line, "오(?:랜|래간)만에 ?(?:보는구나|보네|보는걸|보는군|보자(?![가-힣])|봤네|봤구나|봐(?![가-힣])|만났네|만났구나|마주쳤네)", greeting, RegexOptions.CultureInvariant);
             line = Regex.Replace(line, "오(?:랜|래간)만에 ?보니", "만나니", RegexOptions.CultureInvariant);
             line = Regex.Replace(line, "오(?:랜|래간)만에 ?봐서", "만나서", RegexOptions.CultureInvariant);
-            line = Regex.Replace(line, "오(?:랜|래간)만에 ?(?=(?:왔|와|오|찾아|들렀|돌아|방문|놀러|만나|만났|마주))", "", RegexOptions.CultureInvariant);
+            // 그 밖의 '오랜만에'는 꾸밈말 자리라 지우지 않고 '이렇게'로 바꿔 넣는다 (AbsenceToThisWay, 2026-11-26)
+            line = AbsenceToThisWay(line);
             return Regex.Replace(line, "(?<![가-힣])(?:또|다시) ?(?=왔)", "", RegexOptions.CultureInvariant);
+        }
+
+        // '오랜만에'(앞의 '정말·진짜·참·너무·되게' 포함) 바로 뒤에 '이렇게'가 있으면 지운다 (겹치지 않게)
+        private static readonly Regex AbsenceBeforeThisWay = new Regex("(?:(?:정말|진짜|참|너무|되게) )?오(?:랜|래간)만에 ?(?=이렇게)", RegexOptions.CultureInvariant);
+        // 뒤에 띄어 쓴 말이 오거나, 붙여 쓴 움직임말(왔·와·찾아…)이 오는 '오랜만에' → '이렇게 '. 붙여 쓴 그 밖의 말("오랜만에야 왔구나")은 바꾸면 "이렇게 야"가 되어 두고, 출력 검사가 거른다
+        private static readonly Regex AbsenceAdverb = new Regex(
+                "(?:(?:정말|진짜|참|너무|되게) )?오(?:랜|래간)만에(?: (?=[가-힣])|(?=(?:왔|와|오|찾아|들렀|돌아|방문|놀러|만나|만났|마주)))", RegexOptions.CultureInvariant);
+        // 쉼표·끝 앞의 '오랜만에'("오랜만에, 반가워")는 꾸밀 말이 없어 예전처럼 지운다
+        private static readonly Regex AbsenceAdverbAlone = new Regex("(?:(?:정말|진짜|참|너무|되게) )?오(?:랜|래간)만에(?=[ ,]|$),? ?", RegexOptions.CultureInvariant);
+
+        /// <summary>
+        /// 꾸밈말 '오랜만에'를 지우지 않고 '이렇게'로 바꿔 넣는다 ("와, 오랜만에 찾아왔네." → "와, 이렇게 찾아왔네.", "왔구나, 오랜만에 찾아줘서 고마워." → "왔구나, 이렇게 찾아줘서 고마워.").
+        /// 뒤에 '이렇게'가 이미 있으면 지우고, 꾸밀 말이 없으면(쉼표·끝 앞) 지운다. '오랜만에 보네·보니·봐서'는 부르는 쪽이 먼저 바꾼다. run.py 의 absence_to_this_way 와 같다.
+        /// <para>2026-11-26 PC 기기 흐름 시험: 예전에는 지우기만 해서 "와, 찾아왔네."·"드디어 왔구나, 내 친구를 만나네."처럼 꾸밈말 자리가 빈 토막이 남았고, 출력 검사는 나오면 안 되는 말만 찾아
+        /// 그대로 통과했다. 같은 자리에 시간 간격을 뜻하지 않는 '이렇게'를 넣으면 문장 모양이 그대로 남는다.</para>
+        /// </summary>
+        public static string AbsenceToThisWay(string line)
+        {
+            if (string.IsNullOrEmpty(line))
+            {
+                return line;
+            }
+            line = AbsenceBeforeThisWay.Replace(line, "");
+            line = AbsenceAdverb.Replace(line, "이렇게 ");
+            return AbsenceAdverbAlone.Replace(line, "");
         }
 
         /// <summary>
@@ -1337,8 +1383,8 @@ namespace Jamkkaebi.Npc
             {
                 // 처음 온 친구: "오랜만이야"는 "반가워", "오랜만에 와 줘서"는 "와 줘서" (지난 만남을 지어내지 않는다). "오랜만에 보니"는 "만나니" — 지우면 "보니"만 남는다
                 line = Regex.Replace(line, "오(?:랜|래간)만에 ?보니", "만나니", RegexOptions.CultureInvariant);
-                line = Regex.Replace(line, "오(?:랜|래간)만이(?:야|네|다|에요)", "반가워", RegexOptions.CultureInvariant);
-                return Regex.Replace(line, "오(?:랜|래간)만에 ?", "", RegexOptions.CultureInvariant);
+                line = FixAbsenceClause(line, "반가워");
+                return AbsenceToThisWay(line); // "오랜만에 와 줘서" → "이렇게 와 줘서" (2026-11-26, 예전에는 지웠다)
             }
             int gap = int.MaxValue;
             foreach (KeyValuePair<string, int> reference in DayRefs(visitDays, true))
@@ -1356,10 +1402,11 @@ namespace Jamkkaebi.Npc
             string again = Regex.IsMatch(line, "(?<![가-힣])또(?![가-힣])", RegexOptions.CultureInvariant) ? "반가워" : "또 왔네";
             // "또 왔구나! 오랜만에 보니 반가워"의 '오랜만에'를 지우면 "또 왔구나! 보니 반가워"처럼 '보니'만 남는다 (2026-11-18 --live-store) → "다시 보니"
             line = Regex.Replace(line, "오(?:랜|래간)만에 ?보니", "다시 보니", RegexOptions.CultureInvariant);
-            line = Regex.Replace(line, "오(?:랜|래간)만이(?:야|네|다|에요)", again, RegexOptions.CultureInvariant);
+            line = FixAbsenceClause(line, again);
             if (Regex.IsMatch(line, "(?<![가-힣])또(?![가-힣])", RegexOptions.CultureInvariant))
             {
-                line = Regex.Replace(line, "오(?:랜|래간)만에 ?", "", RegexOptions.CultureInvariant); // 이미 "또 왔네"라고 했으면 "또 왔네, 또 와서"처럼 겹치지 않게 지운다 (2026-11-17 22:27 시험 S06 #1)
+                // 이미 "또 왔네"라고 했으면 "또 왔네, 또 와서"처럼 겹치지 않게 '또'로 바꾸지 않는다 (2026-11-17 22:27 시험 S06 #1). 지우지 않고 '이렇게'로 (2026-11-26)
+                line = AbsenceToThisWay(line);
             }
             else
             {
@@ -1470,7 +1517,14 @@ namespace Jamkkaebi.Npc
         private static readonly Regex QuotedAsk = new Regex(
                 "([가-힣]*[아어여해])\\s?달라고\\s?(?:부탁|요청|말)(?:드리고\\s?싶(?:어요|어|습니다)|하고\\s?싶(?:어요|어)|드립니다|드려요|드릴게요|드릴게|드려|해요|했어요|했어|했다|했네|합니다|할게요|할게|하다|해)?", RegexOptions.CultureInvariant);
         // "어서 왔어?"를 "어서 와"로 고치면서 물음표를 남기면 "어서 와?"가 된다 (2026-11-18 23:45 시험 S06 #4 "어서 와? 또 왔네."). 인사라 "!"로 바꾼다
-        private static readonly Regex Arrive = new Regex("어서,?\\s?(?:왔(?:어요|어|네요|네|구나|지)|와(?![가-힣]))(\\?+)?", RegexOptions.CultureInvariant);
+        // 2026-11-26 기기 시험(ver8): 첫 낱말 '어서' 뒤의 "어서 왔니?"·"어서 왔군"·"어서 왔다니, 반가워"처럼 목록에 없던 어미는 고치지 못해 금칙어(어서왔)로 버렸다
+        // (Tab S10 FE 10초 판 탭 인사 실패 5건 중 3건). 맺는 어미는 모두 "어서 와"로, 뒤 마디로 잇는 어미(~다니·~으니·~는데)는 "어서 와,"로 고친다.
+        // 맺는 어미 뒤에 한글이 이어지면("왔지만") 고치지 않는다 — 예전에는 "어서 와만"이 됐다. "어서 와라"(시키는 말)도 "어서 와"로
+        // '어서'는 따로 선 낱말일 때만 본다 — "보고 싶어서 왔니?"의 '싶어서'를 "보고 싶어서 와!"로 바꾸지 않는다. 띄어쓰기는 가로 공백만 본다 —
+        // 줄바꿈("어서\n왔어")을 삼키면 두 줄 대사가 한 줄로 보여 줄바꿈 검사를 빠져나간다 (StarterComma 와 같은 CodeRabbit 리뷰)
+        private static readonly Regex Arrive = new Regex(
+                "(?<![가-힣])어서,?[ \\t]?(?:왔(?:(다니|으니까|으니|는데),?(?=[ \\t])|(?:어요|어|네요|네|구나|구먼|군|지|니|단다|다|잖아)(?![가-힣]))|와라(?![가-힣])|와(?![가-힣]))(\\?+)?",
+                RegexOptions.CultureInvariant);
 
         // "편하게 구경해 줘"는 손님에게 구경을 부탁하는 말이라 어색하다(2026-11-16 시험 S05 #2·#3). 권하는 말로 "구경해"라고 한다. run.py 의 OFFER_ASK_RE 와 같다
         private static readonly Regex OfferAsk = new Regex("(구경해|구경하고 가|둘러봐|쉬었다 가|놀다 가)\\s?줘" + WordEnd, RegexOptions.CultureInvariant);
@@ -1479,8 +1533,33 @@ namespace Jamkkaebi.Npc
         {
             line = QuotedAsk.Replace(line, m => m.Groups[1].Value + " 줘");
             line = OfferAsk.Replace(line, m => m.Groups[1].Value);
-            return Arrive.Replace(line, m => m.Groups[1].Success ? "어서 와!" : "어서 와");
+            return Arrive.Replace(line, m => m.Groups[1].Success ? "어서 와," : m.Groups[2].Success ? "어서 와!" : "어서 와");
         }
+
+        /// <summary>
+        /// 인사말뿐인 짧은 인사("왔구나!", "어서 와.")에 지금 상대를 부르는 말을 붙인다 ("왔구나, 하늘아!", "어서 와, 발굴자."). 붙일 수 없으면 null —
+        /// 부를 이름이 없거나, 이미 그 이름을 불렀거나, 붙이면 limit 를 넘거나, 부호를 빼면 남는 말이 없을 때.
+        /// 프롬프트가 "한 번 불러 준다"고 적은 대로이고, 호칭 규칙(AddressName)을 따른 이름이라 호칭 검사에 걸리지 않는다. run.py 의 call_plain 과 같다.
+        /// <para>2026-11-26 기기 시험(ver8): 탭 인사 실패 57건 중 9건이 인사말뿐이었다 — 모델이 쓴 "왔구나!"·"어서 와!"는 맞는 인사인데 버리고 기본 대사로 넘어갔다.</para>
+        /// </summary>
+        public static string CallPlain(string line, string address, int limit)
+        {
+            if (string.IsNullOrEmpty(line) || string.IsNullOrEmpty(address) || Core(line).Contains(Core(address)))
+            {
+                return null;
+            }
+            Match m = PlainTail.Match(line.Trim());
+            string body = m.Groups[1].Value.TrimEnd(' ', '\t', ',');
+            if (Core(body).Length == 0)
+            {
+                return null;
+            }
+            string called = body + ", " + NpcLineSlots.Vocative(address) + (m.Groups[2].Length > 0 ? m.Groups[2].Value : "!");
+            return CodePoints(called) <= limit ? called : null; // 코드 포인트로 센다 — 이모지가 든 대사도 run.py(len)와 같게 자른다
+        }
+
+        // 끝 부호: NpcLineChecks.SentenceEnds 와 같게 '。'도 끝 부호로 본다 ("왔구나。" → "왔구나, 하늘아。"이지 "왔구나。, 하늘아!"가 아니다)
+        private static readonly Regex PlainTail = new Regex("^(.*?)([.!?…~。]*)$", RegexOptions.CultureInvariant | RegexOptions.Singleline);
 
         private static readonly Regex PastSeupnida = new Regex("([가-힣])습니다" + WordEnd, RegexOptions.CultureInvariant);
 
@@ -2336,7 +2415,10 @@ namespace Jamkkaebi.Npc
         }
 
         // 인사(탭·손님 맞이)에 붙은 지어낸 사정·캐묻기 ("뭘 찾으러 왔어?"·"무슨 일인지 궁금하네"·"오늘은 좀 일찍 왔구나"). 그런 마디는 지우고 반가움 마디만 남긴다. run.py 의 fix_greeting_tail 과 같다
-        private static readonly Regex Probe = new Regex("무슨|뭘|뭐 |뭐하|왜|궁금|길래|일찍|늦게|찾으러|하러|급하게|보고 ?싶었|오늘은 좀|처음 온 친구야|어떤 일", RegexOptions.CultureInvariant);
+        // '찾으러'는 "뭘 찾으러 왔어?"(캐묻기)만 거른다. "날 찾으러 왔구나"·"나를 찾으러 왔네"는 상황 문장("발굴자가 너를 보러 찾아왔다")과 같은 반가움이라 두고 쓴다.
+        // 날·나를은 따로 선 낱말일 때만 뺀다 — 앞이 글의 처음이거나 한글이 아니어야 한다("전날 찾으러"·"하나를 찾으러"는 나가 아니다). run.py 의 PROBE_RE 와 같은 식
+        // (2026-11-25: 기기·PC 시험에서 인사 실패(WrongHistory '찾으러')가 판마다 한두 건 — 모두 '날/나를 찾으러')
+        private static readonly Regex Probe = new Regex("무슨|뭘|뭐 |뭐하|왜|궁금|길래|일찍|늦게|(?<![^가-힣]날 )(?<!^날 )(?<![^가-힣]날)(?<!^날)(?<![^가-힣]나를 )(?<!^나를 )(?<![^가-힣]나를)(?<!^나를)찾으러|하러|급하게|보고 ?싶었|오늘은 좀|처음 온 친구야|어떤 일", RegexOptions.CultureInvariant);
         private const string ClauseEnd = ",，.!?…~";
 
         public static List<string> Clauses(string line)
@@ -2379,7 +2461,7 @@ namespace Jamkkaebi.Npc
             var keep = new List<string>();
             foreach (string part in parts)
             {
-                if (!Probe.IsMatch(part))
+                if (FindProbe(part) == null)
                 {
                     keep.Add(part);
                 }
@@ -2389,7 +2471,7 @@ namespace Jamkkaebi.Npc
                 string text = Regex.Replace(string.Join(" ", keep.ToArray()), "[,，]+$", "");
                 line = Regex.IsMatch(text, "[.!?…~]$") ? text : text + ".";
             }
-            if (Regex.IsMatch(line, "\\?+$") && !Probe.IsMatch(line) && Regex.IsMatch(line, "반가|환영|어서|안녕|왔"))
+            if (Regex.IsMatch(line, "\\?+$") && FindProbe(line) == null && Regex.IsMatch(line, "반가|환영|어서|안녕|왔"))
             {
                 line = Regex.Replace(line, "\\?+$", "!");
             }
@@ -2403,12 +2485,19 @@ namespace Jamkkaebi.Npc
             {
                 return null;
             }
-            Match found = Probe.Match(line);
-            if (found.Success)
+            return FindProbe(line);
+        }
+
+        // 지어낸 사정·캐묻기 말 (없으면 null). 가로 띄어쓰기가 여럿 이어지면 하나로 보고 찾는다 — "나를  찾으러"도 "나를 찾으러"처럼 반가움으로 본다
+        // (Probe 의 앞말 조건은 띄어쓰기 하나까지만 본다). run.py 의 find_probe 와 같다
+        private static string FindProbe(string text)
+        {
+            if (string.IsNullOrEmpty(text))
             {
-                return found.Value;
+                return null;
             }
-            return null;
+            Match found = Probe.Match(Regex.Replace(text, "[ \\t]+", " "));
+            return found.Success ? found.Value : null;
         }
 
         /// <summary>

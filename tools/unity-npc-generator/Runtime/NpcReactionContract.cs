@@ -144,8 +144,8 @@ namespace Jamkkaebi.Npc
 
     /// <summary>
     /// 사실(Facts) 키. 값은 문자열로 넣는다.
-    /// 서버 응답에서 만드는 법: last_care_days_ago 는 내 전시관의 lastPurifiedAt 으로 오늘까지 며칠인지 계산하고,
-    /// visit_count_30d 는 친구 전시관의 recentVisitDays 를 그대로 쓴다.
+    /// 서버 응답에서 만드는 법: last_care_days_ago 는 내 전시관의 lastPurifiedAt(마지막으로 판을 깬 시각 — 선명도와 따로 바뀐다)으로 오늘까지 며칠인지 계산하고,
+    /// visit_count_30d 는 친구 전시관의 recentVisitDays 를 그대로 쓴다. care_result 의 관리 뒤 선명도는 정산 결과 응답의 clarity 다.
     /// </summary>
     public static class NpcFactKeys
     {
@@ -161,28 +161,48 @@ namespace Jamkkaebi.Npc
     }
 
     /// <summary>
-    /// 상대를 부르는 이름과 친밀도. 친밀도는 최근 30일 방문한 날 수로 정한다: 3·7·12·20번을 채울 때마다 한 단계 오른다 (0~4단계).
-    /// 3단계(30일 방문 12번)부터 닉네임으로 부르고, 0~2단계는 '발굴자'로 부른다.
+    /// 상대를 부르는 이름과 친밀도. 친밀도는 주인이 이 도깨비를 관리한(관리 플레이 성공) 누적 횟수로 정한다:
+    /// 3·7·12·20번을 채울 때마다 한 단계 오른다 (0~4단계). 게임의 IntimacyPolicy 기본값과 같은 기준이고, 게임 화면의 Lv.1~5 가 여기의 0~4단계다.
+    /// 3단계(관리 12번)부터 닉네임으로 부르고, 0~2단계는 '발굴자'로 부른다.
+    /// 손님(구경 온 친구)은 도깨비를 관리하지 않으므로 친밀도가 없다. 대신 최근 30일 방문한 날 수로 같은 단계를 매겨 호칭을 정한다 (VisitorLevelOf).
     /// </summary>
     public static class NpcAddress
     {
         /// <summary>친밀하지 않은 상대(0단계, 닉네임 없음)를 부르는 호칭.</summary>
         public const string Stranger = "발굴자";
 
-        /// <summary>최근 30일 방문한 날 수가 이만큼 이상이면 한 단계씩 오른다: 3번 → 1단계, 7번 → 2단계, 12번 → 3단계, 20번 → 4단계.</summary>
+        /// <summary>
+        /// 누적 관리 성공 횟수가 이만큼 이상이면 친밀도가 한 단계씩 오른다: 3번 → 1단계, 7번 → 2단계, 12번 → 3단계, 20번 → 4단계.
+        /// 게임의 IntimacyPolicy.Default.LevelUpCareCounts 와 같아야 한다 (게임 쪽 테스트가 확인한다).
+        /// </summary>
+        public static readonly System.Collections.ObjectModel.ReadOnlyCollection<int> LevelUpCareCounts =
+            System.Array.AsReadOnly(new[] { 3, 7, 12, 20 });
+
+        /// <summary>손님이 최근 30일에 방문한 날 수가 이만큼 이상이면 호칭 단계가 한 단계씩 오른다: 3번 → 1단계, 7번 → 2단계, 12번 → 3단계, 20번 → 4단계.</summary>
         public static readonly System.Collections.ObjectModel.ReadOnlyCollection<int> LevelUpVisits =
             System.Array.AsReadOnly(new[] { 3, 7, 12, 20 });
 
-        /// <summary>이 단계(3단계 = 30일 방문 12번) 이상이면 닉네임으로 부른다.</summary>
+        /// <summary>이 단계(3단계 = 주인은 관리 12번, 손님은 30일 방문 12번) 이상이면 닉네임으로 부른다.</summary>
         public const int NicknameLevel = 3;
 
-        /// <summary>최근 30일 방문한 날 수(같은 날은 하루)에서 친밀도를 구한다. 방문 기록이 없으면 0.</summary>
-        public static int IntimacyOf(int? visits)
+        /// <summary>주인이 이 도깨비를 관리한(관리 플레이 성공) 누적 횟수에서 친밀도(0~4단계)를 구한다. 횟수를 모르면 0.</summary>
+        public static int IntimacyOf(int? careCount)
+        {
+            return LevelOf(careCount, LevelUpCareCounts);
+        }
+
+        /// <summary>손님이 최근 30일에 방문한 날 수(같은 날은 하루)에서 호칭 단계(0~4)를 구한다. 방문 기록이 없으면 0.</summary>
+        public static int VisitorLevelOf(int? visitDays)
+        {
+            return LevelOf(visitDays, LevelUpVisits);
+        }
+
+        private static int LevelOf(int? count, System.Collections.ObjectModel.ReadOnlyCollection<int> levelUpCounts)
         {
             int level = 0;
-            if (visits.HasValue)
+            if (count.HasValue)
             {
-                while (level < LevelUpVisits.Count && visits.Value >= LevelUpVisits[level])
+                while (level < levelUpCounts.Count && count.Value >= levelUpCounts[level])
                 {
                     level++;
                 }
@@ -240,6 +260,16 @@ namespace Jamkkaebi.Npc
         public string ActionId;
         public string Summary;
 
+        /// <summary>
+        /// 꺼냈음 표시 (T/F). 게임이 기억과 함께 저장한다 — 안부를 띄운 뒤 <see cref="NpcContext.MemoryToMark"/> 의 이 값이 true 로 바뀐다.
+        /// <list type="bullet">
+        /// <item>보통 기억(들려준 실화 등): 안부에서 지난 대화로 꺼냈다. 다시 꺼내지 않는다.</item>
+        /// <item>"지난 일을 다시 이야기했다"(recall_talk) 기억: 그 뒤 안부를 한 번 평소대로(선명도·관리 이야기) 했다. 다음 안부부터 다음 기억을 꺼낸다.</item>
+        /// </list>
+        /// 예전에 저장한 기억은 false 로 읽힌다 — 그 가운데 이미 꺼낸 것이 7일 안에 있으면 한 번 더 꺼낼 수 있다.
+        /// </summary>
+        public bool Recalled;
+
         public MemoryEntry()
         {
         }
@@ -277,7 +307,8 @@ namespace Jamkkaebi.Npc
         public string Nickname { get; set; }
 
         /// <summary>
-        /// 친밀도 0~4단계 (NpcAddress.IntimacyOf — 최근 30일 방문한 날 수가 3·7·12·20번을 채울 때마다 한 단계). 컨텍스트 구성기가 정한다.
+        /// 친밀도 0~4단계 (NpcAddress.IntimacyOf — 주인의 누적 관리 성공 횟수가 3·7·12·20번을 채울 때마다 한 단계). 컨텍스트 구성기가 정한다.
+        /// 손님 장면에서는 최근 30일 방문한 날 수로 매긴 호칭 단계(NpcAddress.VisitorLevelOf)가 들어간다.
         /// 3단계부터 닉네임으로 부른다.
         /// </summary>
         public int Intimacy { get; set; }
@@ -328,6 +359,12 @@ namespace Jamkkaebi.Npc
         /// 작은 모델이 그 대사를 그대로 옮긴다.
         /// </summary>
         public List<string> RecentLines { get; set; }
+
+        /// <summary>
+        /// 뒤에서 만드는 생성(미리 만들기·다시 만들기)인지. 요청 관리자가 붙인다. 백엔드는 이 생성보다 플레이어의 요청·미리 읽기를 먼저 모델에 넣는다
+        /// (NpcPrompt.Background, LlmUnityModelBackend 의 '뒤에서 만들기는 나눠 읽는다'). 게임이 보내는 요청은 false 그대로 둔다.
+        /// </summary>
+        public bool Background { get; set; }
 
         /// <summary>키에 맞는 사실의 값. 없으면 null.</summary>
         public string FindFact(string key)

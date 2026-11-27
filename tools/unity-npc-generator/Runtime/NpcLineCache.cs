@@ -9,7 +9,8 @@ namespace Jamkkaebi.Npc
     /// 미리 만들어 둔 대사 보관함. 기기에서 SLM 은 한 번 만드는 데 몇 초가 걸려서, 요청이 오기 전에 한가할 때 대사를 백그라운드로 만들어 두고
     /// 요청이 오면 바로 꺼내 쓴다 (NpcRequestManager.Prefetch). 같은 상황(도깨비·선택지·상황 문장·사실·기억·호칭)에서 만든 대사만 꺼내 쓴다.
     ///
-    /// <para>중복: 보관함의 대사끼리, 그리고 이미 띄운 최근 대사와 <b>90% 이상 겹치면</b>(NpcLineChecks.Similar) 넣지도 꺼내지도 않는다.
+    /// <para>중복: 보관함의 대사끼리, 그리고 이미 띄운 최근 대사와 <b>90% 이상 겹치면</b>(PromptAssembler.SimilarLine — 출력 검사와 같은 기준) 넣지도 꺼내지도 않는다.
+    /// 흐려진 안부 대사는 코드가 붙인 앞 문장까지 포함한 전체 대사로 본다 (앞 문장이 같다는 것만으로 '시작이 같음'으로 버리지 않는다).
     /// 상황마다 MaxPerKey 개까지, 오래된 것(MaxAge)은 버린다 — 시간대가 바뀌었는데 "좋은 아침"이 나가지 않게.</para>
     ///
     /// <para>스레드: 잠금으로 보호한다. 만든 쪽(백그라운드)과 꺼내 쓰는 쪽(요청 처리)이 달라도 된다.</para>
@@ -121,8 +122,8 @@ namespace Jamkkaebi.Npc
         /// 칸 있는 대사(템플릿)용 열쇠. KeyOf 와 같되 <b>서버가 넘겨주는 값에 달린 것을 뺀다</b> — 시간대(상황 문장의 "낮에"·사실 time_of_day), 닉네임·친밀도(호칭),
         /// 방문 횟수(상황 문장의 "7번"·사실 visit_count_30d·visit_days), 마지막 관리 날 수(사실 last_care_days_ago — 대사에서는 {날수} 칸). 그래서 서버 값을 모르는 채로
         /// 미리 만든 대사를, 서버 값이 온 뒤의 요청이 같은 열쇠로 찾는다. 이번 정화 때 다음 정화의 날 수를 몰라도 다음 정화가 같은 열쇠로 찾는다.
-        /// 선명도·관리 결과(선명/흐려짐→선명/재봉인→선명)·기억처럼 어떤 말을 할지 정하는 사실은 그대로 넣는다 — 선명도는 날 수로 정해지므로(7일 흐려짐, 14일 재봉인)
-        /// 상태마다 열쇠가 하나씩이다.
+        /// 선명도·관리 결과(선명→선명/흐려짐→선명/재봉인→흐려짐 등)·기억처럼 어떤 말을 할지 정하는 사실은 그대로 넣는다 — 상태마다 열쇠가 하나씩이다.
+        /// 한 칸 올라 흐려짐이 된 정령(마지막 정화가 7일 안)은 상황 문장이 달라("아직 흐리다"·"다시 맑아졌다") 오래 흐려진 정령과 열쇠가 다르다.
         /// </summary>
         public static string TemplateKeyOf(ReactionRequest request)
         {
@@ -227,7 +228,7 @@ namespace Jamkkaebi.Npc
                 List<Entry> live = LiveForWrite(key);
                 foreach (Entry entry in live)
                 {
-                    if (NpcLineChecks.Similar(slotted, entry.Result.Line) != null)
+                    if (PromptAssembler.SimilarLine(slotted, entry.Result.Line) != null)
                     {
                         return false;
                     }
@@ -283,7 +284,7 @@ namespace Jamkkaebi.Npc
                     {
                         continue; // 이 요청에는 못 쓰는 대사 — 다른 요청을 위해 둔다
                     }
-                    if (NpcLineChecks.FindSimilar(filled, recent).HasValue)
+                    if (PromptAssembler.FindRepeat(filled, recent).HasValue)
                     {
                         live.RemoveAt(i);
                         i--;
@@ -304,7 +305,7 @@ namespace Jamkkaebi.Npc
                         }
                         taken = ReactionResult.Success(stored.RequestId, rechecked.ActionId, rechecked.TargetId, rechecked.Line, stored.Source, taken.Note);
                         // 다시 검사가 대사를 바꿨으면(다듬기·앞 문장) 바뀐 최종 대사로 최근 대사와 한 번 더 견준다 (CodeRabbit 리뷰)
-                        if (taken.Line != filled && NpcLineChecks.FindSimilar(taken.Line, recent).HasValue)
+                        if (taken.Line != filled && PromptAssembler.FindRepeat(taken.Line, recent).HasValue)
                         {
                             live.RemoveAt(i);
                             i--;
@@ -328,6 +329,16 @@ namespace Jamkkaebi.Npc
         /// </summary>
         public int UsableTemplateCount(ReactionRequest request, int maxLength)
         {
+            return UsableTemplateCount(request, maxLength, null);
+        }
+
+        /// <summary>
+        /// recent(그 시나리오의 최근 띄운 대사)를 주면, 칸을 채운 뒤 그것과 90% 이상 겹치는 대사는 <b>버리고</b> 세지 않는다 — 꺼낼 때(TryTakeTemplate) 어차피 버릴 대사다.
+        /// 예전에는 세기만 해서, 파일에서 읽은 대사·앞서 만든 대사가 다른 장면에서 띄운 대사와 겹쳐 쓸 수 없게 되어도 "찼다"고 보고 새로 만들지 않았고,
+        /// 요청 때 그 대사를 버리면서 빗나갔다 (2026-11-23 기기 시험: 미리 만들기를 하고도 반복 1의 적중이 13건 → 8건).
+        /// </summary>
+        public int UsableTemplateCount(ReactionRequest request, int maxLength, IEnumerable<string> recent)
+        {
             if (request == null)
             {
                 return 0;
@@ -336,9 +347,21 @@ namespace Jamkkaebi.Npc
             lock (gate)
             {
                 int usable = 0;
-                foreach (Entry entry in Live(TemplateKeyOf(request)))
+                List<Entry> live = Live(TemplateKeyOf(request));
+                for (int i = 0; i < live.Count; i++)
                 {
-                    usable += FilledIfUsable(entry.Result, request, actual, maxLength) != null ? 1 : 0;
+                    string filled = FilledIfUsable(live[i].Result, request, actual, maxLength);
+                    if (filled == null)
+                    {
+                        continue; // 이 요청에는 못 쓰지만 다른 요청(짧은 닉네임 등)은 쓸 수 있어 둔다
+                    }
+                    if (recent != null && PromptAssembler.FindRepeat(filled, recent).HasValue)
+                    {
+                        live.RemoveAt(i);
+                        i--;
+                        continue;
+                    }
+                    usable++;
                 }
                 return usable;
             }
@@ -362,9 +385,20 @@ namespace Jamkkaebi.Npc
         /// <summary>그 상황으로 보관된 대사 수 (오래된 것은 먼저 버린다).</summary>
         public int Count(ReactionRequest request)
         {
+            return Count(request, null);
+        }
+
+        /// <summary>recent 와 90% 이상 겹치는 대사는 버리고 센다 (꺼낼 때 TryTake 가 어차피 버린다 — UsableTemplateCount 참고).</summary>
+        public int Count(ReactionRequest request, IEnumerable<string> recent)
+        {
             lock (gate)
             {
-                return Live(KeyOf(request)).Count;
+                List<Entry> live = Live(KeyOf(request));
+                if (recent != null)
+                {
+                    live.RemoveAll(entry => PromptAssembler.FindRepeat(entry.Result.Line, recent).HasValue);
+                }
+                return live.Count;
             }
         }
 
@@ -418,7 +452,7 @@ namespace Jamkkaebi.Npc
                 }
                 foreach (Entry entry in live)
                 {
-                    if (NpcLineChecks.Similar(result.Line, entry.Result.Line) != null)
+                    if (PromptAssembler.SimilarLine(result.Line, entry.Result.Line) != null)
                     {
                         return false;
                     }
@@ -447,7 +481,7 @@ namespace Jamkkaebi.Npc
                     ReactionResult result = live[i].Result;
                     live.RemoveAt(i);
                     i--;
-                    if (!NpcLineChecks.FindSimilar(result.Line, recent).HasValue)
+                    if (!PromptAssembler.FindRepeat(result.Line, recent).HasValue)
                     {
                         return result;
                     }
@@ -523,7 +557,7 @@ namespace Jamkkaebi.Npc
                         list.RemoveAll(entry => entry.At < limit); // 지난 것이 칸을 차지해 새것을 막지 않게 먼저 쓸어 낸다 (CodeRabbit 리뷰)
                     }
                     string line = item.Result.Line;
-                    if (list != null && (list.Count >= MaxPerKey || list.Exists(entry => NpcLineChecks.Similar(line, entry.Result.Line) != null)))
+                    if (list != null && (list.Count >= MaxPerKey || list.Exists(entry => PromptAssembler.SimilarLine(line, entry.Result.Line) != null)))
                     {
                         continue;
                     }
