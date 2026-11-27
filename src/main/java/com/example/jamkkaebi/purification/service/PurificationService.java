@@ -23,6 +23,7 @@ import com.example.jamkkaebi.relic.domain.Difficulty;
 import com.example.jamkkaebi.relic.domain.EntryRoute;
 import com.example.jamkkaebi.relic.domain.Phase;
 import com.example.jamkkaebi.relic.domain.RelicMaster;
+import com.example.jamkkaebi.relic.domain.RelicStatus;
 import com.example.jamkkaebi.relic.domain.RevealLevel;
 import com.example.jamkkaebi.relic.domain.UserRelic;
 import com.example.jamkkaebi.relic.dto.response.BuildingView;
@@ -313,13 +314,24 @@ public class PurificationService {
                 RelicCard.of(master, userRelic),
                 userRelic.getStatus(),
                 // 관리 플레이(!first)는 공개 단계가 오르지 않는다.
-                success && first ? userRelic.revealLevel() : null,
+                success && first ? revealedBy(session.getPhase()) : null,
                 nextStep(session, userRelic, success, clarity),
                 userRelic.restorePhaseFor(clarity),
                 userRelic.isCompleted() ? userRelic.getCareCount() : null,
                 clarity,
                 buildingAwarded,
                 null);
+    }
+
+    /**
+     * 최초 정화 한 판의 성공으로 <b>새로</b> 열리는 공개 단계. 봉인 해제는 {@code FORM}, 기억 회복은 {@code NAMED}이고,
+     * 오염 관리는 이미 이름까지 공개된 뒤라 없다.
+     *
+     * <p>유물의 지금 공개 단계가 아니라 세션의 페이즈로 정한다. 다음 페이즈를 진행한 뒤 이전 판을 다시 보고해도
+     * 처음 정산과 같은 값이 나온다.
+     */
+    private static RevealLevel revealedBy(Phase cleared) {
+        return cleared.isLast() ? null : RevealLevel.of(RelicStatus.IN_PROGRESS, cleared.next());
     }
 
     private PurificationResultResponse.NextStep nextStep(PlaySession session, UserRelic userRelic,
