@@ -223,6 +223,24 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
+    @DisplayName("시작하자마자 포기해도 실패 보고는 받는다 — 최소 플레이 시간은 성공에만 적용한다")
+    void 바로_포기() throws Exception {
+        Player player = player("바로포기");
+        give(player, 1);
+        String token = startPurification(player, 1, null);
+
+        post(player, "/api/purifications/{token}/result", """
+                {"result":"FAILURE","failReason":"GAVE_UP","tapsUsed":0,"scoutsUsed":0,"damage":0}
+                """, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.result").value("FAILURE"))
+                .andExpect(jsonPath("$.data.rewards.jeongseong").value(0))
+                .andExpect(jsonPath("$.data.next.action").value("RETRY"));
+        assertThat(userRelicRepository.findByUserIdAndRelicId(player.id(), 1)
+                .orElseThrow().getCurrentPhase().order()).isEqualTo(1);
+    }
+
+    @Test
     @DisplayName("새 세션을 시작하면 보고하지 않은 이전 세션은 무효가 된다")
     void 세션_쌓아두기_방지() throws Exception {
         Player player = player("저장왕");

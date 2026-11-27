@@ -15,7 +15,7 @@ import java.util.stream.Stream;
  *
  *
  * @param sessionTtl         세션 토큰 수명
- * @param minPlayDuration    한 판에 최소한 걸려야 하는 시간
+ * @param minPlayDuration    성공한 판에 최소한 걸려야 하는 시간. 실패(포기 포함) 보고에는 적용하지 않는다
  * @param firstRouteDifficulty 최초 정화에 고정으로 쓰는 난이도 (보통)
  * @param clearJeongseong    클리어 기본 정성. 난이도 배율을 곱한다
  * @param bonusTileJeongseong 정성 보너스 타일 1개당 정성

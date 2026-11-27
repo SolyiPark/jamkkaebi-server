@@ -222,8 +222,10 @@ public class PurificationService {
         boolean overLimit = request.tapsUsed() > session.getTapBudget()
                 || request.scoutsUsed() > session.getScoutLimit()
                 || bonusJeongseong > params.bonusJeongseongCount();
-        boolean tooFast = Duration.between(session.getStartedAt(), now)
-                .compareTo(properties.minPlayDuration()) < 0;
+        // 최소 플레이 시간은 성공에만 적용한다. 실패는 보상이 없고 진행도도 바뀌지 않아 빨리 끝내도 얻는 것이 없으며,
+        // 시작하자마자 포기하는 정상 보고까지 거절하면 클라이언트가 재전송 화면으로 빠진다.
+        boolean tooFast = request.result() == PlayResult.SUCCESS
+                && Duration.between(session.getStartedAt(), now).compareTo(properties.minPlayDuration()) < 0;
         if (overLimit || tooFast) {
             throw new BusinessException(ErrorCode.PURIFICATION_RESULT_REJECTED);
         }
