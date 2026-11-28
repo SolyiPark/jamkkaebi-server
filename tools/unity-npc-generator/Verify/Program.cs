@@ -292,39 +292,58 @@ public static class Program
                 "기다리다 시간이 넘으면 기본 대사로 답하고, 만들던 것은 끝까지 만들어 보관함 ← " + timedOut.Note + ", 취소 " + cancelled + "번, 보관 " + timing.Cache.TemplateCount(Tap(8)) + "개");
 
         // 2-1) 기다림과 그 뒤의 생성을 합쳐 SlmTimeout 을 넘지 않는다: 기다린 생성이 쓸 대사를 못 만들어 그 자리에서 만들게 되면 남은 시간만 준다
-        //      (예전에는 다시 SlmTimeout 을 다 줘 기다린 만큼 더 기다렸다 — 지난 리뷰의 '기다림에 기한을 둔다'와 같은 갈래)
-        var budgetBackend = new FakeBackend();
-        int budgetHold = 1;
-        var budgetStarted = new TaskCompletionSource<bool>();
-        var budgetRelease = new TaskCompletionSource<bool>();
-        budgetBackend.Delayed = async ct =>
+        //      (예전에는 다시 SlmTimeout 을 다 줘 기다린 만큼 더 기다렸다 — 지난 리뷰의 '기다림에 기한을 둔다'와 같은 갈래).
+        //      준비(1초 쉼)가 늦게 깨어 기다림이 먼저 끝나면 그 판은 제품 실패가 아니라 준비 실패다 — 다시 해 보고(3번까지), 끝내 준비가 안 되면 실패가 아니라 건너뜀으로 적는다 (CodeRabbit 리뷰).
+        //      시간 비교도 실제로 기다린 시간(released)으로 한다: 예전 동작은 released + SlmTimeout, 고친 동작은 SlmTimeout 안팎이다
+        TimeSpan budgetTimeout = TimeSpan.FromMilliseconds(3000);
+        bool budgetChecked = false;
+        for (int budgetTry = 1; budgetTry <= 3 && !budgetChecked; budgetTry++)
         {
-            if (Interlocked.Exchange(ref budgetHold, 0) == 1)
+            var budgetBackend = new FakeBackend();
+            int budgetHold = 1;
+            var budgetStarted = new TaskCompletionSource<bool>();
+            var budgetRelease = new TaskCompletionSource<bool>();
+            budgetBackend.Delayed = async ct =>
             {
-                budgetStarted.TrySetResult(true);
-                await budgetRelease.Task;
-                return Out("greet", "player", "");   // 검사에 걸리는 대사 — 보관하지 못한다
+                if (Interlocked.Exchange(ref budgetHold, 0) == 1)
+                {
+                    budgetStarted.TrySetResult(true);
+                    await budgetRelease.Task;
+                    return Out("greet", "player", "");   // 검사에 걸리는 대사 — 보관하지 못한다
+                }
+                await Task.Delay(10000, ct);               // 그 자리 생성은 시간 안에 끝나지 않는다
+                return Out("greet", "player", "드디어 왔구나, 기다렸어!");
+            };
+            var budgetSlm = new SlmReactionGenerator(budgetBackend, assembler, validator) { MaxAttempts = 1 };
+            budgetSlm.LoadAsync(CancellationToken.None).Wait();
+            var budgetManager = new NpcRequestManager(budgetSlm, rule) { SlmTimeout = budgetTimeout, PrefetchTimeout = TimeSpan.FromSeconds(20), PrefetchIdleDelay = TimeSpan.Zero };
+            budgetManager.PrefetchTemplate(Tap(8), 1);
+            Check(budgetStarted.Task.Wait(5000), "기다림 한도: 뒤에서 미리 만들기가 모델을 부르기 시작함");
+            var budgetThinking = new ThinkingRecorder();
+            Stopwatch budgetWatch = Stopwatch.StartNew();
+            Task<NpcResponse> budgetTask = Task.Run(() => budgetManager.RequestAsync(Tap(8), CancellationToken.None, budgetThinking));
+            Check(SpinWait.SpinUntil(() => budgetThinking.Lines.Count > 0, 5000), "기다림 한도: 요청이 같은 상황을 기다리기 시작함");
+            Thread.Sleep(1000);                            // 기다리는 동안 만들던 것이 쓸 수 없는 대사로 끝난다
+            long released = budgetWatch.ElapsedMilliseconds;
+            budgetRelease.TrySetResult(true);
+            NpcResponse budgetAnswer = budgetTask.Wait(20000) ? budgetTask.Result : null;
+            long budgetMs = budgetWatch.ElapsedMilliseconds;
+            budgetManager.CancelPrefetch();
+            if (budgetAnswer != null && budgetAnswer.Note != null && budgetAnswer.Note.StartsWith(NpcRequestManager.SameSituationTimeoutNote))
+            {
+                Console.WriteLine("  (기다림 한도 준비가 늦어 기다림이 먼저 끝남 — " + released + "ms 에 놓음, 다시 " + budgetTry + "/3)");
+                continue; // 준비 실패: 만들던 것을 놓기 전에 기다림(SlmTimeout)이 끝났다 — 제품 동작은 맞다
             }
-            await Task.Delay(5000, ct);                // 그 자리 생성은 시간 안에 끝나지 않는다
-            return Out("greet", "player", "드디어 왔구나, 기다렸어!");
-        };
-        var budgetSlm = new SlmReactionGenerator(budgetBackend, assembler, validator) { MaxAttempts = 1 };
-        budgetSlm.LoadAsync(CancellationToken.None).Wait();
-        var budgetManager = new NpcRequestManager(budgetSlm, rule) { SlmTimeout = TimeSpan.FromMilliseconds(1500), PrefetchTimeout = TimeSpan.FromSeconds(10), PrefetchIdleDelay = TimeSpan.Zero };
-        budgetManager.PrefetchTemplate(Tap(8), 1);
-        Check(budgetStarted.Task.Wait(5000), "기다림 한도: 뒤에서 미리 만들기가 모델을 부르기 시작함");
-        var budgetThinking = new ThinkingRecorder();
-        Stopwatch budgetWatch = Stopwatch.StartNew();
-        Task<NpcResponse> budgetTask = Task.Run(() => budgetManager.RequestAsync(Tap(8), CancellationToken.None, budgetThinking));
-        Check(SpinWait.SpinUntil(() => budgetThinking.Lines.Count > 0, 5000), "기다림 한도: 요청이 같은 상황을 기다리기 시작함");
-        Thread.Sleep(1000);                            // 1초 기다린 뒤에 만들던 것이 쓸 수 없는 대사로 끝난다
-        budgetRelease.TrySetResult(true);
-        NpcResponse budgetAnswer = budgetTask.Wait(10000) ? budgetTask.Result : null;
-        long budgetMs = budgetWatch.ElapsedMilliseconds;
-        Check(budgetAnswer != null && budgetAnswer.UsedFallback && budgetAnswer.Note != null && budgetAnswer.Note.StartsWith("SLM 시간 초과") && budgetAnswer.Note.Contains("같은 상황을 기다린")
-                && budgetMs < 2100,
-                "기다린 뒤 그 자리에서 만들면 남은 시간만 줘 합쳐서 SlmTimeout(1.5초) 안팎 (예전: 1초 + 1.5초) ← " + budgetMs + "ms, " + (budgetAnswer != null ? budgetAnswer.Note : "응답 없음"));
-        budgetManager.CancelPrefetch();
+            budgetChecked = true;
+            Check(budgetAnswer != null && budgetAnswer.UsedFallback && budgetAnswer.Note != null && budgetAnswer.Note.StartsWith("SLM 시간 초과") && budgetAnswer.Note.Contains("같은 상황을 기다린")
+                    && budgetMs < (long)budgetTimeout.TotalMilliseconds + released / 2,
+                    "기다린 뒤 그 자리에서 만들면 남은 시간만 줘 합쳐서 SlmTimeout(" + (int)budgetTimeout.TotalMilliseconds + "ms) 안팎 (예전: 기다린 " + released + "ms + SlmTimeout) ← "
+                    + budgetMs + "ms, " + (budgetAnswer != null ? budgetAnswer.Note : "응답 없음"));
+        }
+        if (!budgetChecked)
+        {
+            Console.WriteLine("  건너뜀: 기다림 한도 시험의 준비가 세 번 모두 늦었다 (기계가 바쁨 — 제품 실패가 아니다)");
+        }
 
         // 3) 다른 상황이면 예전처럼 만들던 것을 멈추고 그 자리에서 만든다 (플레이어가 먼저)
         cancelled = 0;
@@ -354,6 +373,14 @@ public static class Program
         var quietThinking = new ThinkingRecorder();
         quiet.RequestAsync(Tap(8), CancellationToken.None, quietThinking).Wait(5000);
         Check(quietThinking.Lines.Count == 0, "ThinkingLine 을 비우면 알리지 않음");
+        // 버려진 요청(취소된 요청)은 알리지 않는다 — 새 요청의 말풍선을 덮지 않게 (CodeRabbit 리뷰)
+        var cancelledThinking = new ThinkingRecorder();
+        using (var gone = new CancellationTokenSource())
+        {
+            gone.Cancel();
+            NpcResponse goneAnswer = quick.RequestAsync(Tap(8), gone.Token, cancelledThinking).Result;
+            Check(!goneAnswer.ShouldShow && cancelledThinking.Lines.Count == 0, "취소된 요청은 '음...'을 알리지 않고 버림");
+        }
         NpcResponse thrown = quick.RequestAsync(Tap(9), CancellationToken.None, new ThinkingRecorder { Throw = true }).Result;
         Check(thrown.ShouldShow, "알리는 쪽이 예외를 던져도 대사는 만듦 ← " + thrown.Note);
 

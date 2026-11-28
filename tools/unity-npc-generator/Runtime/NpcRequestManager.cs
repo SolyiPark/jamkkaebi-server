@@ -594,7 +594,9 @@ namespace Jamkkaebi.Npc
             return Handle(request, ct, thinking);
         }
 
-        // 모델을 기다리기 전에 ThinkingLine 을 한 번 알린다. 알리는 쪽의 예외는 삼킨다 (RequestAsync 는 예외를 던지지 않는다)
+        // 모델을 기다리기 전에 ThinkingLine 을 한 번 알린다. 알리는 쪽의 예외는 삼킨다 (RequestAsync 는 예외를 던지지 않는다).
+        // 이미 버려진 요청(같은 NPC 의 새 요청·화면 종료로 세션이 취소됨)은 알리지 않는다 — 새 요청의 말풍선을 덮지 않게 (CodeRabbit 리뷰).
+        // 알린 것이 게임에 닿기 전에 새 요청이 시작될 수도 있어(Progress 는 메인 스레드로 넘겨 부른다) 게임도 말풍선의 주인을 확인한다 (README 예시)
         private sealed class ThinkingNotice
         {
             private readonly IProgress<string> sink;
@@ -607,9 +609,9 @@ namespace Jamkkaebi.Npc
                 this.line = line;
             }
 
-            public void Show()
+            public void Show(CancellationToken session)
             {
-                if (sink == null || string.IsNullOrEmpty(line) || Interlocked.Exchange(ref shown, 1) == 1)
+                if (sink == null || string.IsNullOrEmpty(line) || session.IsCancellationRequested || Interlocked.Exchange(ref shown, 1) == 1)
                 {
                     return;
                 }
@@ -703,7 +705,7 @@ namespace Jamkkaebi.Npc
                     MarkModelRelic(request.RelicId);
                     // 기기에서는 한 번 만드는 데 10초가 넘어 다시 만들 틈이 없다 — 첫 시도부터 최근 대사와 다른 첫 낱말로 만들게 한다
                     PickFreshStarter(request, request.RecentLines);
-                    notice.Show(); // 그 자리에서 만든다 — 기다리는 동안 "음..." (같은 상황을 기다렸다가 온 요청은 이미 띄웠다)
+                    notice.Show(session.Token); // 그 자리에서 만든다 — 기다리는 동안 "음..." (같은 상황을 기다렸다가 온 요청은 이미 띄웠다)
                     // 같은 상황을 기다렸다가 쓸 대사가 없어 여기 왔으면 이미 기다린 만큼 뺀다 (예전에는 다시 SlmTimeout 을 다 줘 플레이어가 SlmTimeout 의 두 배까지 기다렸다)
                     TimeSpan waitedBefore = modelWait.Elapsed;
                     TimeSpan budget = SlmTimeout - waitedBefore;
@@ -1235,7 +1237,7 @@ namespace Jamkkaebi.Npc
             {
                 return null;
             }
-            notice.Show(); // 뒤에서 만드는 것을 기다린다 — 기다리는 동안 "음..."
+            notice.Show(session.Token); // 뒤에서 만드는 것을 기다린다 — 기다리는 동안 "음..."
             Task first;
             using (var waitCts = CancellationTokenSource.CreateLinkedTokenSource(session.Token))
             {
