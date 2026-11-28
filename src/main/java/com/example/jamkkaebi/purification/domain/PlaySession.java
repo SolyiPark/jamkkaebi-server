@@ -73,8 +73,8 @@ public class PlaySession extends BaseTimeEntity {
     private EntryRoute entryRoute;
 
     /**
-     * 관리 플레이를 시작할 때의 선명도. 최초 정화면 {@code null}. 기록·분석용이다.
-     * 정산은 {@link #phase} 와 정산 순간의 선명도로 한다 ({@code PurificationService.settleCare}).
+     * 관리 플레이를 시작할 때의 선명도. 최초 정화면 {@code null}.
+     * 정산은 이 선명도에서 한 칸(어려움·쉬움은 바로 선명) 올린다 ({@code PurificationService.reachedClarity}).
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "plan_clarity", length = 20)
@@ -156,6 +156,16 @@ public class PlaySession extends BaseTimeEntity {
 
     public boolean isReportable(LocalDateTime now) {
         return status == SessionStatus.ISSUED && now.isBefore(expiresAt);
+    }
+
+    /**
+     * 계획 선명도가 비어 있는 관리 세션(계획 선명도를 저장하기 전에 시작한 세션)에 출발 선명도를 정해 둔다.
+     * 정산 전에 한 번만 정해, 정산·응답·같은 내용의 재보고가 같은 값을 쓰게 한다. 이미 있으면 바꾸지 않는다.
+     */
+    public void fillPlanClarity(Clarity clarity) {
+        if (planClarity == null && entryRoute == EntryRoute.CARE) {
+            planClarity = clarity;
+        }
     }
 
     public void supersede() {

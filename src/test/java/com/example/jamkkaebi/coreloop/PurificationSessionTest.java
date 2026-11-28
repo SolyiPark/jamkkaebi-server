@@ -130,7 +130,7 @@ class PurificationSessionTest extends CoreLoopApiTestSupport {
         give(player, 6);
 
         post(player, "/api/purifications", "{\"relicId\":1}")
-                .andExpect(jsonPath("$.data.sealMedium").value("RUST"));
+                .andExpect(jsonPath("$.data.sealMedium").value("ROOT"));
         post(player, "/api/purifications", "{\"relicId\":2}")
                 .andExpect(jsonPath("$.data.sealMedium").value("SOOT"));
         post(player, "/api/purifications", "{\"relicId\":6}")

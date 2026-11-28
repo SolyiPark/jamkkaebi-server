@@ -195,22 +195,24 @@ class ExhibitionTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("마지막 정화 시각은 시간이 지나도 그대로이고, 관리 순서를 끝까지 마쳤을 때만 바뀐다")
+    @DisplayName("마지막 정화 시각은 시간이 지나도 그대로이고, 관리 플레이에 성공할 때마다 바뀐다")
     void 마지막_정화_시각() throws Exception {
         Player player = player("돌보미");
         giveCompleted(player, INCENSE_BURNER);
 
-        // 흐려짐 — 기억 회복부터 두 판을 다시 한다. 한 판만 하면 아직 회복된 게 아니다.
-        clock.advance(Duration.ofDays(8));
+        // 재봉인 — 보통 한 판이면 흐려짐까지 오르고, 마지막 정화 시각은 그 판의 시각이 된다.
+        clock.advance(Duration.ofDays(15));
+        get(player, "/api/exhibition")
+                .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").value(startsWith("2026-09-12T10:00")));
         clearPhase(player, INCENSE_BURNER, Difficulty.NORMAL).andExpect(status().isOk());
         get(player, "/api/exhibition")
                 .andExpect(jsonPath("$.data.spirits[0].clarity").value("FADED"))
-                .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").value(startsWith("2026-09-12T10:00")));
+                .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").value(startsWith("2026-09-27T10:01")));
 
         clearPhase(player, INCENSE_BURNER, Difficulty.NORMAL).andExpect(status().isOk());
         get(player, "/api/exhibition")
                 .andExpect(jsonPath("$.data.spirits[0].clarity").value("CLEAR"))
-                .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").value(startsWith("2026-09-20T10:02")));
+                .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").value(startsWith("2026-09-27T10:02")));
     }
 
     @Test

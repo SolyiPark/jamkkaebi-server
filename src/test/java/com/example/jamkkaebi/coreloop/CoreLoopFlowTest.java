@@ -3,16 +3,19 @@ package com.example.jamkkaebi.coreloop;
 import com.example.jamkkaebi.relic.domain.Clarity;
 import com.example.jamkkaebi.relic.domain.Difficulty;
 import com.example.jamkkaebi.relic.domain.Era;
-import com.example.jamkkaebi.relic.domain.Phase;
 import com.example.jamkkaebi.relic.domain.RelicStatus;
 import com.example.jamkkaebi.relic.domain.UserRelic;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -22,6 +25,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>백엔드 계획 M1 의 완료 판정이 그대로 이 파일의 첫 테스트다.
  */
 class CoreLoopFlowTest extends CoreLoopApiTestSupport {
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     @DisplayName("상자를 열어 얻은 유물을 3페이즈까지 마치면 완료 상태가 되고 이름이 공개된다")
@@ -172,70 +178,99 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("재봉인이어도 어려움 한 판이면 전부 복구된다")
-    void 어려움은_한_판에_전체_복구() throws Exception {
+    @DisplayName("재봉인이어도 어려움 한 판이면 바로 선명이 된다")
+    void 어려움은_한_판에_선명() throws Exception {
         Player player = player("한방이");
         int relicId = completedRelic(player);
         clock.advance(Duration.ofDays(15));
 
         get(player, "/api/relics/{id}", relicId)
                 .andExpect(jsonPath("$.data.clarity").value("RESEALED"))
-                .andExpect(jsonPath("$.data.nextPlay.remainingPhases.length()").value(3));
+                .andExpect(jsonPath("$.data.clarityChangesAt").doesNotExist())
+                .andExpect(jsonPath("$.data.nextPlay.phase").value("UNSEAL"))
+                .andExpect(jsonPath("$.data.nextPlay.remainingPhases.length()").value(2));
 
         clearPhase(player, relicId, Difficulty.HARD)
                 .andExpect(jsonPath("$.data.next.action").value("DONE"))
                 .andExpect(jsonPath("$.data.clarity").value("CLEAR"))
+                .andExpect(jsonPath("$.data.clarityChangesAt").value(startsWith(at(Duration.ofDays(7)))))
                 .andExpect(jsonPath("$.data.lastClearedPhase").doesNotExist())
                 .andExpect(jsonPath("$.data.careCount").value(1));
-
-        UserRelic stored = userRelicRepository.findByUserIdAndRelicId(player.id(), relicId).orElseThrow();
-        assertThat(stored.getRestorePhase()).isNull();
-        assertThat(stored.getRestoreClarity()).isNull();
     }
 
     @Test
-    @DisplayName("보통은 한 페이즈씩 복구하고, 판마다 돌봄 횟수가 오른다")
-    void 보통은_한_페이즈씩() throws Exception {
+    @DisplayName("보통은 선명도를 한 칸씩 올린다 — 재봉인에서 선명까지 두 판")
+    void 보통은_한_칸씩() throws Exception {
         Player player = player("꾸준이");
+        int relicId = completedRelic(player);
+        clock.advance(Duration.ofDays(15));
+
+        // 봉인 해제 → 흐려짐. 재봉인까지 흐려짐 구간 7일을 온전히 받는다.
+        clearPhase(player, relicId, Difficulty.NORMAL)
+                .andExpect(jsonPath("$.data.clarity").value("FADED"))
+                .andExpect(jsonPath("$.data.next.action").value("CONTINUE_RESTORE"))
+                .andExpect(jsonPath("$.data.next.phase").value("RECALL"))
+                .andExpect(jsonPath("$.data.next.remainingPhases.length()").value(1))
+                .andExpect(jsonPath("$.data.careCount").value(1));
+
+        get(player, "/api/relics/{id}", relicId)
+                .andExpect(jsonPath("$.data.clarity").value("FADED"))
+                .andExpect(jsonPath("$.data.lastPurifiedAt").value(startsWith(at(Duration.ZERO))))
+                .andExpect(jsonPath("$.data.clarityChangesAt").value(startsWith(at(Duration.ofDays(7)))))
+                .andExpect(jsonPath("$.data.nextPlay.phase").value("RECALL"))
+                .andExpect(jsonPath("$.data.nextPlay.difficulties[0]").value("NORMAL"));
+
+        // 기억 회복 → 선명. 복구가 끝난다.
+        clearPhase(player, relicId, Difficulty.NORMAL)
+                .andExpect(jsonPath("$.data.clarity").value("CLEAR"))
+                .andExpect(jsonPath("$.data.next.action").value("DONE"))
+                .andExpect(jsonPath("$.data.careCount").value(2));
+
+        get(player, "/api/relics/{id}", relicId)
+                .andExpect(jsonPath("$.data.clarityChangesAt").value(startsWith(at(Duration.ofDays(7)))))
+                .andExpect(jsonPath("$.data.nextPlay.phase").value("GUARD"))
+                .andExpect(jsonPath("$.data.nextPlay.remainingPhases.length()").value(1));
+    }
+
+    @Test
+    @DisplayName("흐려짐에서 보통 한 판이면 선명이 된다")
+    void 흐려짐은_보통_한_판() throws Exception {
+        Player player = player("부지런");
         int relicId = completedRelic(player);
         clock.advance(Duration.ofDays(8));
 
-        clearPhase(player, relicId, Difficulty.NORMAL)
-                .andExpect(jsonPath("$.data.next.action").value("CONTINUE_RESTORE"))
-                .andExpect(jsonPath("$.data.next.phase").value("GUARD"))
-                .andExpect(jsonPath("$.data.lastClearedPhase").value("RECALL"))
-                .andExpect(jsonPath("$.data.careCount").value(1));
+        get(player, "/api/relics/{id}", relicId)
+                .andExpect(jsonPath("$.data.nextPlay.phase").value("RECALL"));
 
         clearPhase(player, relicId, Difficulty.NORMAL)
                 .andExpect(jsonPath("$.data.next.action").value("DONE"))
                 .andExpect(jsonPath("$.data.clarity").value("CLEAR"))
-                .andExpect(jsonPath("$.data.careCount").value(2));
+                .andExpect(jsonPath("$.data.careCount").value(1));
     }
 
     @Test
-    @DisplayName("흐려짐에서 기억 회복까지 복구한 뒤 재봉인되면 봉인 해제부터 다시 한다")
-    void 복구_도중_선명도가_바뀌면_처음부터() throws Exception {
-        Player player = player("게으름뱅이");
+    @DisplayName("관리 플레이에 실패하면 선명도와 두 시각, 돌봄 횟수가 그대로다")
+    void 실패하면_그대로() throws Exception {
+        Player player = player("헛손질");
         int relicId = completedRelic(player);
-        clock.advance(Duration.ofDays(8));
-        clearPhase(player, relicId, Difficulty.NORMAL)
-                .andExpect(jsonPath("$.data.lastClearedPhase").value("RECALL"));
+        UserRelic before = userRelicRepository.findByUserIdAndRelicId(player.id(), relicId).orElseThrow();
+        clock.advance(Duration.ofDays(15));
 
-        UserRelic midway = userRelicRepository.findByUserIdAndRelicId(player.id(), relicId).orElseThrow();
-        assertThat(midway.getRestorePhase()).isEqualTo(Phase.RECALL);
-        assertThat(midway.getRestoreClarity()).isEqualTo(Clarity.FADED);
-
-        // 방치해 재봉인 — 예전에는 [GUARD] 만 남아 두 페이즈를 건너뛰었다.
-        clock.advance(Duration.ofDays(7));
-        get(player, "/api/relics/{id}", relicId)
+        String token = startPurification(player, relicId, Difficulty.NORMAL);
+        clock.advance(Duration.ofMinutes(1));
+        post(player, "/api/purifications/{token}/result", """
+                {"result":"FAILURE","failReason":"DAMAGE_FULL","tapsUsed":15,"scoutsUsed":3,"damage":100,
+                 "bonusTiles":{"jeongseong":0}}
+                """, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.next.action").value("RETRY"))
                 .andExpect(jsonPath("$.data.clarity").value("RESEALED"))
-                .andExpect(jsonPath("$.data.lastClearedPhase").doesNotExist())
-                .andExpect(jsonPath("$.data.nextPlay.phase").value("UNSEAL"))
-                .andExpect(jsonPath("$.data.nextPlay.remainingPhases.length()").value(3));
+                .andExpect(jsonPath("$.data.careCount").value(0));
 
-        clearPhase(player, relicId, Difficulty.NORMAL)
-                .andExpect(jsonPath("$.data.next.phase").value("RECALL"))
-                .andExpect(jsonPath("$.data.next.remainingPhases.length()").value(2));
+        UserRelic after = userRelicRepository.findByUserIdAndRelicId(player.id(), relicId).orElseThrow();
+        assertThat(after.getLastPurifiedAt()).isEqualTo(before.getLastPurifiedAt());
+        assertThat(after.getClarityAnchorAt()).isEqualTo(before.getClarityAnchorAt());
+        assertThat(after.getCareCount()).isZero();
     }
 
     @Test
@@ -258,8 +293,8 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
     }
 
     @Test
-    @DisplayName("흐려짐에서 기억 회복을 하던 중 재봉인돼도 그 판은 인정되어 오염 관리만 남는다")
-    void 플레이_도중_재봉인돼도_진행_인정() throws Exception {
+    @DisplayName("흐려짐에서 기억 회복을 하던 중 재봉인돼도 시작할 때의 흐려짐에서 한 칸 올라 선명이 된다")
+    void 플레이_도중_재봉인돼도_계획_선명도에서_한_칸() throws Exception {
         Player player = player("아슬아슬");
         int relicId = completedRelic(player);
         // 흐려짐의 마지막 순간에 기억 회복을 시작하고, 끝낼 때는 재봉인이다.
@@ -272,17 +307,54 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
                  "bonusTiles":{"jeongseong":0}}
                 """, token)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.clarity").value("RESEALED"))
-                .andExpect(jsonPath("$.data.lastClearedPhase").value("RECALL"))
+                .andExpect(jsonPath("$.data.clarity").value("CLEAR"))
+                .andExpect(jsonPath("$.data.next.action").value("DONE"));
+    }
+
+    @Test
+    @DisplayName("계획 선명도가 없는 옛 관리 세션도 정산 전 선명도에서 한 칸만 오르고, 다시 보고해도 같은 다음 단계다")
+    void 계획_선명도_없는_세션은_한_번만_오른다() throws Exception {
+        Player player = player("옛세션");
+        int relicId = completedRelic(player);
+        clock.advance(Duration.ofDays(15));
+        String token = startPurification(player, relicId, Difficulty.NORMAL);
+        // 계획 선명도를 저장하기 전에 시작한 세션을 흉내 낸다.
+        jdbcTemplate.update("UPDATE play_sessions SET plan_clarity = NULL WHERE session_token = ?", token);
+        clock.advance(Duration.ofMinutes(1));
+
+        String body = """
+                {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
+                 "bonusTiles":{"jeongseong":0}}
+                """;
+        post(player, "/api/purifications/{token}/result", body, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.clarity").value("FADED"))
                 .andExpect(jsonPath("$.data.next.action").value("CONTINUE_RESTORE"))
-                .andExpect(jsonPath("$.data.next.phase").value("GUARD"))
-                .andExpect(jsonPath("$.data.next.remainingPhases.length()").value(1));
+                .andExpect(jsonPath("$.data.next.phase").value("RECALL"));
+        post(player, "/api/purifications/{token}/result", body, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.next.action").value("CONTINUE_RESTORE"))
+                .andExpect(jsonPath("$.data.next.phase").value("RECALL"))
+                .andExpect(jsonPath("$.data.careCount").value(1));
 
-        get(player, "/api/relics/{id}", relicId)
-                .andExpect(jsonPath("$.data.nextPlay.phase").value("GUARD"));
+        assertThat(playSessionRepository.findBySessionToken(token).orElseThrow().getPlanClarity())
+                .isEqualTo(Clarity.RESEALED);
+    }
 
-        UserRelic stored = userRelicRepository.findByUserIdAndRelicId(player.id(), relicId).orElseThrow();
-        assertThat(stored.getRestoreClarity()).isEqualTo(Clarity.RESEALED);
+    @Test
+    @DisplayName("작업대 정령에도 마지막 정화 시각과 다음에 선명도가 바뀌는 시각이 실린다")
+    void 작업대_정령_시각() throws Exception {
+        Player player = player("시계공");
+        int relicId = completedRelic(player);
+        LocalDateTime completedAt = LocalDateTime.now(clock);
+        clock.advance(Duration.ofDays(8));
+
+        get(player, "/api/workbench")
+                .andExpect(jsonPath("$.data.spirits[0].relicId").value(relicId))
+                .andExpect(jsonPath("$.data.spirits[0].clarity").value("FADED"))
+                .andExpect(jsonPath("$.data.spirits[0].lastPurifiedAt").value(startsWith(completedAt.toString())))
+                .andExpect(jsonPath("$.data.spirits[0].clarityChangesAt")
+                        .value(startsWith(completedAt.plusDays(14).toString())));
     }
 
     @Test
@@ -381,6 +453,11 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
                 .andExpect(jsonPath("$.data.spirits[2].clarity").value("CLEAR"))
                 .andExpect(jsonPath("$.data.lockedCount").value(6))
                 .andExpect(jsonPath("$.data.capacity").value(3));
+    }
+
+    /** 지금 시계에서 {@code offset} 만큼 뒤의 시각. 응답 시각과 앞부분을 비교한다. */
+    private String at(Duration offset) {
+        return LocalDateTime.now(clock).plus(offset).toString();
     }
 
     /** 유물을 쥐여 주고 그 번호를 돌려준다. */

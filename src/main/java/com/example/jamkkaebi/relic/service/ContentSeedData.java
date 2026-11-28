@@ -45,10 +45,10 @@ final class ContentSeedData {
     record BuildingSeed(int id, Era era, String name, String realStory) {
     }
 
-    // 같은 시대의 유물 3종은 서로 다른 매개체를 쓴다.
+    // 봉인 매개체는 기획 배정을 따른다(2026-11-20). 같은 시대 안에서 겹칠 수 있다.
     static final List<RelicSeed> RELICS = List.of(
             // 출처: https://www.emuseum.go.kr/detail?relicId=PS0100100100101381300000 · https://museum.seoul.go.kr/www/relic/RelicView.do?mcsjgbnc=PS01003026001&mcseqno1=010126&mcseqno2=00000&cdLanguage=KOR
-            new RelicSeed(1, Era.THREE_KINGDOMS, SealMedium.RUST,
+            new RelicSeed(1, Era.THREE_KINGDOMS, SealMedium.ROOT,
                     "고구려, 벼루 곁에 엎드린 거북", "거북이 모양 연적", "거북이",
                     "나는 고구려 사람이 흙으로 빚은 거북 모양 연적이다\n"
                             + "연적은 벼루에 먹을 갈 때 부을 물을 담아 두는 그릇이다\n"
@@ -70,7 +70,7 @@ final class ContentSeedData {
                     "나는 석류를 얼싸안은 원숭이 모양 고려청자 연적이고, 원숭이 입으로 물을 따른다\n"
                             + "석류 씨는 흰 상감점을 촘촘히 찍어 나타냈다\n"
                             + "나처럼 동물과 식물 모양으로 빚은 청자는 고려청자 전성기인 12세기 전반에 많이 만들어졌다"),
-            new RelicSeed(5, Era.GORYEO, SealMedium.SOOT,
+            new RelicSeed(5, Era.GORYEO, SealMedium.FOG,
                     "고려, 살결에 새긴 구름", "상감 청자 매병", "구름결",
                     "고려가 완성한 상감기법으로, 파낸 자리에 흰 백토와 붉은 자토를 채워 무늬를 냈다\n"
                             + "주꾸미가 안고 온 청자 덕에, 나 같은 고려청자를 실은 배가 태안 바다에서 발견됐다\n"
@@ -86,12 +86,12 @@ final class ContentSeedData {
                     "봉잠이라고도 불리는 나는 봉황 무늬로 꾸민 조선의 뒤꽂이다\n"
                             + "나를 국립중앙박물관에 기증한 김희진 선생은 평생 전통 매듭을 만든 무형문화재다\n"
                             + "국립중앙박물관은 경복궁 시절 마지막 전시로 김희진 선생이 기증한 매듭전을 열었다"),
-            new RelicSeed(8, Era.JOSEON, SealMedium.ROOT,
+            new RelicSeed(8, Era.JOSEON, SealMedium.RUST,
                     "조선, 밤길을 여는 말굽", "마패", "말발굽",
                     "나는 진짜 암행어사가 지니던 마패다. 암행어사는 관리의 잘잘못과 백성의 고통을 살폈다\n"
                             + "관원의 등급에 따라 말을 새겼고, 그 수만큼 역마를 썼다\n"
                             + "나무와 철을 거쳐 구리로 만들었고, 지금 국립중앙박물관에 있다"),
-            new RelicSeed(9, Era.JOSEON, SealMedium.FOG,
+            new RelicSeed(9, Era.JOSEON, SealMedium.SOOT,
                     "조선, 참새를 올려다보는 눈", "묘작도", "묘작이",
                     "나를 그린 변상벽은 고양이를 잘 그려서 사람들이 그 화가를 '변고양이'라 불렀다\n"
                             + "고양이는 장수를, 참새는 기쁨을 뜻한다\n"

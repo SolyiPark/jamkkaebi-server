@@ -237,6 +237,9 @@ public class PurificationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.RELIC_NOT_OWNED));
         RelicMaster master = ownership.require(user.getId(), userRelic.getRelicId()).master();
 
+        // 계획 선명도가 없는 옛 세션은 유물을 바꾸기 전의 선명도로 출발점을 정해 둔다(정산 뒤에 다시 계산하면 두 번 오른다).
+        session.fillPlanClarity(clarityPolicy.clarityOf(userRelic, now));
+
         boolean success = request.result() == PlayResult.SUCCESS;
         boolean perfect = success && request.damage() == 0 && session.getEntryRoute().allowsPerfectBonus();
         RewardCalculator.Reward reward = rewardCalculator.calculate(
@@ -280,18 +283,30 @@ public class PurificationService {
     }
 
     /**
-     * 관리 플레이 성공. 효과는 세션 난이도가, 페이즈는 <b>세션 시작 시점 계획</b>이 정한다.
-     *
-     * <p>복구 진행은 <b>정산 순간의 선명도</b>로 저장한다. 플레이 도중 7·14일 경계를 넘어 선명도가 떨어졌어도
-     * 이번 판에 마친 페이즈를 그대로 인정하기 위해서다 (예: 흐려짐에서 기억 회복을 하던 중 재봉인 → 오염 관리만 남는다).
-     * 판과 판 사이에 방치해 떨어진 경우는 저장된 선명도와 달라 처음부터 다시 한다.
+     * 관리 플레이 성공. 선명도를 {@link #reachedClarity} 까지 올리고 타이머를 새로 시작한다.
      */
     private void settleCare(PlaySession session, UserRelic userRelic, LocalDateTime now) {
-        if (restorePolicy.effectOf(session.getDifficulty()) == RestoreEffect.FULL) {
-            userRelic.restoreFully(now);
-            return;
+        Clarity reached = reachedClarity(session, userRelic, now);
+        userRelic.clearCarePlay(clarityPolicy.anchorFor(reached, now), now);
+    }
+
+    /**
+     * 관리 플레이 한 판 성공으로 오르는 선명도. 보통은 한 칸(재봉인 → 흐려짐 → 선명), 어려움·쉬움은 바로 선명이다.
+     *
+     * <p>출발점은 <b>세션 시작 시점 계획의 선명도</b>다. 플레이 도중 7·14일 경계를 넘어 떨어졌어도 시작할 때의
+     * 선명도에서 한 칸 올린다(관대한 쪽). 세션 값만으로 정해지므로 같은 결과를 다시 보고해도 같은 값이 나온다.
+     */
+    private Clarity reachedClarity(PlaySession session, UserRelic userRelic, LocalDateTime now) {
+        if (restorePolicy.effectOf(session.getDifficulty()) != RestoreEffect.ONE_STEP) {
+            return Clarity.CLEAR;
         }
-        userRelic.clearCarePlay(session.getPhase(), clarityPolicy.clarityOf(userRelic, now), now);
+        Clarity planned = session.getPlanClarity();
+        if (planned == null) {
+            // 이 수정 전에 계획 선명도 없이 정산된 세션을 같은 내용으로 다시 보고한 경우뿐이다.
+            // 유물은 이미 올라 있으므로 다시 올리지 않고 지금 선명도를 쓴다.
+            return clarityPolicy.clarityOf(userRelic, now);
+        }
+        return planned.stepUp();
     }
 
     private PurificationResultResponse render(PlaySession session, User user) {
@@ -317,10 +332,11 @@ public class PurificationService {
                 userRelic.getStatus(),
                 // 관리 플레이(!first)는 공개 단계가 오르지 않는다.
                 success && first ? revealedBy(session.getPhase()) : null,
-                nextStep(session, userRelic, success, clarity),
-                userRelic.restorePhaseFor(clarity),
+                nextStep(session, userRelic, success, now),
                 userRelic.isCompleted() ? userRelic.getCareCount() : null,
                 clarity,
+                userRelic.isCompleted() ? userRelic.getLastPurifiedAt() : null,
+                clarityPolicy.nextChangeAt(userRelic, now),
                 buildingAwarded,
                 null);
     }
@@ -337,7 +353,7 @@ public class PurificationService {
     }
 
     private PurificationResultResponse.NextStep nextStep(PlaySession session, UserRelic userRelic,
-                                                         boolean success, Clarity clarity) {
+                                                         boolean success, LocalDateTime now) {
         if (!success) {
             //실패 하면 재시도(잃는 것 없음)
             return PurificationResultResponse.NextStep.of(NextAction.RETRY);
@@ -349,12 +365,12 @@ public class PurificationService {
             Phase next = userRelic.getCurrentPhase();
             return new PurificationResultResponse.NextStep(NextAction.NEXT_PHASE, next, Phase.from(next));
         }
-        if (session.getPhase().isLast() || restorePolicy.effectOf(session.getDifficulty()) == RestoreEffect.FULL) {
+        // 선명이 되면 복구가 끝난다. 아니면(재봉인 → 흐려짐) 오른 선명도의 페이즈를 이어서 한다.
+        Clarity reached = reachedClarity(session, userRelic, now);
+        if (reached == Clarity.CLEAR) {
             return PurificationResultResponse.NextStep.of(NextAction.DONE);
         }
-        // 지금 선명도 기준으로 남은 순서. 복구 도중 선명도가 바뀌었으면 처음부터다.
-        List<Phase> remaining = clarityPolicy.remainingPhases(clarity, userRelic.restorePhaseFor(clarity));
         return new PurificationResultResponse.NextStep(
-                NextAction.CONTINUE_RESTORE, remaining.getFirst(), remaining);
+                NextAction.CONTINUE_RESTORE, reached.restoreFrom(), clarityPolicy.remainingPhases(reached));
     }
 }

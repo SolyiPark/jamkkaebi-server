@@ -18,7 +18,7 @@ import java.time.LocalDateTime;
  * 실린다.
  *
  * @param clarity        밝기 연출
- * @param lastPurifiedAt 마지막으로 관리(정화)를 끝내 선명도가 회복된 시각. 도깨비 대사의 "며칠 전에 닦아 줬다" 같은 이력에 쓴다
+ * @param lastPurifiedAt 마지막으로 정화(관리 플레이 포함)에 성공한 시각. 도깨비 대사의 "며칠 전에 닦아 줬다" 같은 이력에 쓴다
  * @param position       배치 좌표. 배치하지 않았으면 생략
  */
 
