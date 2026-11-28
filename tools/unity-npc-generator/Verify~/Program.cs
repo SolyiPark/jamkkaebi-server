@@ -2,7 +2,7 @@
 //
 //   verify.exe <unity-npc-generator 폴더> <npc-prompt-test/data 폴더> <기준 프롬프트 json>
 //
-// 0) 데이터: Data/ 사본이 npc-prompt-test/data 원본과 같은지, 실화 이야기가 3개씩 짝이 맞는지
+// 0) 데이터: Runtime/Resources/Npc/ 사본이 npc-prompt-test/data 원본과 같은지, 실화 이야기가 3개씩 짝이 맞는지
 // 1) 규칙 기반 생성기: 프롬프트 시험의 장면을 그대로 돌려 기대 행동을 고르는지, 규칙·이야기 돌리기·실패 결과가 맞는지
 // 2) 공통 금칙어: 걸러야 할 말은 걸리고 정상 대사는 통과하는지, 기본 대사·예시 대사가 모두 통과하는지
 // 3) 프롬프트 조립기: run.py 가 만든 프롬프트(시험에 쓴 그것)와 글자 단위로 같은지
@@ -54,10 +54,10 @@ public static class Program
         string testDataDir = args[1];
         string expectedPath = args[2];
 
-        var lines = Read<DefaultLineCatalog>(Path.Combine(packageDir, "Data", "default_lines.json"));
-        var personas = Read<PersonaCatalog>(Path.Combine(packageDir, "Data", "personas.json"));
-        var actions = Read<ActionCatalog>(Path.Combine(packageDir, "Data", "actions.json"));
-        var forbidden = Read<ForbiddenCatalog>(Path.Combine(packageDir, "Data", "forbidden.json"));
+        var lines = Read<DefaultLineCatalog>(Path.Combine(packageDir, "Runtime", "Resources", "Npc", "default_lines.json"));
+        var personas = Read<PersonaCatalog>(Path.Combine(packageDir, "Runtime", "Resources", "Npc", "personas.json"));
+        var actions = Read<ActionCatalog>(Path.Combine(packageDir, "Runtime", "Resources", "Npc", "actions.json"));
+        var forbidden = Read<ForbiddenCatalog>(Path.Combine(packageDir, "Runtime", "Resources", "Npc", "forbidden.json"));
         var sceneFile = (Dictionary<string, object>)Json.DeserializeObject(ReadText(Path.Combine(testDataDir, "scenes.json")));
         var scenes = ((IEnumerable)sceneFile["scenes"]).Cast<Dictionary<string, object>>().ToList();
         var labels = ((Dictionary<string, object>)sceneFile["labels"]).ToDictionary(p => p.Key, p => (string)p.Value);
@@ -76,7 +76,7 @@ public static class Program
         CheckOutput(forbidden, personas, actions, lines, scenes);
         CheckManager(forbidden, personas, actions, lines);
         CheckEnforcement(forbidden, personas, actions, lines);
-        CheckDeviceFindings(forbidden, personas, actions, lines, scenes, ReadText(Path.Combine(packageDir, "Data", "personas.json")));
+        CheckDeviceFindings(forbidden, personas, actions, lines, scenes, ReadText(Path.Combine(packageDir, "Runtime", "Resources", "Npc", "personas.json")));
         CheckServerContext(forbidden, personas, actions, lines);
         CheckQuality(forbidden, personas, actions, lines);
         CheckRound3(forbidden, personas, actions, lines);
@@ -795,9 +795,9 @@ public static class Program
         Console.WriteLine("=== 데이터 ===");
         foreach (string name in new[] { "personas.json", "actions.json", "forbidden.json" })
         {
-            string copy = ReadText(Path.Combine(packageDir, "Data", name)).Replace("\r\n", "\n");
+            string copy = ReadText(Path.Combine(packageDir, "Runtime", "Resources", "Npc", name)).Replace("\r\n", "\n");
             string original = ReadText(Path.Combine(testDataDir, name)).Replace("\r\n", "\n");
-            Check(copy == original, "Data/" + name + " 이 npc-prompt-test/data 원본과 같음 (다르면 원본을 복사한다)");
+            Check(copy == original, "Runtime/Resources/Npc/" + name + " 이 npc-prompt-test/data 원본과 같음 (다르면 원본을 복사한다)");
         }
         foreach (SpiritLines spirit in lines.spirits)
         {

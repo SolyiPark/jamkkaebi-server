@@ -1,0 +1,10 @@
+{
+  "name": "com.jamkkaebi.npc",
+  "version": "0.1.0",
+  "displayName": "Jamkkaebi NPC Reaction Generator",
+  "description": "도깨비 반응 생성기(규칙 기반·SLM)와 기본 대사 자료",
+  "dependencies": {
+    "com.unity.modules.imgui": "1.0.0",
+    "com.unity.modules.jsonserialize": "1.0.0"
+  }
+}

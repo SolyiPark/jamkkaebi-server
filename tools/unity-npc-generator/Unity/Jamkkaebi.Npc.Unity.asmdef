@@ -1,0 +1,5 @@
+{
+  "name": "Jamkkaebi.Npc.Unity",
+  "references": ["Jamkkaebi.Npc", "undream.llmunity.Runtime"],
+  "autoReferenced": false
+}

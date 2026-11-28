@@ -39,19 +39,20 @@
 
    | 가져올 것 | 넣을 곳 |
    |---|---|
-   | `unity-npc-generator/Runtime/*.cs` (16개, `NpcLineChecks.cs` 포함) | `Assets/Scripts/Npc/` |
+   | `unity-npc-generator/Runtime/*.cs` (19개) | `Assets/Scripts/Npc/` |
    | `unity-npc-generator/Unity/*.cs` (2개) | `Assets/Scripts/Npc/Unity/` |
-   | `unity-npc-generator/Data/*.json` (4개) + `npc-prompt-test/data/scenes.json` | `Assets/Resources/Npc/` |
+   | `unity-npc-generator/Runtime/Resources/Npc/*.json` (4개) + `npc-prompt-test/data/scenes.json` | `Assets/Resources/Npc/` |
 
    Windows (PowerShell, 첫 줄 두 경로는 자기 것으로 바꾼다):
    ```powershell
-   $proj = "C:\UnityProjects\NpcTest"; $src = "C:\jamkkaebi-server\tools"; New-Item -ItemType Directory -Force "$proj\Assets\Scripts\Npc\Unity", "$proj\Assets\Resources\Npc" | Out-Null; Copy-Item "$src\unity-npc-generator\Runtime\*.cs" "$proj\Assets\Scripts\Npc\"; Copy-Item "$src\unity-npc-generator\Unity\*.cs" "$proj\Assets\Scripts\Npc\Unity\"; Copy-Item "$src\unity-npc-generator\Data\*.json" "$proj\Assets\Resources\Npc\"; Copy-Item "$src\npc-prompt-test\data\scenes.json" "$proj\Assets\Resources\Npc\"
+   $proj = "C:\UnityProjects\NpcTest"; $src = "C:\jamkkaebi-server\tools"; New-Item -ItemType Directory -Force "$proj\Assets\Scripts\Npc\Unity", "$proj\Assets\Resources\Npc" | Out-Null; Copy-Item "$src\unity-npc-generator\Runtime\*.cs" "$proj\Assets\Scripts\Npc\"; Copy-Item "$src\unity-npc-generator\Unity\*.cs" "$proj\Assets\Scripts\Npc\Unity\"; Copy-Item "$src\unity-npc-generator\Runtime\Resources\Npc\*.json" "$proj\Assets\Resources\Npc\"; Copy-Item "$src\npc-prompt-test\data\scenes.json" "$proj\Assets\Resources\Npc\"
    ```
    Mac (터미널):
    ```bash
-   proj=~/UnityProj/NpcTest; src=~/jamkkaebi-server/tools; mkdir -p "$proj/Assets/Scripts/Npc/Unity" "$proj/Assets/Resources/Npc" && cp "$src"/unity-npc-generator/Runtime/*.cs "$proj/Assets/Scripts/Npc/" && cp "$src"/unity-npc-generator/Unity/*.cs "$proj/Assets/Scripts/Npc/Unity/" && cp "$src"/unity-npc-generator/Data/*.json "$src"/npc-prompt-test/data/scenes.json "$proj/Assets/Resources/Npc/"
+   proj=~/UnityProj/NpcTest; src=~/jamkkaebi-server/tools; mkdir -p "$proj/Assets/Scripts/Npc/Unity" "$proj/Assets/Resources/Npc" && cp "$src"/unity-npc-generator/Runtime/*.cs "$proj/Assets/Scripts/Npc/" && cp "$src"/unity-npc-generator/Unity/*.cs "$proj/Assets/Scripts/Npc/Unity/" && cp "$src"/unity-npc-generator/Runtime/Resources/Npc/*.json "$src"/npc-prompt-test/data/scenes.json "$proj/Assets/Resources/Npc/"
    ```
-   - **`Verify/` 폴더는 넣지 않는다.** Unity 밖에서 쓰는 검사 프로그램이라 넣으면 컴파일 오류가 난다.
+   - **`.cs` 와 `.json` 만 복사한다.** `.asmdef` · `.meta` · `package.json` 은 패키지로 참조할 때 쓰는 것이라 복사하지 않는다 (패키지로 참조하는 방법은 [README.md](README.md) 의 "Unity에 넣기").
+   - **`Verify~/` 폴더는 넣지 않는다.** Unity 밖에서 쓰는 검사 프로그램이라 넣으면 컴파일 오류가 난다.
    - **`Resources` 폴더 이름은 그대로** 둔다. 코드가 `Resources.Load("Npc/…")`로 읽는다.
 5. **심볼 켜기**: Edit → Project Settings → Player → Other Settings → Script Compilation → Scripting Define Symbols 에 `JAMKKAEBI_LLMUNITY` 를 넣고 Apply.
    - **대문자 그대로** 쓴다. 대소문자가 다르면 LLMUnity 연결부가 통째로 빠진 채 컴파일된다 (오류도 안 난다).
@@ -95,14 +96,14 @@
 
 ### Unity 없이 PowerShell 에서 (LM Studio)
 
-같은 흐름(파일 읽기 → 미리 만들기 → 장면마다 미리 읽기·서버 값 바꿔 요청·장면 사이 쉬기)을 Verify 로 돌린다. 검사는 건너뛰고 바로 시작한다. LM Studio 서버를 켜고 모델을 올린 뒤 `Verify` 폴더에서:
+같은 흐름(파일 읽기 → 미리 만들기 → 장면마다 미리 읽기·서버 값 바꿔 요청·장면 사이 쉬기)을 Verify 로 돌린다. 검사는 건너뛰고 바로 시작한다. LM Studio 서버를 켜고 모델을 올린 뒤 `Verify~` 폴더에서:
 
 ```powershell
 .\verify.bat --device --repeat 4 --gap 30 --fresh
 ```
 
-- 옵션: `--url` `--model` `--repeat` `--gap`(장면 사이 쉬는 초, 기본 0) `--idle`(PrefetchIdleDelay 초, 기본 3 — 예전 결과와 비교하려면 `--idle 10 --no-adaptive-idle`: 기기 속도 맞춤이 켜져 있으면 10 을 줘도 빠른 PC 에서는 1~3초로 줄어든다) `--switch-idle`(PrefetchSwitchIdleDelay 초 — 다른 도깨비의 작업 전에 쉬는 시간, 기본 30) `--seed`(주면 매번 그 seed) `--fresh`(npc_lines.txt 를 지우고 처음 설치처럼) `--per-scene` `--no-prefetch` `--no-store` `--no-refill` `--no-prepare` `--same-server-values`. 전체는 `Verify/DeviceRun.cs` 맨 위.
-- CSV·로그·npc_lines.txt 는 `Verify/bin/device/` 에 생긴다. CSV 열은 기기 시험과 같고, 첫응답ms·메모리MB 는 -1 이다. 맨 끝 `생각중ms` 는 요청이 "음..."(`NpcRequestManager.ThinkingLine`)을 알린 때(요청을 보낸 때부터)이고, 모델을 기다리지 않은 요청(미리 만든 대사·정해진 대사·기본 대사)은 -1 이다 (2026-11-27). Ctrl+C 로 멈춰도 그때까지의 줄과 대사 파일은 남는다.
+- 옵션: `--url` `--model` `--repeat` `--gap`(장면 사이 쉬는 초, 기본 0) `--idle`(PrefetchIdleDelay 초, 기본 3 — 예전 결과와 비교하려면 `--idle 10 --no-adaptive-idle`: 기기 속도 맞춤이 켜져 있으면 10 을 줘도 빠른 PC 에서는 1~3초로 줄어든다) `--switch-idle`(PrefetchSwitchIdleDelay 초 — 다른 도깨비의 작업 전에 쉬는 시간, 기본 30) `--seed`(주면 매번 그 seed) `--fresh`(npc_lines.txt 를 지우고 처음 설치처럼) `--per-scene` `--no-prefetch` `--no-store` `--no-refill` `--no-prepare` `--same-server-values`. 전체는 `Verify~/DeviceRun.cs` 맨 위.
+- CSV·로그·npc_lines.txt 는 `Verify~/bin/device/` 에 생긴다. CSV 열은 기기 시험과 같고, 첫응답ms·메모리MB 는 -1 이다. 맨 끝 `생각중ms` 는 요청이 "음..."(`NpcRequestManager.ThinkingLine`)을 알린 때(요청을 보낸 때부터)이고, 모델을 기다리지 않은 요청(미리 만든 대사·정해진 대사·기본 대사)은 -1 이다 (2026-11-27). Ctrl+C 로 멈춰도 그때까지의 줄과 대사 파일은 남는다.
 - 요약에 반복별 적중, 메모에 Repeated 가 적힌 장면 수, 미리 읽기 시간(앞 장면과 같은 도깨비 / 바뀜)이 따로 나온다.
 - 기억 장면(S14)은 기기 시험 화면과 이 모드 모두 게임처럼 돈다(`NpcTestMemory`, 2026-11-24): 반복마다 기억을 남기고 꺼냈음을 표시한다. 기억이 하나라 반복 1은 지난 대화(`recall_talk`), 반복 2부터는 평소 안부(`answer_status`)다. CSV 의 요청서버값 칸에 "기억: 지난 대화 꺼냄 (꺼냈음 표시)" · "기억: 평소 안부 (꺼낸 뒤 한 번 쉼 표시)"가 적힌다. 처음 미리 만들 때 그다음 평소 안부도 함께 만든다.
 - 기기와 다른 점: LM Studio 는 같은 도깨비가 이어져도 미리 읽기 때 1토큰을 다시 부르므로 그 시간이 0 은 아니다(짧은 호출 한 번). 수 초가 걸리면 뒤에서 만들던 대사 뒤에 줄을 선 것이다. seed 는 `--seed 0` 이 고치기 전 LLMUnity, 생략이 고친 뒤와 같은 상황이다.
@@ -194,7 +195,7 @@
 | "데이터가 없다" | 2단계 4번. `Assets/Resources/Npc/` 에 JSON 5개(scenes 포함)가 있는지 본다. |
 | 컴파일 오류 `The type or namespace name 'LLMUnity' could not be found` | LLMUnity 가 설치되지 않았거나, 우리 스크립트가 다른 asmdef 안에 있어 LLMUnity 를 못 본다. asmdef 가 있으면 LLMUnity 참조를 추가한다. |
 | 컴파일 오류 `'LLM' 또는 'LLMAgent' does not contain a definition for …` | LLMUnity 버전이 3.0.3 이 아니다. 3.0.3 으로 고정해 다시 설치한다. |
-| 컴파일 오류가 `Program.cs`·`System.Web.Script` 쪽에서 남 | `Verify/` 를 넣었다. Unity 프로젝트에서 지운다. |
+| 컴파일 오류가 `Program.cs`·`System.Web.Script` 쪽에서 남 | `Verify~/` 의 파일을 넣었다. Unity 프로젝트에서 지운다. |
 | `adb` 를 찾을 수 없음 | 4단계 3번의 Unity SDK 폴더에서 실행하거나, 그 폴더를 PATH 에 넣는다. |
 
 ## 미리 만들기 흐름 (칸 있는 대사)

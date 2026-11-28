@@ -29,6 +29,8 @@ AI 반응 생성기의 클라이언트 쪽 코드다. 생성기 두 가지와 �
 | `Runtime/NpcContentCatalogs.cs` | 페르소나·행동 카탈로그 데이터 타입 |
 | `Runtime/NpcContextBuilder.cs` | 컨텍스트 구성기 (`NpcContextInput`, `NpcContext` 포함) |
 | `Runtime/NpcRequestManager.cs` | 요청 관리자 (`NpcResponse` 포함) |
+| `Runtime/NpcLineCache.cs` | 미리 만들어 둔 대사 보관함 (`NpcLineCache`). 같은 상황에서 만든 대사만 꺼내 쓰게 하는 열쇠(`KeyOf` · `TemplateKeyOf`) 포함 |
+| `Runtime/NpcLineSlots.cs` | 칸 있는 대사: 서버 값에 달린 말(시간대·호칭·횟수·날 수)을 칸으로 남기고 실제 값으로 채운다 (`SlotValues` 포함) |
 | `Runtime/NpcLineStore.cs` | 미리 만든 대사 파일 (`INpcLineStore`, `NpcLineFileStore`, `NpcLineStoreFormat`). 앱을 다시 켜도 미리 만든 대사를 쓴다 |
 | `Runtime/SlmReactionGenerator.cs` | SLM 생성기와 모델 런타임 자리(`INpcModelBackend`) |
 | `Runtime/LlmUnityModelBackend.cs` | LLMUnity 백엔드의 핵심 (`LlmUnityOptions`, `ILlmUnityRuntime`, `ILlmUnitySession`). Unity 없이 컴파일된다 |
@@ -41,19 +43,42 @@ AI 반응 생성기의 클라이언트 쪽 코드다. 생성기 두 가지와 �
 | `Runtime/NpcLineChecks.cs` | 대사 내용 판정: 문장마다 어미(존댓말·반말 섞기), 같은 대사인지. `run.py` 와 같은 규칙 |
 | `Runtime/StoryRotation.cs` | 실화 이야기를 돌려 가며 고르는 기록 |
 | `Runtime/NpcLineFilter.cs` | 공통 금칙어 필터 (`ForbiddenCatalog` 포함) |
-| `Runtime/NpcContentLoader.cs` | `Data/` 의 JSON을 읽는 Unity 전용 도우미 |
-| `Data/default_lines.json` | 도깨비별 기본 대사와 실화 이야기 대사 (규칙 기반 생성기) |
-| `Data/personas.json` · `Data/actions.json` · `Data/forbidden.json` | 페르소나(실화 조각 포함)·행동 카탈로그·공통 금칙어. `tools/npc-prompt-test/data/` 의 복사본 |
-| `Verify/` | Unity 없이 검증하는 도구 |
+| `Runtime/NpcContentLoader.cs` | `Runtime/Resources/Npc/` 의 JSON을 읽는 Unity 전용 도우미 |
+| `Runtime/Resources/Npc/default_lines.json` | 도깨비별 기본 대사와 실화 이야기 대사 (규칙 기반 생성기) |
+| `Runtime/Resources/Npc/personas.json` · `actions.json` · `forbidden.json` | 페르소나(실화 조각 포함)·행동 카탈로그·공통 금칙어. `tools/npc-prompt-test/data/` 의 복사본 |
+| `Verify~/` | Unity 없이 검증하는 도구. 이름 끝의 `~` 때문에 Unity 는 이 폴더를 읽지 않는다 |
+| `package.json` · `Runtime/Jamkkaebi.Npc.asmdef` · `Unity/Jamkkaebi.Npc.Unity.asmdef` · `*.meta` | Unity 패키지 형식 (아래 "Unity에 넣기") |
 
 ## Unity에 넣기
 
-1. `Runtime/` 의 `.cs` 파일 열다섯 개를 `Assets/Scripts/Npc/` 같은 곳에, `Unity/` 의 두 개를 `Assets/Scripts/Npc/Unity/` 에 복사한다.
-   LLMUnity 를 쓰면 Scripting Define Symbols 에 `JAMKKAEBI_LLMUNITY` 를 넣는다 (플랫폼 탭마다).
-2. `Data/` 의 JSON 넷을 `Assets/Resources/Npc/` 에 복사한다 (TextAsset으로 읽힌다).
-3. 클라이언트에 이미 `INpcReactionGenerator`(대사만 만드는 v1)가 있다면, 이 파일들은 `Jamkkaebi.Npc` 네임스페이스라 충돌하지 않는다. v1을 이 계약으로 바꿀지 따로 둘지 정한다.
+이 폴더는 Unity 패키지(`com.jamkkaebi.npc`)다. 파일을 복사하지 않고 git 주소로 참조한다.
 
-C# 5 문법만 써서 낮은 Unity 버전에서도 컴파일된다. 외부 패키지는 필요 없다.
+1. Unity 프로젝트의 `Packages/manifest.json` 의 `dependencies` 에 아래 한 줄을 넣는다. 끝의 태그가 쓰는 판이다.
+   ```json
+   "com.jamkkaebi.npc": "https://github.com/SolyiPark/jamkkaebi-server.git?path=/tools/unity-npc-generator#npc-v0.1.0"
+   ```
+   - PC 에 Git 이 설치돼 있고 PATH 에 있어야 한다 (Unity 가 git 주소 패키지를 받을 때 쓴다).
+   - 판을 올릴 때는 끝의 태그만 바꾼다. 브랜치 이름으로 참조하지 않는다.
+   - git 으로 받은 패키지는 읽기 전용이다. 고칠 것이 있으면 이 저장소에 PR 을 낸다.
+2. 어셈블리는 둘이다.
+   - `Jamkkaebi.Npc` (`Runtime/`): 생성기 본체. asmdef 가 없는 `Assets/` 코드에서는 바로 쓰이고, asmdef 가 있는 코드는 `references` 에 `Jamkkaebi.Npc` 를 넣는다.
+   - `Jamkkaebi.Npc.Unity` (`Unity/`): LLMUnity 연결부와 실기기 시험 컴포넌트. 자동으로 참조되지 않는다 — 쓰는 쪽 asmdef 의 `references` 에 넣는다.
+     LLMUnity 를 쓰면 Scripting Define Symbols 에 `JAMKKAEBI_LLMUNITY` 를 넣는다 (플랫폼 탭마다). 심볼이 없으면 `LlmUnityRuntime.cs` 가 통째로 빠져 LLMUnity 없이도 컴파일된다.
+3. 자료 JSON 넷은 패키지의 `Runtime/Resources/Npc/` 에 있어 복사 없이 `Resources.Load("Npc/…")` 로 읽힌다 (TextAsset).
+   실기기 시험용 `scenes.json` 은 패키지에 없다. 시험 프로젝트가 자기 `Assets/Resources/Npc/` 에 둔다.
+4. 클라이언트에 이미 `INpcReactionGenerator`(대사만 만드는 v1)가 있다면, 이 파일들은 `Jamkkaebi.Npc` 네임스페이스라 충돌하지 않는다. v1을 이 계약으로 바꿀지 따로 둘지 정한다.
+
+이 저장소를 받아 둔 PC 에서 고치면서 바로 보려면 git 주소 대신 `"com.jamkkaebi.npc": "file:<저장소 경로>/tools/unity-npc-generator"` 로 건다.
+
+### 판 올리기 (태그)
+
+- `Runtime/` · `Unity/` · `Runtime/Resources/` 가 바뀌는 PR 을 합칠 때 `package.json` 의 `version` 을 올리고, 합쳐진 커밋에 `npc-v<버전>` 태그를 단다 (첫 태그는 `npc-v0.1.0`).
+- 클라이언트는 태그로만 가져간다.
+- 파일·폴더를 새로 넣으면 그 `.meta` 도 함께 커밋한다 (`Verify~/` 안은 제외). git 으로 받은 패키지는 읽기 전용이라 Unity 가 `.meta` 를 만들어 주지 않고, `.meta` 가 없는 파일은 무시한다.
+  위의 `file:` 로 걸어 Unity 를 한 번 열면 빠진 `.meta` 가 만들어진다.
+- `Verify~/` 는 이름이 `~` 로 끝나 Unity 가 읽지 않는다 (콘솔용 검사 프로그램이라 Unity 컴파일에 섞이면 안 된다).
+
+C# 5 문법만 써서 낮은 Unity 버전에서도 컴파일된다. Unity 기본 모듈(JSONSerialize) 말고 외부 패키지는 필요 없다.
 LM Studio 백엔드는 `System.Net.Http` 를 쓴다. 오래된 Unity에서 `HttpClient` 를 못 찾는다고 나오면 `Assets/csc.rsp` 에 `-r:System.Net.Http.dll` 한 줄을 넣는다.
 
 ## 규칙 기반 생성기 쓰기
@@ -645,14 +670,14 @@ string system = assembler.SystemFor(relicId);   // 그 도깨비의 시스템 �
 
 ## 데이터 고치기
 
-- **기본 대사** `Data/default_lines.json`
+- **기본 대사** `Runtime/Resources/Npc/default_lines.json`
   - 도깨비 하나 = `spirits[]` 의 항목 하나. 없는 도깨비는 `fallback`(정중한 해요체)을 쓴다.
   - 모든 행동에 대사가 있어야 하고, `answer_status` 는 `faded` · `recent_care` · `default` 셋이 필요하다.
   - `thank_calm` · `thank_joyful` 은 일반 풀(`""`)과 `partial` 풀이 모두 필요하다(`fallback` 포함). `partial` 은 관리 뒤에도 아직 선명이 아닐 때(보통 난이도로 재봉인 → 흐려짐) 쓰는 감사로, "깨끗해졌네"·"맑아졌어"처럼 다 나았다는 말을 넣지 않는다. 규칙 기반 생성기는 이때 일반 풀로 내려가지 않는다(`Verify` 가 검사).
   - 기준: 30자 안팎(손님 관람 20자 이내), 도깨비 말투 어미 유지, 묘작이는 "좋은 일" 금지(이야기 대사는 예외), 밤바다는 주인에게 시키지 않는다.
   - 끌려갈 때(`struggle_*`)는 기본 대사도 없다(`Verify` 가 풀이 없는지 본다). 모든 기본 대사는 공통 금칙어를 통과해야 한다(`Verify` 가 검사).
   - `stories`: 실화 이야기 대사 3개(70자 이하). 페르소나 `stories` 와 같은 순서로, 사실은 그대로 두고 말투만 입힌다. 페르소나가 있는 도깨비는 `tell_story` 풀을 두지 않는다.
-- **페르소나·행동·금칙어** `Data/personas.json` · `Data/actions.json` · `Data/forbidden.json`
+- **페르소나·행동·금칙어** `Runtime/Resources/Npc/` 의 `personas.json` · `actions.json` · `forbidden.json`
   - **원본은 `tools/npc-prompt-test/data/`** 다. 원본을 고쳐 시험한 뒤 여기로 복사한다.
   - 복사를 잊으면 `Verify` 의 사본 비교가 실패해서 알 수 있다.
 - **아직 페르소나가 없는 4종**(금동연가7년명여래입상 1, 금관총 금관 3, 관촉사 미륵보살 4, 유서지보 7)
@@ -661,10 +686,10 @@ string system = assembler.SystemFor(relicId);   // 그 도깨비의 시스템 �
 
 ## Unity 없이 확인하기
 
-`Verify/verify.bat` 하나로 확인한다. 설치할 것은 없다. Windows에 기본으로 들어 있는 C# 컴파일러(.NET Framework 4.x의 csc, C# 5)와 Python만 쓴다.
+`Verify~/verify.bat` 하나로 확인한다. 설치할 것은 없다. Windows에 기본으로 들어 있는 C# 컴파일러(.NET Framework 4.x의 csc, C# 5)와 Python만 쓴다.
 
 ```bash
-cd tools/unity-npc-generator/Verify
+cd tools/unity-npc-generator/Verify~
 ```
 
 ```bash
@@ -688,7 +713,7 @@ LM Studio 서버를 켜 두었다면 실제 모델로도 돌려 볼 수 있다. 
 ```
 
 마지막 숫자는 판 1 의 반복 횟수(기본 3)다. 모델이 이야기·끌려갈 때를 뺀 시험 장면과 다음 정화 셋(선명 3일·흐려짐 10일·재봉인 18일 뒤 — 견본 1·9·16일과 날 수가 다르다)을 요청한다.
-- **판 1 (처음 설치)**: 빈 파일에서 시작해 미리 만들고, 반복해 요청한다. 반복 사이에는 쓴 만큼 다시 만들기가 끝나기를 기다린다(게임에서 사용자가 다음에 누를 때까지 비는 시간). 끝에 파일(`Verify/bin/live_npc_lines.txt`)에 쓴다.
+- **판 1 (처음 설치)**: 빈 파일에서 시작해 미리 만들고, 반복해 요청한다. 반복 사이에는 쓴 만큼 다시 만들기가 끝나기를 기다린다(게임에서 사용자가 다음에 누를 때까지 비는 시간). 끝에 파일(`Verify~/bin/live_npc_lines.txt`)에 쓴다.
 - **판 2 (앱을 다시 켬)**: 새 요청 관리자로 그 파일을 읽고 한 번 더 요청한다.
 - 볼 것: 판마다 "파일에서 읽은 칸 있는 대사 n개", "미리 만들기 …ms, 모델 n번"(판 2 는 거의 0번이어야 한다), 반복마다 "미리 만든 대사 적중 x/y"와 "쓴 만큼 다시 만들기 … 모델 n번"(쓴 수만큼), 줄 끝의 `[칸 채움: 날수]`(정화 대사의 날 수를 채워 씀). 끝에 판 1·판 2 적중률 요약.
 
@@ -701,7 +726,7 @@ LM Studio 서버를 켜 두었다면 실제 모델로도 돌려 볼 수 있다. 
 
 | 대상 | 내용 |
 |---|---|
-| 데이터 | `Data/` 의 사본 셋이 원본과 같은지, 5종 모두 실화 3개와 이야기 대사 3개가 짝이 맞는지, 이야기 대사 70자 이하 |
+| 데이터 | `Runtime/Resources/Npc/` 의 사본 셋이 원본과 같은지, 5종 모두 실화 3개와 이야기 대사 3개가 짝이 맞는지, 이야기 대사 70자 이하 |
 | 규칙 기반 생성기: 장면 | 18장면을 6번씩 돌려 기대 행동을 고르는지, 대상이 맞는지, 대사가 있는지, 바로 앞 대사를 반복하지 않는지 |
 | 규칙 기반 생성기: 규칙 | 안부 세 가지 변형, 단골 기준, 도깨비 성향, 페르소나 없는 도깨비, 실패 결과(없는 요청·후보 없음·취소) |
 | 실화 이야기 | 번호 없이 네 번 들으면 처음 세 번이 모두 다르고 네 번째에 처음 것으로 돌아오는지, `story_index` 를 따르는지, 페르소나 없는 도깨비는 자료 문장 그대로인지, 돌리기 기록 저장·복원 |
@@ -716,7 +741,7 @@ LM Studio 서버를 켜 두었다면 실제 모델로도 돌려 볼 수 있다. 
 | SLM 생성기 | 가짜 모델로: 통과하면 Success(Slm), 검사에 걸리면 InvalidOutput + 이유, NotReady · Unsupported(페르소나 없음·이야기) · NoCandidate · Error · Cancelled(요청 전·생성 도중), 모델을 부르지 않아야 할 때 부르지 않는지, 실패 뒤 규칙 기반 대신 |
 | 프롬프트 조립기 | 13장면 모두 `run.py` 와 시스템·사용자 메시지(형식 설명 있음·없음)·JSON 스키마가 글자 단위로 같은지 (다르면 몇 번째 글자부터 다른지 보여 준다), 이야기 5장면은 프롬프트가 없는지, **시스템 메시지가 도깨비마다 고정이고 바뀌는 내용(상대 태도·상황·대사 길이·페르소나 칸·기억)이 없는지**, 사용자 메시지가 지금 상대부터인지, 감사·끌어당기기·손님 관람에 맞는 페르소나 칸만 싣는지, 형식 설명이 형식 제약 없을 때만인지, 말줄임표가 거의 없는지, 애착 규칙, `story_index` 가 안 실리는지, 문법, null 경우, 예시 끄기 |
 
-**검사를 늘리려면** `Verify/Program.cs` 에 `Check(조건, "설명")` 을 더한다. 장면을 늘리려면 `tools/npc-prompt-test/data/scenes.json` 에 장면을 넣으면 두 검사에 모두 들어간다.
+**검사를 늘리려면** `Verify~/Program.cs` 에 `Check(조건, "설명")` 을 더한다. 장면을 늘리려면 `tools/npc-prompt-test/data/scenes.json` 에 장면을 넣으면 두 검사에 모두 들어간다.
 
 **다른 방법**
 - .NET SDK를 설치하면 `dotnet new nunit` 으로 테스트 프로젝트를 만들어 같은 코드를 `dotnet test` 로 돌릴 수 있다.
