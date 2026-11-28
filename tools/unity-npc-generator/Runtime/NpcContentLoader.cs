@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Jamkkaebi.Npc
 {
     /// <summary>
-    /// Data/ 의 JSON(default_lines · personas · actions)을 읽는다. Unity 에서만 컴파일된다.
+    /// Runtime/Resources/Npc/ 의 JSON(default_lines · personas · actions)을 읽는다. Unity 에서만 컴파일된다.
     /// JsonUtility 는 키 이름이 필드 이름과 정확히 같아야 읽고, 모르는 키는 무시한다.
     /// </summary>
     public static class NpcContentLoader

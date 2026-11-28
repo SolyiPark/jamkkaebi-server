@@ -5,7 +5,7 @@
 //
 // 흐름은 실기기 시험과 같다: 파일(npc_lines.txt)을 읽고 → 장면마다 칸 있는 대사를 미리 만들고 → 장면을 반복해 요청한다.
 // 요청마다 그 도깨비의 시스템 프롬프트를 먼저 읽히고(미리 읽기), 서버 값(시간대·호칭)을 바꿔 요청하고, 장면 사이에 --gap 초 쉰다.
-// CSV 는 실기기 시험과 같은 열로 Verify/bin/device/ 에 쓴다 (첫응답ms·메모리MB 는 LM Studio 에서 잴 수 없어 -1).
+// CSV 는 실기기 시험과 같은 열로 Verify~/bin/device/ 에 쓴다 (첫응답ms·메모리MB 는 LM Studio 에서 잴 수 없어 -1).
 //
 // 실기기와 다른 점: LLMUnity 가 아니라 LM Studio(llama.cpp 서버)를 부른다. 미리 읽기는 같은 도깨비가 이어져도 1토큰 생성을 한 번 한다(LLMUnity 는 건너뜀).
 // seed 는 --seed 를 주면 매번 그 값(고치기 전 LLMUnity 의 seed 0 과 같은 상황),
@@ -142,7 +142,7 @@ public static class DeviceRun
                 case "--no-refill": s.Refill = false; break;
                 case "--no-prepare": s.Prepare = false; break;
                 case "--same-server-values": s.OtherServerValues = false; break;
-                default: throw new ArgumentException(name + " (쓸 수 있는 옵션은 Verify/DeviceRun.cs 맨 위에 있다)");
+                default: throw new ArgumentException(name + " (쓸 수 있는 옵션은 Verify~/DeviceRun.cs 맨 위에 있다)");
             }
         }
         return s;

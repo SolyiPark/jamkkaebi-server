@@ -34,7 +34,7 @@ from pathlib import Path
 BASE = Path(__file__).resolve().parent
 DATA = BASE / "data"
 # 게임의 기본 대사 (출력 검사에 걸려 기본 대사로 대신할 때 무엇을 띄우는지 흉내 낸다). 없으면 흉내 내지 않는다
-DEFAULT_LINES = BASE.parent / "unity-npc-generator" / "Data" / "default_lines.json"
+DEFAULT_LINES = BASE.parent / "unity-npc-generator" / "Runtime" / "Resources" / "Npc" / "default_lines.json"
 
 VARIANTS = {
     "single": "한 번 호출. 상황은 키-값, 예시 대사와 대화 기억 포함",
@@ -96,7 +96,7 @@ ACTION_FIELDS = {
 # "닦아 주셔서 감사합니다", "선명해졌어요" 하고 고마워했다(S03 3/3, 2026-11-11 시험)
 UNCARED_CLARITY = {"흐려짐", "재봉인"}
 # AI 로 만들지 않고 정해진 대사를 쓰는 행동. 이야기는 2B 모델이 사실을 지어내거나 빼먹어서, 검수한 이야기 대사
-# 3개(unity-npc-generator/Data/default_lines.json 의 stories)를 게임이 차례로 꺼내 쓴다. 이 시험기는 건너뛴다.
+# 3개(unity-npc-generator/Runtime/Resources/Npc/default_lines.json 의 stories)를 게임이 차례로 꺼내 쓴다. 이 시험기는 건너뛴다.
 FIXED_ACTIONS = {"tell_story"}
 # 대사 없이 몸짓(애니메이션)만 하는 행동. 끌려갈 때는 대사를 띄우지 않는다(2026-11-13) — 게임은 모델을 부르지 않고 행동만 고른다.
 # 이 시험기도 건너뛴다 (C# NpcActions.IsSilent)
