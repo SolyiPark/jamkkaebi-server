@@ -254,12 +254,14 @@ namespace Jamkkaebi.Npc
                         string when = TimeOfDay(input.Now.Value);
                         // 2026-11-17 20:39 시험: "너를 불렀다"를 읽은 모델이 부른 쪽을 뒤바꿔("발굴자를 불러서 반가워") 말했다. 주인이 도깨비를 '보러 찾아왔다'고 적어 방문한 쪽이 주인임을 분명히 한다
                         // ('찾아와'를 넣어 방문한 쪽이 주인임을 분명히 한다 ("아침에 날 깨워줘서", "아침부터 반갑게 맞이해줘서"처럼 주체가 뒤바뀐 말을 줄인다)
-                        request.Situation = "주인이 " + when + "에 너를 보러 찾아왔다.";
+                        // 2026-11-27 ver9 기기 시험: "너를 보러 찾아왔다"의 '너를'(프롬프트에서는 도깨비)을 모델이 플레이어에게 하는 말로 옮겨("드디어 너를 보러 저녁에 찾아왔구나",
+                        // "드디어 너를 찾았네") 다듬기가 지우면 "드디어 보러 저녁에 찾아왔구나"·"드디어 찾았네" 같은 토막이 남았다. '너를 보러'를 빼고 찾아온 쪽만 적는다
+                        request.Situation = "주인이 " + when + "에 찾아왔다.";
                         request.Facts.Add(new Fact(NpcFactKeys.TimeOfDay, when));
                     }
                     else
                     {
-                        request.Situation = "주인이 너를 보러 찾아왔다.";
+                        request.Situation = "주인이 찾아왔다.";
                     }
                     AddAwakening(input, request);
                     Candidates(request, NpcActions.Greet);
@@ -543,9 +545,10 @@ namespace Jamkkaebi.Npc
             // 흐려짐·재봉인이어도 한 칸 올라 흐려짐이 된 정령(partly)은 며칠 전에 관리받았다 — "오랜만에"가 아니다
             bool longGap = (days.HasValue && days.Value >= LongGapDays) || ((before == "FADED" || before == "RESEALED") && !partly);
 
+            // '너를'은 빼고 적는다 — 모델이 "너를 관리해 줘서"처럼 옮기면 다듬기가 지운다 (탭 상황 문장과 같은 까닭, 2026-11-27)
             string situation = longGap
-                    ? "주인이 오랜만에 너를 관리해 주었다."
-                    : "주인이 너를 관리해 주었다.";
+                    ? "주인이 오랜만에 관리해 주었다."
+                    : "주인이 관리해 주었다.";
             // 관리 결과 사실은 프롬프트에 싣지 않으므로(HiddenFactKeys) 다 낫지 않았으면 상황 문장에 적는다 — 적지 않으면 재봉인에서 흐려짐까지만 올랐는데
             // 다 나은 것처럼 고마워한다. 한 칸 올라 흐려짐이던 정령이 마저 선명해졌으면 그것도 적는다(선명 → 선명과 같은 프롬프트가 되지 않게)
             if (after == "RESEALED")

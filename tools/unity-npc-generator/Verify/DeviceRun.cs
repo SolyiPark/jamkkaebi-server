@@ -25,6 +25,23 @@ using Jamkkaebi.Npc;
 
 public static class DeviceRun
 {
+    /// <summary>요청이 "음..."(NpcRequestManager.ThinkingLine)을 알린 때를 잰다 (요청을 보낸 때부터 ms, 알리지 않았으면 -1). CSV 의 생각중ms 열.</summary>
+    private sealed class ThinkingClock : IProgress<string>
+    {
+        private readonly Stopwatch watch = Stopwatch.StartNew();
+        private long at = -1;
+
+        public long At
+        {
+            get { return Interlocked.Read(ref at); }
+        }
+
+        public void Report(string value)
+        {
+            Interlocked.CompareExchange(ref at, watch.ElapsedMilliseconds, -1);
+        }
+    }
+
     private sealed class Settings
     {
         public string Url = "http://127.0.0.1:1234";
@@ -250,13 +267,14 @@ public static class DeviceRun
         }
 
         string path = Path.Combine(dir, "npc_device_test_" + stamp + ".csv");
-        File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값,미리읽기초과ms,기억\n", new UTF8Encoding(true));
+        File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값,미리읽기초과ms,기억,생각중ms\n", new UTF8Encoding(true));
         Say("CSV: " + path + " (장면마다 이어 쓴다), 로그: " + logPath);
 
         // 기억을 꺼내는 장면(S14)은 게임처럼 돌린다: 반복마다 기억을 남기고 꺼냈음을 표시해, 같은 기억을 연달아 꺼내지 않는다 (NpcTestMemory)
         var testMemory = new NpcTestMemory(personas, DateTime.Today);
         var memoryScenes = new HashSet<string>(sceneList.Where(NpcTestMemory.Handles).Select(sc => sc.Id));
         int prefetchHits = 0;
+        var waitedHitTimes = new List<long>(); // 같은 상황을 기다려 꺼낸 미리 만든 대사의 전체 시간
         if (s.Prefetch && slm.IsReady)
         {
             Stopwatch preparing = Stopwatch.StartNew();
@@ -387,13 +405,15 @@ public static class DeviceRun
                 }
 
                 Stopwatch watch = Stopwatch.StartNew();
-                NpcResponse response = await run.RequestAsync(request, ct);
+                var thinking = new ThinkingClock();
+                NpcResponse response = await run.RequestAsync(request, ct, thinking);
                 watch.Stop();
 
                 bool isSilent = response.Note == NpcRequestManager.SilentNote;
                 bool isFixed = response.Note == NpcRequestManager.FixedLinesNote || isSilent;
                 bool fromSlm = response.ShouldShow && !response.UsedFallback;
-                bool prefetched = response.ShouldShow && response.Note == NpcRequestManager.PrefetchedNote;
+                bool prefetched = NpcRequestManager.IsPrefetched(response);
+                bool waitedPrefetch = prefetched && response.Note == NpcRequestManager.PrefetchWaitedNote; // 같은 상황을 기다려 꺼냄 — 시간이 있다
                 string source = !response.ShouldShow ? "없음" : (prefetched ? "미리" : (fromSlm ? "SLM" : (isSilent ? "대사없음" : (isFixed ? "정해진" : "기본"))));
                 string action = response.ShouldShow ? response.Reaction.ActionId : "";
                 string line = response.ShouldShow ? response.Reaction.Line : "";
@@ -411,6 +431,10 @@ public static class DeviceRun
                 {
                     prefetchHits++;
                     repHits++;
+                    if (waitedPrefetch)
+                    {
+                        waitedHitTimes.Add(watch.ElapsedMilliseconds);
+                    }
                 }
                 else if (fromSlm)
                 {
@@ -427,7 +451,8 @@ public static class DeviceRun
 
                 Say(scene.Id + " #" + rep + " (" + total + "/" + all + ") " + source + " " + action + " " + line + "  (" + watch.ElapsedMilliseconds + "ms"
                     + (prepareMs >= 0 ? ", 미리 읽기 " + prepareMs + "ms" : "")
-                    + (prepareTimedOutMs >= 0 ? ", 미리 읽기 시간 초과(" + prepareTimedOutMs + "ms 기다림)" : "") + ")"
+                    + (prepareTimedOutMs >= 0 ? ", 미리 읽기 시간 초과(" + prepareTimedOutMs + "ms 기다림)" : "")
+                    + (thinking.At >= 0 ? ", '" + run.ThinkingLine + "' " + thinking.At + "ms" : "") + ")"
                     + (fromSlm && response.Reaction.Note == null ? "" : "  ← " + response.Note));
                 var row = new StringBuilder();
                 row.Append(Csv(scene.Id)).Append(',').Append(rep).Append(',').Append(source).Append(',').Append(action).Append(',')
@@ -436,7 +461,7 @@ public static class DeviceRun
                     .Append(-1).Append(',').Append(Csv(response.Note)).Append(',').Append(prefetched ? "O" : "X").Append(',')
                     .Append(Csv(prefetched && response.Reaction != null ? response.Reaction.Note : "")).Append(',').Append(Csv(retargeted)).Append(',')
                     .Append(prepareTimedOutMs >= 0 ? prepareTimedOutMs.ToString(CultureInfo.InvariantCulture) : "").Append(',')
-                    .Append(Csv(kvNote)).Append('\n'); // 기억 열: LM Studio 백엔드는 기억(KV 슬롯) 저장·복원을 하지 않아 '뒤에서 만들기에 맡김'·미리 읽기 실패·취소만 적는다
+                    .Append(Csv(kvNote)).Append(',').Append(thinking.At).Append('\n'); // 생각중ms 는 맨 끝. 기억 열: LM Studio 백엔드는 기억(KV 슬롯) 저장·복원을 하지 않아 '뒤에서 만들기에 맡김'·미리 읽기 실패·취소만 적는다
                 File.AppendAllText(path, row.ToString(), new UTF8Encoding(false));
 
                 if (s.GapSeconds > 0)
@@ -450,6 +475,10 @@ public static class DeviceRun
         Say("=== 요약 ===");
         Say("SLM 대사 " + slmCount + "/" + (total - fixedCount) + " (이야기·끌려갈 때 " + fixedCount + "건은 정해진 대사), 기대 행동 일치 " + expectedOk + "/" + total);
         Say("미리 만든 대사 적중 " + prefetchHits + "/" + (total - fixedCount) + ", 반복별 " + string.Join("·", hitsPerRep.Select(h => h.ToString(CultureInfo.InvariantCulture)).ToArray()));
+        List<long> waitedSorted = waitedHitTimes.OrderBy(t => t).ToList();
+        Say("  그중 같은 상황을 기다려 꺼냄 " + waitedSorted.Count + "건"
+            + (waitedSorted.Count > 0 ? " (전체 시간 중앙값 " + waitedSorted[waitedSorted.Count / 2] + "ms, 최대 " + waitedSorted[waitedSorted.Count - 1] + "ms)" : "")
+            + ", 나머지는 바로 꺼냄(0ms 안팎)");
         Say("메모에 Repeated 가 적힌 장면 " + repeated + "건");
         if (prepareDeferred > 0)
         {

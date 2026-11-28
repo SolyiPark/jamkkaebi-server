@@ -91,6 +91,18 @@ namespace Jamkkaebi.Npc
 
         /// <summary>미리 만들어 둔 대사를 꺼내 쓴 경우의 Note. 그 요청에서는 SLM 을 부르지 않았다 (응답이 바로 뜬다).</summary>
         public const string PrefetchedNote = "미리 만든 대사";
+
+        /// <summary>
+        /// 같은 상황을 뒤에서 만드는 것을 기다렸다가 꺼낸 미리 만든 대사의 메모 (WaitForSameSituation). 바로 꺼낸 것(PrefetchedNote)과 달리 기다린 시간이 있다 —
+        /// 기기·PC 시험은 이것을 따로 세고 그 시간을 보고한다 (Copilot 리뷰). 미리 만든 대사인지는 IsPrefetched 로 둘을 함께 본다.
+        /// </summary>
+        public const string PrefetchWaitedNote = "같은 상황을 기다려 꺼낸 미리 만든 대사";
+
+        /// <summary>미리 만든 대사로 답한 응답인지 (바로 꺼냄 PrefetchedNote · 기다려 꺼냄 PrefetchWaitedNote).</summary>
+        public static bool IsPrefetched(NpcResponse response)
+        {
+            return response != null && response.ShouldShow && (response.Note == PrefetchedNote || response.Note == PrefetchWaitedNote);
+        }
         /// <summary>
         /// 모델이 멈춰(취소한 생성이 CancelHold 가 지나도 끝나지 않음, <see cref="INpcModelHealth"/>) 기본 대사로 대신한 경우의 Note.
         /// 아직 안 올라온 것("모델이 아직 준비되지 않음")과 구분한다 — 기기 시험에서 이 메모가 나오면 모델이 묶인 것이다.
@@ -142,6 +154,9 @@ namespace Jamkkaebi.Npc
         private volatile bool lastPrepareDeferred; // 마지막 PrepareAsync 가 같은 도깨비의 뒤에서 만들기에 맡겨 미리 읽지 않았는지 (LastPrepareDeferred)
         private volatile NpcPrepareOutcome lastPrepareOutcome; // 마지막 PrepareAsync 가 어떻게 끝났는지 (LastPrepareOutcome)
         private int prefetchRelicId;     // 그 생성의 도깨비 (prefetchGenerating 일 때만 뜻이 있다). gate 안에서 읽고 쓴다
+        // 모델에 들어간 미리 만들기 생성의 보관함 열쇠와, 그 생성이 끝나(보관함에 넣고) 알리는 신호. 같은 상황의 요청이 그것을 기다려 꺼내 쓴다 (SameSituationPrefetch). gate 안에서 읽고 쓴다
+        private string prefetchKey;
+        private TaskCompletionSource<bool> prefetchDone;
         private bool prefetchPreempted;   // 지금 생성(prefetchCts)을 요청·미리 읽기·CancelPrefetch 가 멈췄는지. gate 안에서 읽고 쓴다
         private Task prefetchWorker = Task.FromResult(true);
         private bool prefetchRunning;
@@ -173,6 +188,7 @@ namespace Jamkkaebi.Npc
             this.rule = rule;
             SlmEnabled = slm != null;
             SlmTimeout = TimeSpan.FromSeconds(3);
+            ThinkingLine = "음...";
             RecentLineCount = 5; // 2026-11-26: 10 → 5. 15자 인사를 같은 도깨비가 거듭하면 10개와 겹치지 않을 말이 모자라 반복 실패가 가장 많았다 (ver8 기기 시험 57건 중 20건)
             Cache = new NpcLineCache();
             UsePrefetched = true;
@@ -538,6 +554,8 @@ namespace Jamkkaebi.Npc
             public int Count;
             public int NextVariation;
             public int Failures;
+            // 이 작업이 도는 동안 같은 상황의 미리 만들기·다시 만들기가 합쳐졌는지 (EnqueuePrefetch). 일꾼은 다 만들었다고 본 뒤에도 이것이 서 있으면 지우지 않고 다시 본다. gate 안에서 읽고 쓴다
+            public bool Refreshed;
         }
 
         /// <summary>
@@ -561,20 +579,70 @@ namespace Jamkkaebi.Npc
         public TimeSpan SlmTimeout { get; set; }
 
         /// <summary>
+        /// 모델을 기다리는 동안 도깨비가 띄울 말 (기본 "음..."). 미리 만든 대사가 없어 그 자리에서 만들거나 같은 상황을 뒤에서 만드는 것을 기다릴 때,
+        /// RequestAsync 의 thinking 으로 한 번 알린다. 비우면 알리지 않는다 (2026-11-27: 그 자리 생성은 PC 1초 남짓, 폰 10초 안팎이라 말풍선이 비어 있었다).
+        /// </summary>
+        public string ThinkingLine { get; set; }
+
+        /// <summary>
         /// 반응을 만든다. 예외를 던지지 않고(요청이 null 일 때만 ArgumentNullException) 늘 NpcResponse 를 돌려준다.
         /// ct 는 부르는 쪽의 취소(화면 종료 등)다 — 취소되면 기본 대사로 대신하지 않고 버린다.
         /// </summary>
         public Task<NpcResponse> RequestAsync(ReactionRequest request, CancellationToken ct = default(CancellationToken))
         {
+            return RequestAsync(request, ct, null);
+        }
+
+        /// <summary>
+        /// 반응을 만든다 (위와 같다). 모델을 기다려야 하면(미리 만든 대사가 없음) 기다리기 전에 thinking 에 ThinkingLine("음...")을 한 번 알린다 —
+        /// 게임은 그동안 말풍선에 띄우고, 응답이 오면 그 대사로 바꾼다. 미리 만든 대사·정해진 대사·대사 없음·기본 대사로 바로 답하는 요청은 알리지 않는다.
+        /// <para>Unity 에서는 메인 스레드에서 만든 <c>new Progress&lt;string&gt;(line =&gt; ShowBubble(line))</c> 을 넘긴다 — Progress 는 만든 스레드에서 부르므로
+        /// 말풍선을 바로 바꿔도 된다. 알린 뒤 응답이 띄우지 않는 것(ShouldShow == false: 화면 종료·NPC 전환)이면 게임이 말풍선을 거둔다.</para>
+        /// </summary>
+        public Task<NpcResponse> RequestAsync(ReactionRequest request, CancellationToken ct, IProgress<string> thinking)
+        {
             if (request == null)
             {
                 throw new ArgumentNullException("request");
             }
-            return Handle(request, ct);
+            return Handle(request, ct, thinking);
         }
 
-        private async Task<NpcResponse> Handle(ReactionRequest request, CancellationToken ct)
+        // 모델을 기다리기 전에 ThinkingLine 을 한 번 알린다. 알리는 쪽의 예외는 삼킨다 (RequestAsync 는 예외를 던지지 않는다).
+        // 이미 버려진 요청(같은 NPC 의 새 요청·화면 종료로 세션이 취소됨)은 알리지 않는다 — 새 요청의 말풍선을 덮지 않게 (CodeRabbit 리뷰).
+        // 알린 것이 게임에 닿기 전에 새 요청이 시작될 수도 있어(Progress 는 메인 스레드로 넘겨 부른다) 게임도 말풍선의 주인을 확인한다 (README 예시)
+        private sealed class ThinkingNotice
         {
+            private readonly IProgress<string> sink;
+            private readonly string line;
+            private int shown;
+
+            public ThinkingNotice(IProgress<string> sink, string line)
+            {
+                this.sink = sink;
+                this.line = line;
+            }
+
+            public void Show(CancellationToken session)
+            {
+                if (sink == null || string.IsNullOrEmpty(line) || session.IsCancellationRequested || Interlocked.Exchange(ref shown, 1) == 1)
+                {
+                    return;
+                }
+                try
+                {
+                    sink.Report(line);
+                }
+                catch (Exception)
+                {
+                    // 말풍선을 띄우지 못해도 대사는 만든다
+                }
+            }
+        }
+
+        private async Task<NpcResponse> Handle(ReactionRequest request, CancellationToken ct, IProgress<string> thinking)
+        {
+            var notice = new ThinkingNotice(thinking, ThinkingLine);
             if (request.Candidates == null || request.Candidates.Count == 0)
             {
                 return NpcResponse.Discard(null, "후보가 없어 띄울 반응이 없다");
@@ -614,6 +682,9 @@ namespace Jamkkaebi.Npc
                 // 모델 상태는 SLM 을 쓸 요청에서만(정해진 대사·대사 없음·SLM 꺼짐 다음에) 한 번 읽고, 그 값으로 판단과 메모를 함께 정한다.
                 // 준비 여부와 멈춤을 따로 읽으면 그 사이 멈춘 생성이 끝나 멈춘 모델이 '아직 준비되지 않음'으로 적힌다
                 NpcModelStatus slmStatus = NpcModelStatus.NotLoaded;
+                SameSituationOutcome sameSituation;
+                // 모델을 기다리기 시작한 때. 같은 상황을 기다린 뒤 그 자리에서 만들게 되면 남은 시간만 준다 — 기다림과 생성을 합쳐 SlmTimeout 을 넘지 않게
+                Stopwatch modelWait = Stopwatch.StartNew();
                 if (NpcActions.OnlyFixedLines(request.Candidates))
                 {
                     fallbackNote = FixedLinesNote;
@@ -630,16 +701,39 @@ namespace Jamkkaebi.Npc
                 {
                     fallbackNote = slmStatus == NpcModelStatus.Stalled ? StalledNote : "모델이 아직 준비되지 않음 → 기본 대사";
                 }
+                else if ((sameSituation = await WaitForSameSituation(request, session, notice).ConfigureAwait(false)) != null)
+                {
+                    // 같은 상황을 뒤에서 만들던 것을 기다렸다: 꺼내 썼거나(또는 화면이 바뀌어 버림) 기다리다 시간이 넘었다
+                    if (sameSituation.Response != null)
+                    {
+                        return sameSituation.Response;
+                    }
+                    fallbackNote = sameSituation.FallbackNote;
+                }
+                else if (modelWait.Elapsed >= SlmTimeout)
+                {
+                    //기다림에 주어진 시간을 다 썼으면 새 생성을 시작하지 않는다.
+                    fallbackNote = SameSituationTimeoutNote + "(" + (int)SlmTimeout.TotalMilliseconds + "ms) -> 기본 대사";
+                }
                 else
                 {
                     usedModel = true;
                     // 이 요청이 모델을 쓴다 — 뒤에서 만들던 것은 멈추고(백엔드가 한 조각 안에 비켜 준다, LlmUnityOptions.BackgroundStepChars) 요청이 끝나면 이어 만든다.
-                    // 플레이어의 요청이 늘 먼저다: 뒤에서 만들던 것이 같은 상황이어도 기다리지 않는다 — 그것이 읽어 둔 앞부분은 모델에 남아 이 요청이 다시 읽지 않는다
+                    // 뒤에서 만들던 것이 같은 상황이면 위에서 멈추지 않고 기다렸다 꺼내 썼다 (SameSituationPrefetch). 여기 오는 것은 다른 상황이거나, 기다린 결과를 쓸 수 없었던 요청이다
                     CancelCurrentPrefetch();
                     MarkModelRelic(request.RelicId);
                     // 기기에서는 한 번 만드는 데 10초가 넘어 다시 만들 틈이 없다 — 첫 시도부터 최근 대사와 다른 첫 낱말로 만들게 한다
                     PickFreshStarter(request, request.RecentLines);
-                    slmAttempt = await RunSlm(request, session).ConfigureAwait(false);
+                    // 그 자리에서 만든다 — 기다리는 동안 "음..." (같은 상황을 기다렸다가 온 요청은 이미 띄웠다).
+                    // 모델을 부르지 않고 끝날 요청(페르소나 없는 도깨비 등 — 생성기가 Unsupported 로 바로 끝낸다)은 띄우지 않는다 (Copilot 리뷰)
+                    if (CanGenerate(request))
+                    {
+                        notice.Show(session.Token);
+                    }
+                    // 같은 상황을 기다렸다가 쓸 대사가 없어 여기 왔으면 이미 기다린 만큼 뺀다 (예전에는 다시 SlmTimeout 을 다 줘 플레이어가 SlmTimeout 의 두 배까지 기다렸다)
+                    TimeSpan waitedBefore = modelWait.Elapsed;
+                    TimeSpan budget = SlmTimeout - waitedBefore;
+                    slmAttempt = await RunSlm(request, session, budget > MinSlmBudget ? budget : MinSlmBudget).ConfigureAwait(false);
                     if (session.Token.IsCancellationRequested)
                     {
                         return NpcResponse.Discard(slmAttempt, session.CancelNote());
@@ -651,7 +745,8 @@ namespace Jamkkaebi.Npc
                         return NpcResponse.Show(slmAttempt, slmAttempt, slmAttempt.Note != null ? "SLM (" + slmAttempt.Note + ")" : "SLM");
                     }
                     fallbackNote = session.TimedOut
-                            ? "SLM 시간 초과(" + (int)SlmTimeout.TotalMilliseconds + "ms) → 기본 대사"
+                            ? "SLM 시간 초과(" + (int)SlmTimeout.TotalMilliseconds + "ms"
+                              + (waitedBefore >= SameSituationNoteThreshold ? ", 같은 상황을 기다린 " + (int)waitedBefore.TotalMilliseconds + "ms 포함" : "") + ") → 기본 대사"
                             : "SLM 실패 " + slmAttempt.FailReason
                               + (slmAttempt.FailDetail != null ? " (" + slmAttempt.FailDetail + ")" : "") + " → 기본 대사";
                 }
@@ -691,6 +786,12 @@ namespace Jamkkaebi.Npc
         // 보관함에서 이 요청의 대사를 꺼내 띄운다 (같은 상황에서 만든 것, 최근 대사와 90% 이상 겹치지 않는 것). 없으면 null
         private NpcResponse ServePrefetched(ReactionRequest request)
         {
+            return ServePrefetched(request, PrefetchedNote);
+        }
+
+        // note: 응답 메모 (바로 꺼냄 PrefetchedNote, 같은 상황을 기다려 꺼냄 PrefetchWaitedNote)
+        private NpcResponse ServePrefetched(ReactionRequest request, string note)
+        {
             ReactionResult ready = Cache.TryTake(request, request.RecentLines);
             if (ready == null)
             {
@@ -707,7 +808,7 @@ namespace Jamkkaebi.Npc
             Remember(request, served.Line);
             Refill(request, false);
             SaveSoon(); // 꺼낸 대사가 파일에서 빠지게 한다 (RecentLineCount 가 0 이면 Remember 가 저장하지 않는다)
-            return NpcResponse.Show(served, null, PrefetchedNote);
+            return NpcResponse.Show(served, null, note);
         }
 
         private static long NowMs()
@@ -825,6 +926,9 @@ namespace Jamkkaebi.Npc
         /// <summary>시험용: 미리 만들기가 플레이어 대기 확인을 지나 도깨비를 적기 직전에 부른다 (Verify 가 그 틈에 요청을 끼워 넣는다). 게임에서는 쓰지 않는다.</summary>
         internal Action BeforePrefetchMarkForTest { get; set; }
 
+        /// <summary>시험용: 일꾼이 작업을 다 만들었다고 본 뒤, 줄에서 지우기 전에 부른다 (Verify 가 그 틈에 같은 상황의 다시 만들기를 끼워 넣는다). 게임에서는 null.</summary>
+        internal Action<ReactionRequest> AfterPrefetchJobForTest { get; set; }
+
         /// <summary>시험용: 모델이 시스템 메시지를 읽어 둔 도깨비 (모르면 null).</summary>
         internal int? ModelRelicForTest
         {
@@ -893,6 +997,13 @@ namespace Jamkkaebi.Npc
                     {
                         // 합쳐도 상황마다 둘 수 있는 수(MaxPerKey)를 넘지 않는다 — 넘기면 다 찬 뒤에도 넣지 못하는 생성을 실패가 쌓일 때까지 거듭한다
                         queued.Count = Math.Max(queued.Count, Math.Min(count, Math.Max(1, Cache.MaxPerKey)));
+                        // 일꾼이 이 작업을 다 만들었다고 보고 지우려는 참일 수 있다 — 표시해 두면 지우지 않고 다시 본다 (Copilot 리뷰: 꺼내 간 만큼의 다시 만들기가 사라졌다).
+                        // 실패가 쌓여 그만두려던 작업이면 새로 줄에 넣은 것처럼 실패를 다시 센다 (지워진 뒤 새로 넣었을 때와 같게)
+                        queued.Refreshed = true;
+                        if (queued.Failures >= MaxPrefetchFailures)
+                        {
+                            queued.Failures = 0;
+                        }
                         return;
                     }
                 }
@@ -976,12 +1087,29 @@ namespace Jamkkaebi.Npc
                         await Task.Delay(poll).ConfigureAwait(false);
                         continue;
                     }
+                    lock (gate)
+                    {
+                        job.Refreshed = false; // 이번에 돌기 시작한 뒤에 합쳐진 것만 본다
+                    }
                     bool finished = await RunPrefetchJob(job).ConfigureAwait(false);
+                    Action<ReactionRequest> afterJob = AfterPrefetchJobForTest;
+                    if (finished && afterJob != null)
+                    {
+                        afterJob(job.Template);
+                    }
                     if (finished)
                     {
                         lock (gate)
                         {
-                            prefetchJobs.Remove(job); // CancelPrefetch 가 이미 뺐으면 아무것도 하지 않는다
+                            // 다 만들었다고 본 뒤 지우기 전에 같은 상황이 합쳐졌으면(요청이 꺼내 가서 다시 만들기를 넣음) 지우지 않는다 — 다음 바퀴에 모자란 만큼 다시 만든다
+                            if (job.Refreshed)
+                            {
+                                job.Refreshed = false;
+                            }
+                            else
+                            {
+                                prefetchJobs.Remove(job); // CancelPrefetch 가 이미 뺐으면 아무것도 하지 않는다
+                            }
                         }
                     }
                 }
@@ -1027,6 +1155,7 @@ namespace Jamkkaebi.Npc
                     return false;
                 }
                 ReactionRequest request = CopyForPrefetch(job);
+                TaskCompletionSource<bool> done = null; // 이 생성이 모델에 들어갔으면 끝날 때 알린다 (같은 상황의 요청이 기다린다)
                 using (var cts = new CancellationTokenSource())
                 {
                     lock (gate)
@@ -1064,59 +1193,166 @@ namespace Jamkkaebi.Npc
                             if (!prefetchPreempted)
                             {
                                 MarkModelRelic(job.Template.RelicId); // gate 는 다시 들어갈 수 있는 잠금이다
+                                done = new TaskCompletionSource<bool>();
+                                prefetchDone = done;
+                                prefetchKey = job.IsTemplate ? NpcLineCache.TemplateKeyOf(job.Template) : NpcLineCache.KeyOf(job.Template);
                             }
                         }
                     }
-                    ReactionResult result;
-                    Stopwatch generating = Stopwatch.StartNew();
                     try
                     {
-                        result = await slm.GenerateAsync(request, cts.Token).ConfigureAwait(false);
-                    }
-                    catch (Exception)
-                    {
-                        result = ReactionResult.Failed(request.RequestId, FailReason.Error, ReactionSource.Slm);
-                    }
-                    bool preempted;
-                    lock (gate)
-                    {
-                        prefetchCts = null;
-                        prefetchGenerating = false;
-                        preempted = prefetchPreempted;
-                        prefetchPreempted = false;
-                        if (result.FailReason != FailReason.Cancelled)
+                        ReactionResult result;
+                        Stopwatch generating = Stopwatch.StartNew();
+                        try
                         {
-                            RecordPrefetchDuration(generating.ElapsedMilliseconds); // 끝까지 돈 생성만 (AdaptiveIdleDelay)
+                            result = await slm.GenerateAsync(request, cts.Token).ConfigureAwait(false);
+                        }
+                        catch (Exception)
+                        {
+                            result = ReactionResult.Failed(request.RequestId, FailReason.Error, ReactionSource.Slm);
+                        }
+                        bool preempted;
+                        lock (gate)
+                        {
+                            prefetchCts = null;
+                            prefetchGenerating = false;
+                            preempted = prefetchPreempted;
+                            prefetchPreempted = false;
+                            if (result.FailReason != FailReason.Cancelled)
+                            {
+                                RecordPrefetchDuration(generating.ElapsedMilliseconds); // 끝까지 돈 생성만 (AdaptiveIdleDelay)
+                            }
+                        }
+                        if (result.FailReason == FailReason.Cancelled)
+                        {
+                            // CancelPrefetch 로 줄에서 빠졌으면 끝, 요청·미리 읽기가 멈췄으면(다시 이어 만든다) 나중에, 아니면 시간이 넘은 것이다.
+                            // 멈춘 것은 지금 쉬는 중인지와 상관없이 실패로 세지 않는다 — 빨리 끝난 요청(미리 만든 대사로 답함)·미리 읽기 뒤에 쉬는 시간이 0 이면
+                            // 여기 올 때 이미 한가해 시간 초과로 잘못 세어, 세 번이면 그 상황을 그만 만들었다
+                            if (!IsQueued(job))
+                            {
+                                return true;
+                            }
+                            if (preempted || HoldingForPlayer(job))
+                            {
+                                return false;
+                            }
+                            job.Failures++;
+                            continue;
+                        }
+                        if (!result.IsSuccess || !(job.IsTemplate ? Cache.AddTemplate(job.Template, result, MaxLineLength(job.Template)) : Cache.Add(job.Template, result)))
+                        {
+                            // 검사에 걸렸거나 보관한 대사·최근 대사와 90% 이상 겹침 → 다음 곁들일 거리·첫 낱말로 다시
+                            job.Failures++;
+                        }
+                        else if (job.IsTemplate)
+                        {
+                            SaveSoon();
                         }
                     }
-                    if (result.FailReason == FailReason.Cancelled)
+                    finally
                     {
-                        // CancelPrefetch 로 줄에서 빠졌으면 끝, 요청·미리 읽기가 멈췄으면(다시 이어 만든다) 나중에, 아니면 시간이 넘은 것이다.
-                        // 멈춘 것은 지금 쉬는 중인지와 상관없이 실패로 세지 않는다 — 빨리 끝난 요청(미리 만든 대사로 답함)·미리 읽기 뒤에 쉬는 시간이 0 이면
-                        // 여기 올 때 이미 한가해 시간 초과로 잘못 세어, 세 번이면 그 상황을 그만 만들었다
-                        if (!IsQueued(job))
+                        if (done != null)
                         {
-                            return true;
+                            lock (gate)
+                            {
+                                if (prefetchDone == done)
+                                {
+                                    prefetchDone = null;
+                                    prefetchKey = null;
+                                }
+                            }
+                            // 잠금 밖에서, 기다리던 요청은 다른 스레드에서 잇게 한다 (이 일꾼이 요청의 일을 떠맡지 않게)
+                            TaskCompletionSource<bool> finished = done;
+                            ThreadPool.QueueUserWorkItem(state => finished.TrySetResult(true)); // 기다리지 않는 작업이라 Task.Run 대신 (CS4014 경고 없이)
                         }
-                        if (preempted || HoldingForPlayer(job))
-                        {
-                            return false;
-                        }
-                        job.Failures++;
-                        continue;
-                    }
-                    if (!result.IsSuccess || !(job.IsTemplate ? Cache.AddTemplate(job.Template, result, MaxLineLength(job.Template)) : Cache.Add(job.Template, result)))
-                    {
-                        // 검사에 걸렸거나 보관한 대사·최근 대사와 90% 이상 겹침 → 다음 곁들일 거리·첫 낱말로 다시
-                        job.Failures++;
-                    }
-                    else if (job.IsTemplate)
-                    {
-                        SaveSoon();
                     }
                 }
             }
             return true;
+        }
+
+        /// <summary>같은 상황을 뒤에서 만들던 것을 기다렸을 때 그 끝: 꺼내 쓴 응답(또는 화면이 바뀌어 버린 응답), 아니면 기다리다 시간이 넘어 쓸 기본 대사 메모.</summary>
+        private sealed class SameSituationOutcome
+        {
+            public NpcResponse Response;
+            public string FallbackNote;
+        }
+
+        /// <summary>같은 상황을 뒤에서 만들다 기다리다 시간이 넘어 기본 대사로 답했을 때 메모의 앞부분 (기기 시험이 사유를 센다).</summary>
+        public const string SameSituationTimeoutNote = "같은 상황을 뒤에서 만드는 중 — 기다리다 시간 초과";
+
+        /// <summary>
+        /// 보관함이 비어 모델을 써야 하는 요청이, 같은 상황(보관함 열쇠)의 대사를 뒤에서 만들고 있으면 멈추지 않고 그것이 끝나기를 기다린다 (SameSituationPrefetch).
+        /// 끝나 보관함에서 꺼냈으면 그 응답, 기다리다 SlmTimeout 이 넘었으면 기본 대사 메모를 돌려준다 — 이때 새로 만들지 않는다: 만들던 것이 먼저 시작해
+        /// 새로 만들어도 그보다 늦게 끝나고, 만들던 것은 멈추지 않아 다음 요청이 꺼내 쓴다. 뒤에서 만드는 것이 없거나, 다른 상황이거나, 끝났는데 쓸 대사가 없으면
+        /// (검사에 걸림·최근 대사와 겹침) null — 예전처럼 만들던 것을 멈추고 그 자리에서 만든다.
+        /// </summary>
+        // 이 요청을 모델로 만들 수 있는지 (SlmReactionGenerator.CanGenerate). 다른 생성기는 알 수 없어 만들 수 있다고 본다.
+        // "음..."을 띄울지만 정하는 미리 보기라, 여기서 난 예외(백엔드의 IsLoaded 가 던짐 등)는 가두고 띄우지 않는다 — 생성 자체의 실패는 RunSlm 이 예전처럼
+        // 기본 대사로 받는다 (RequestAsync 는 예외를 던지지 않는다, CodeRabbit 리뷰)
+        private bool CanGenerate(ReactionRequest request)
+        {
+            SlmReactionGenerator generator = slm as SlmReactionGenerator;
+            if (generator == null)
+            {
+                return true;
+            }
+            try
+            {
+                return generator.CanGenerate(request);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private async Task<SameSituationOutcome> WaitForSameSituation(ReactionRequest request, Session session, ThinkingNotice notice)
+        {
+            Task<bool> building = UsePrefetched ? SameSituationPrefetch(request) : null;
+            if (building == null)
+            {
+                NpcResponse ready = UsePrefetched ? ServePrefetched(request) : null;
+                return ready != null ? new SameSituationOutcome {Response = ready} : null;
+            }
+            notice.Show(session.Token); // 뒤에서 만드는 것을 기다린다 — 기다리는 동안 "음..."
+            Task first;
+            using (var waitCts = CancellationTokenSource.CreateLinkedTokenSource(session.Token))
+            {
+                first = await Task.WhenAny(building, Task.Delay(SlmTimeout, waitCts.Token)).ConfigureAwait(false);
+                waitCts.Cancel();
+            }
+            if (session.Token.IsCancellationRequested)
+            {
+                return new SameSituationOutcome { Response = NpcResponse.Discard(null, session.CancelNote()) };
+            }
+            if (first != building)
+            {
+                return new SameSituationOutcome { FallbackNote = SameSituationTimeoutNote + "(" + (int)SlmTimeout.TotalMilliseconds + "ms) → 기본 대사" };
+            }
+            NpcResponse built = ServePrefetched(request, PrefetchWaitedNote);
+            return built != null ? new SameSituationOutcome { Response = built } : null;
+        }
+
+        /// <summary>
+        /// 이 요청과 같은 상황(보관함 열쇠)의 대사를 뒤에서 만들고 있으면, 그 생성이 끝나 보관함에 넣었을 때 끝나는 작업. 아니면 null.
+        /// <para>2026-11-27 ver9 기기 시험(장면 사이 10초): 그 자리에서 만든 인사 10건 중 7건이 같은 도깨비의 대사를 뒤에서 만드는 중에 왔다. 요청은 그 생성을 멈추고
+        /// 같은 대사를 처음부터 다시 만들었고(약 10초), 다시 만들기는 다음 요청에 또 멈춰 끝나지 못해 회차마다 보관함이 비었다. 같은 상황이면 멈추지 말고 남은 시간만 기다린다.</para>
+        /// </summary>
+        private Task<bool> SameSituationPrefetch(ReactionRequest request)
+        {
+            string templateKey = NpcLineCache.TemplateKeyOf(request);
+            string key = NpcLineCache.KeyOf(request);
+            lock (gate)
+            {
+                // prefetchGenerating 이 아니라 신호로 본다 — 생성이 끝나 보관함에 넣기 전(prefetchGenerating 은 이미 false)에 온 요청도 기다려 꺼내 쓴다.
+                // 신호는 모델에 들어간 생성에만 세우고, 보관함에 넣은 뒤(finally)에 거둔다. 다른 요청·미리 읽기가 멈춘 생성(prefetchPreempted)은 기다리지 않는다
+                if (prefetchPreempted || prefetchDone == null || prefetchKey == null)
+                {
+                    return null;
+                }
+                return prefetchKey == templateKey || prefetchKey == key ? prefetchDone.Task : null;
+            }
         }
 
         // 한 상황에서 검사에 걸리거나 겹쳐 버린 생성이 이만큼 되면 그 작업은 그만둔다 (다음에 그 상황을 쓰면 다시 줄에 들어간다)
@@ -1510,7 +1746,14 @@ namespace Jamkkaebi.Npc
         }
 
         // 시간 초과면 session.TimedOut 을 세운다 (C# 5 의 async 메서드는 out 매개변수를 못 쓴다)
-        private async Task<ReactionResult> RunSlm(ReactionRequest request, Session session)
+        // 남은 시간이 이보다 적어도 생성은 이만큼 기다린다 (0 이면 Task.Delay 가 바로 끝나 모델을 부르자마자 시간 초과로 버린다)
+        private static readonly TimeSpan MinSlmBudget = TimeSpan.FromMilliseconds(1);
+
+        // 시간 초과 메모에 '같은 상황을 기다린 시간'을 적는 기준 (그보다 짧으면 보관함을 본 시간일 뿐이다)
+        private static readonly TimeSpan SameSituationNoteThreshold = TimeSpan.FromMilliseconds(50);
+
+        // timeout: 이 생성을 기다릴 시간 (보통 SlmTimeout, 같은 상황을 기다린 뒤면 그 남은 시간)
+        private async Task<ReactionResult> RunSlm(ReactionRequest request, Session session, TimeSpan timeout)
         {
             request.RequestId = NewId();
             using (var slmCts = CancellationTokenSource.CreateLinkedTokenSource(session.Token))
@@ -1525,7 +1768,7 @@ namespace Jamkkaebi.Npc
                 {
                     return ReactionResult.Failed(request.RequestId, FailReason.Error, ReactionSource.Slm, e.Message);
                 }
-                Task waiting = Task.Delay(SlmTimeout, delayCts.Token);
+                Task waiting = Task.Delay(timeout, delayCts.Token);
                 Task first = await Task.WhenAny(generating, waiting).ConfigureAwait(false);
                 if (first == generating)
                 {

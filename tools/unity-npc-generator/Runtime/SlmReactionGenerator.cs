@@ -184,6 +184,16 @@ namespace Jamkkaebi.Npc
             get { return ModelStatus == NpcModelStatus.Stalled; }
         }
 
+        /// <summary>
+        /// 이 요청을 모델로 만들 수 있는지: 모델이 올라왔고, 후보가 있고, 정해진 대사·대사 없음이 아니고, 페르소나가 있는 도깨비다.
+        /// false 면 GenerateAsync 가 모델을 부르지 않고 NotReady·NoCandidate·Unsupported 로 바로 끝난다 — 요청 관리자는 이때 "음..."을 띄우지 않는다 (Copilot 리뷰).
+        /// </summary>
+        public bool CanGenerate(ReactionRequest request)
+        {
+            return request != null && backend.IsLoaded && request.Candidates != null && request.Candidates.Count > 0
+                    && !NpcActions.SkipsModel(request.Candidates) && assembler.SystemFor(request.RelicId) != null;
+        }
+
         public Task LoadAsync(CancellationToken ct)
         {
             return backend.LoadAsync(ct);
