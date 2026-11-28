@@ -4939,11 +4939,23 @@ public static class Program
         backend.Unload();
         Check(!backend.IsLoaded && CompleteErrorOf(during) == "OperationCanceledException", "Unload 하면 진행 중인 요청도 취소");
 
+        // 올리는 중에 Unload 하면 올리기도 취소된다. 예전에는 Unload 가 올리기에 닿지 않아, 늦게 끝난 올리기가 IsLoaded 를 다시 켰다
+        var loadingBackend = new LmStudioModelBackend(new LmStudioOptions(), server);
+        Task loading = loadingBackend.LoadAsync(CancellationToken.None);
+        Thread.Sleep(100);
+        loadingBackend.Unload();
+        string loadEnd = ErrorWithin(loading, 2000);
+        Check(loadEnd == "OperationCanceledException" && !loadingBackend.IsLoaded,
+                "올리는 중에 Unload 하면 올리기도 취소되고 IsLoaded 는 false ← " + loadEnd);
+
         server.Respond = async (path, body, ct) =>
         {
             await Task.Delay(100);
             return Http(HttpStatusCode.OK, path == "/v1/models" ? models : Chat(reply, 0));
         };
+        loadingBackend.LoadAsync(CancellationToken.None).Wait();
+        Check(loadingBackend.IsLoaded, "올리기가 취소된 뒤에도 다시 올릴 수 있음");
+        loadingBackend.Dispose();
         backend.LoadAsync(CancellationToken.None).Wait();
         server.MaxActive = 0;
         Task.WaitAll(backend.CompleteAsync(prompt, CancellationToken.None), backend.CompleteAsync(prompt, CancellationToken.None),
@@ -6786,6 +6798,15 @@ public static class Program
         rotation.Take(8, 3);   // 0번을 다시 들려줌
         Check(!rotation.Return(t0) && Order(rotation) == "1,2,0", "같은 실화를 그 뒤에 다시 들려줬으면 되돌리지 않음");
         Check(!rotation.Return(t0) && !rotation.Return(null), "이미 처리한 표나 빈 표는 false");
+
+        // 표 두 장을 고른 순서대로 되돌린다. 고를 때의 자리 번호로 넣으면 그사이 목록이 바뀌어 1,0,2 가 됐다 — 들려준 순서(Seq)로 자리를 찾는다
+        rotation = new StoryRotation();
+        rotation.Restore(8, new[] { 0, 1, 2 });
+        StoryTicket firstTaken = rotation.Take(8, 3);
+        StoryTicket secondTaken = rotation.Take(8, 3);
+        Check(firstTaken.Index == 0 && secondTaken.Index == 1 && Order(rotation) == "2,0,1", "다 들려준 뒤 두 번 고르면 0번, 1번 ← " + Order(rotation));
+        Check(rotation.Return(firstTaken) && Order(rotation) == "0,2,1", "먼저 고른 0번을 되돌리면 맨 앞으로 ← " + Order(rotation));
+        Check(rotation.Return(secondTaken) && Order(rotation) == "0,1,2", "이어서 1번을 되돌리면 0번 뒤, 2번 앞으로 (원래 순서) ← " + Order(rotation));
 
         // NpcContext.Finish
         var builder = new NpcContextBuilder(personas);

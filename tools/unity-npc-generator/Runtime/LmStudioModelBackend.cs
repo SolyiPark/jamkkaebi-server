@@ -145,28 +145,38 @@ namespace Jamkkaebi.Npc
 
         public async Task LoadAsync(CancellationToken ct)
         {
-            if (loaded)
-            {
-                return;
-            }
-            string body = await Send(HttpMethod.Get, "/v1/models", null, ct).ConfigureAwait(false);
-            List<string> models = ModelIds(body);
-            if (!models.Contains(options.Model))
-            {
-                throw new InvalidOperationException("LM Studio 에 모델 '" + options.Model + "' 가 없다. 있는 모델: "
-                        + (models.Count > 0 ? string.Join(", ", models.ToArray()) : "(없음)"));
-            }
-            if (options.WarmUp)
-            {
-                await Chat("짧게 답한다.", "안녕", null, 8, false, ct).ConfigureAwait(false);
-            }
+            CancellationToken alive;
             lock (gate)
             {
+                if (loaded)
+                {
+                    return;
+                }
+                ct.ThrowIfCancellationRequested();
                 if (lifetime.IsCancellationRequested)
                 {
                     lifetime = new CancellationTokenSource();
                 }
-                loaded = true;
+                alive = lifetime.Token;
+            }
+            using (var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, alive))
+            {
+                string body = await Send(HttpMethod.Get, "/v1/models", null, linked.Token).ConfigureAwait(false);
+                List<string> models = ModelIds(body);
+                if (!models.Contains(options.Model))
+                {
+                    throw new InvalidOperationException("LM Studio 에 모델 '" + options.Model + "' 가 없다. 있는 모델: "
+                            + (models.Count > 0 ? string.Join(", ", models.ToArray()) : "(없음)"));
+                }
+                if (options.WarmUp)
+                {
+                    await Chat("짧게 답한다.", "안녕", null, 8, false, linked.Token).ConfigureAwait(false);
+                }
+                lock (gate)
+                {
+                    linked.Token.ThrowIfCancellationRequested();
+                    loaded = true;
+                }
             }
         }
 
