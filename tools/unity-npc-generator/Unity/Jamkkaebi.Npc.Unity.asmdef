@@ -1,5 +1,12 @@
 {
   "name": "Jamkkaebi.Npc.Unity",
   "references": ["Jamkkaebi.Npc", "undream.llmunity.Runtime"],
-  "autoReferenced": false
+  "autoReferenced": false,
+  "versionDefines": [
+    {
+      "name": "ai.undream.llm",
+      "expression": "[3.0.3,4.0.0)",
+      "define": "JAMKKAEBI_LLMUNITY"
+    }
+  ]
 }

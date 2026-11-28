@@ -35,7 +35,7 @@ AI 반응 생성기의 클라이언트 쪽 코드다. 생성기 두 가지와 �
 | `Runtime/SlmReactionGenerator.cs` | SLM 생성기와 모델 런타임 자리(`INpcModelBackend`) |
 | `Runtime/LlmUnityModelBackend.cs` | LLMUnity 백엔드의 핵심 (`LlmUnityOptions`, `ILlmUnityRuntime`, `ILlmUnitySession`). Unity 없이 컴파일된다 |
 | `Runtime/NpcTestScenes.cs` | 시험 장면(scenes.json)을 요청으로 바꾼다. 실기기 시험이 쓴다 |
-| `Unity/LlmUnityRuntime.cs` | LLMUnity 를 직접 부르는 연결부 (LLM + LLMAgent). `JAMKKAEBI_LLMUNITY` 심볼이 있어야 컴파일된다 |
+| `Unity/LlmUnityRuntime.cs` | LLMUnity 를 직접 부르는 연결부 (LLM + LLMAgent). `JAMKKAEBI_LLMUNITY` 심볼이 있어야 컴파일된다 (패키지로 쓰면 LLMUnity 설치 여부에 따라 자동) |
 | `Unity/NpcDeviceTestRunner.cs` | 실기기 시험 장면용 컴포넌트. 18장면을 돌려 화면·로그·CSV 로 결과를 남긴다 |
 | `DEVICE_TEST.md` | 실기기(안드로이드·iOS) 시험 순서 |
 | `Runtime/LmStudioModelBackend.cs` | 개발용 LM Studio 백엔드 (`LmStudioOptions`, `LmStudioCall` 포함) |
@@ -63,7 +63,9 @@ AI 반응 생성기의 클라이언트 쪽 코드다. 생성기 두 가지와 �
 2. 어셈블리는 둘이다.
    - `Jamkkaebi.Npc` (`Runtime/`): 생성기 본체. asmdef 가 없는 `Assets/` 코드에서는 바로 쓰이고, asmdef 가 있는 코드는 `references` 에 `Jamkkaebi.Npc` 를 넣는다.
    - `Jamkkaebi.Npc.Unity` (`Unity/`): LLMUnity 연결부와 실기기 시험 컴포넌트. 자동으로 참조되지 않는다 — 쓰는 쪽 asmdef 의 `references` 에 넣는다.
-     LLMUnity 를 쓰면 Scripting Define Symbols 에 `JAMKKAEBI_LLMUNITY` 를 넣는다 (플랫폼 탭마다). 심볼이 없으면 `LlmUnityRuntime.cs` 가 통째로 빠져 LLMUnity 없이도 컴파일된다.
+     LLMUnity(`ai.undream.llm` 3.0.3 이상 4.0.0 미만)가 패키지로 설치돼 있으면 이 어셈블리에 `JAMKKAEBI_LLMUNITY` 심볼이 자동으로 켜진다 (asmdef 의 `versionDefines`). Scripting Define Symbols 에 따로 넣지 않는다.
+     LLMUnity 가 없으면 심볼이 꺼져 `LlmUnityRuntime.cs` 가 통째로 빠지고, LLMUnity 없이도 컴파일된다.
+     `Unity/` 의 파일을 `Assets/` 에 복사해 쓰는 프로젝트(asmdef 없이)는 예전처럼 Scripting Define Symbols 에 직접 넣는다 (플랫폼 탭마다).
 3. 자료 JSON 넷은 패키지의 `Runtime/Resources/Npc/` 에 있어 복사 없이 `Resources.Load("Npc/…")` 로 읽힌다 (TextAsset).
    실기기 시험용 `scenes.json` 은 패키지에 없다. 시험 프로젝트가 자기 `Assets/Resources/Npc/` 에 둔다.
 4. 클라이언트에 이미 `INpcReactionGenerator`(대사만 만드는 v1)가 있다면, 이 파일들은 `Jamkkaebi.Npc` 네임스페이스라 충돌하지 않는다. v1을 이 계약으로 바꿀지 따로 둘지 정한다.
