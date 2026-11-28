@@ -25,6 +25,23 @@ using Jamkkaebi.Npc;
 
 public static class DeviceRun
 {
+    /// <summary>요청이 "음..."(NpcRequestManager.ThinkingLine)을 알린 때를 잰다 (요청을 보낸 때부터 ms, 알리지 않았으면 -1). CSV 의 생각중ms 열.</summary>
+    private sealed class ThinkingClock : IProgress<string>
+    {
+        private readonly Stopwatch watch = Stopwatch.StartNew();
+        private long at = -1;
+
+        public long At
+        {
+            get { return Interlocked.Read(ref at); }
+        }
+
+        public void Report(string value)
+        {
+            Interlocked.CompareExchange(ref at, watch.ElapsedMilliseconds, -1);
+        }
+    }
+
     private sealed class Settings
     {
         public string Url = "http://127.0.0.1:1234";
@@ -250,7 +267,7 @@ public static class DeviceRun
         }
 
         string path = Path.Combine(dir, "npc_device_test_" + stamp + ".csv");
-        File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값,미리읽기초과ms,기억\n", new UTF8Encoding(true));
+        File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값,미리읽기초과ms,기억,생각중ms\n", new UTF8Encoding(true));
         Say("CSV: " + path + " (장면마다 이어 쓴다), 로그: " + logPath);
 
         // 기억을 꺼내는 장면(S14)은 게임처럼 돌린다: 반복마다 기억을 남기고 꺼냈음을 표시해, 같은 기억을 연달아 꺼내지 않는다 (NpcTestMemory)
@@ -387,7 +404,8 @@ public static class DeviceRun
                 }
 
                 Stopwatch watch = Stopwatch.StartNew();
-                NpcResponse response = await run.RequestAsync(request, ct);
+                var thinking = new ThinkingClock();
+                NpcResponse response = await run.RequestAsync(request, ct, thinking);
                 watch.Stop();
 
                 bool isSilent = response.Note == NpcRequestManager.SilentNote;
@@ -427,7 +445,8 @@ public static class DeviceRun
 
                 Say(scene.Id + " #" + rep + " (" + total + "/" + all + ") " + source + " " + action + " " + line + "  (" + watch.ElapsedMilliseconds + "ms"
                     + (prepareMs >= 0 ? ", 미리 읽기 " + prepareMs + "ms" : "")
-                    + (prepareTimedOutMs >= 0 ? ", 미리 읽기 시간 초과(" + prepareTimedOutMs + "ms 기다림)" : "") + ")"
+                    + (prepareTimedOutMs >= 0 ? ", 미리 읽기 시간 초과(" + prepareTimedOutMs + "ms 기다림)" : "")
+                    + (thinking.At >= 0 ? ", '" + run.ThinkingLine + "' " + thinking.At + "ms" : "") + ")"
                     + (fromSlm && response.Reaction.Note == null ? "" : "  ← " + response.Note));
                 var row = new StringBuilder();
                 row.Append(Csv(scene.Id)).Append(',').Append(rep).Append(',').Append(source).Append(',').Append(action).Append(',')
@@ -436,7 +455,7 @@ public static class DeviceRun
                     .Append(-1).Append(',').Append(Csv(response.Note)).Append(',').Append(prefetched ? "O" : "X").Append(',')
                     .Append(Csv(prefetched && response.Reaction != null ? response.Reaction.Note : "")).Append(',').Append(Csv(retargeted)).Append(',')
                     .Append(prepareTimedOutMs >= 0 ? prepareTimedOutMs.ToString(CultureInfo.InvariantCulture) : "").Append(',')
-                    .Append(Csv(kvNote)).Append('\n'); // 기억 열: LM Studio 백엔드는 기억(KV 슬롯) 저장·복원을 하지 않아 '뒤에서 만들기에 맡김'·미리 읽기 실패·취소만 적는다
+                    .Append(Csv(kvNote)).Append(',').Append(thinking.At).Append('\n'); // 생각중ms 는 맨 끝. 기억 열: LM Studio 백엔드는 기억(KV 슬롯) 저장·복원을 하지 않아 '뒤에서 만들기에 맡김'·미리 읽기 실패·취소만 적는다
                 File.AppendAllText(path, row.ToString(), new UTF8Encoding(false));
 
                 if (s.GapSeconds > 0)

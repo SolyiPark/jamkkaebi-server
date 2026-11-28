@@ -27,6 +27,23 @@ namespace Jamkkaebi.Npc
     /// </summary>
     public sealed class NpcDeviceTestRunner : MonoBehaviour
     {
+        /// <summary>요청이 "음..."(NpcRequestManager.ThinkingLine)을 알린 때를 잰다 (요청을 보낸 때부터 ms, 알리지 않았으면 -1). CSV 의 생각중ms 열.</summary>
+        private sealed class ThinkingClock : IProgress<string>
+        {
+            private readonly Stopwatch watch = Stopwatch.StartNew();
+            private long at = -1;
+
+            public long At
+            {
+                get { return Interlocked.Read(ref at); }
+            }
+
+            public void Report(string value)
+            {
+                Interlocked.CompareExchange(ref at, watch.ElapsedMilliseconds, -1);
+            }
+        }
+
         public enum BackendKind
         {
             LlmUnity,   // 기기 안 모델 (LLMUnity). JAMKKAEBI_LLMUNITY 심볼이 있어야 한다
@@ -267,7 +284,7 @@ namespace Jamkkaebi.Npc
             string path = Path.Combine(Application.persistentDataPath,
                     "npc_device_test_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".csv");
             // 미리읽기ms 는 끝난 미리 읽기만 (시간 초과면 -1), 시간 초과는 미리읽기초과ms 에 기다린 시간을 따로 적는다
-            File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값,미리읽기초과ms,기억\n", new UTF8Encoding(true)); // BOM: 엑셀에서 한글이 안 깨진다
+            File.WriteAllText(path, "장면,반복,출처,행동,기대행동일치,대사,글자수,미리읽기ms,첫응답ms,전체ms,메모리MB,메모,미리만든,채운칸,요청서버값,미리읽기초과ms,기억,생각중ms\n", new UTF8Encoding(true)); // BOM: 엑셀에서 한글이 안 깨진다
             csvPath = path;
             Say("CSV: " + path + " (장면마다 이어 쓴다)");
 
@@ -424,7 +441,8 @@ namespace Jamkkaebi.Npc
 
                     LlmUnityCall callBefore = llm != null ? llm.LastCall : null;
                     Stopwatch watch = Stopwatch.StartNew();
-                    NpcResponse response = await run.RequestAsync(request, ct);
+                    var thinking = new ThinkingClock(); // 게임은 new Progress<string>(line => ShowBubble(line)) 를 넘긴다
+                    NpcResponse response = await run.RequestAsync(request, ct, thinking);
                     watch.Stop();
                     // 이 요청의 생성이 끝나 LastCall 을 새로 남겼고(뒤에서 만들기는 남기지 않는다) 그 생성이 기억을 되살렸을 때만
                     if (llm != null && llm.LastCall != callBefore && llm.LastCallRestored)
@@ -484,6 +502,7 @@ namespace Jamkkaebi.Npc
                         + (prepareMs >= 0 ? ", 미리 읽기 " + prepareMs + "ms" : "")
                         + (prepareTimedOutMs >= 0 ? ", 미리 읽기 시간 초과(" + prepareTimedOutMs + "ms 기다림)" : "")
                         + (firstToken >= 0 ? ", 첫 응답 " + firstToken + "ms" : "")
+                        + (thinking.At >= 0 ? ", '" + run.ThinkingLine + "' " + thinking.At + "ms" : "")
                         + (kvNote.Length > 0 ? ", " + kvNote : "") + ")"
                         + (fromSlm && response.Reaction.Note == null ? "" : "  ← " + response.Note));
                     var row = new StringBuilder();
@@ -493,7 +512,7 @@ namespace Jamkkaebi.Npc
                         .Append(memory).Append(',').Append(Csv(response.Note)).Append(',').Append(prefetched ? "O" : "X").Append(',')
                         .Append(Csv(prefetched && response.Reaction != null ? response.Reaction.Note : "")).Append(',').Append(Csv(retargeted)).Append(',')
                         .Append(prepareTimedOutMs >= 0 ? prepareTimedOutMs.ToString(CultureInfo.InvariantCulture) : "").Append(',')
-                        .Append(Csv(kvNote)).Append('\n');
+                        .Append(Csv(kvNote)).Append(',').Append(thinking.At).Append('\n'); // 생각중ms: "음..."을 알린 때 (그 자리에서 만들거나 뒤에서 만드는 것을 기다린 요청만, 아니면 -1)
                     AppendCsv(path, row.ToString());
 
                     // 플레이어가 잠깐 쉬는 틈 — 다시 만들기는 이 사이에 돈다. 시간에는 넣지 않는다 (다음 장면의 미리 읽기부터 잰다)

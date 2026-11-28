@@ -693,7 +693,7 @@ namespace Jamkkaebi.Npc
             return m.Groups[1].Value + "해, " + line.Substring(m.Groups[2].Index);
         }
 
-        private static readonly Regex StarterComma = new Regex("^(덕분에|이제|훨씬|한결|역시|요즘|조금|점점|많이|어느새|자꾸|몸이|기분이|개운하게|깨끗하게|마지막|벌써|드디어|어서|살살|괜찮으면|시간 되면|조심조심|혹시|이왕이면),[ \\t]*", RegexOptions.CultureInvariant); // 가로 공백만 (줄바꿈은 검사가 거른다, CodeRabbit 리뷰)
+        private static readonly Regex StarterComma = new Regex("^(덕분에|이제|훨씬|한결|역시|요즘|조금|점점|많이|어느새|자꾸|몸이|기분이|개운하게|깨끗하게|마지막|벌써|드디어|어서|이렇게|살살|괜찮으면|시간 되면|조심조심|혹시|이왕이면),[ \\t]*", RegexOptions.CultureInvariant); // 가로 공백만 (줄바꿈은 검사가 거른다, CodeRabbit 리뷰)
 
         private static readonly Regex DanglingConnective = new Regex("(서|며|면서|려고|도록|다가|지만|으나|니까|면)$", RegexOptions.CultureInvariant);
         private static readonly Regex DanglingParticle = new Regex("(은|는|을|를|의)$", RegexOptions.CultureInvariant);

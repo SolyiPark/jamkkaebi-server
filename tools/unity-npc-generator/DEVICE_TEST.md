@@ -102,7 +102,7 @@
 ```
 
 - 옵션: `--url` `--model` `--repeat` `--gap`(장면 사이 쉬는 초, 기본 0) `--idle`(PrefetchIdleDelay 초, 기본 3 — 예전 결과와 비교하려면 `--idle 10 --no-adaptive-idle`: 기기 속도 맞춤이 켜져 있으면 10 을 줘도 빠른 PC 에서는 1~3초로 줄어든다) `--switch-idle`(PrefetchSwitchIdleDelay 초 — 다른 도깨비의 작업 전에 쉬는 시간, 기본 30) `--seed`(주면 매번 그 seed) `--fresh`(npc_lines.txt 를 지우고 처음 설치처럼) `--per-scene` `--no-prefetch` `--no-store` `--no-refill` `--no-prepare` `--same-server-values`. 전체는 `Verify/DeviceRun.cs` 맨 위.
-- CSV·로그·npc_lines.txt 는 `Verify/bin/device/` 에 생긴다. CSV 열은 기기 시험과 같고, 첫응답ms·메모리MB 는 -1 이다. Ctrl+C 로 멈춰도 그때까지의 줄과 대사 파일은 남는다.
+- CSV·로그·npc_lines.txt 는 `Verify/bin/device/` 에 생긴다. CSV 열은 기기 시험과 같고, 첫응답ms·메모리MB 는 -1 이다. 맨 끝 `생각중ms` 는 요청이 "음..."(`NpcRequestManager.ThinkingLine`)을 알린 때(요청을 보낸 때부터)이고, 모델을 기다리지 않은 요청(미리 만든 대사·정해진 대사·기본 대사)은 -1 이다 (2026-11-27). Ctrl+C 로 멈춰도 그때까지의 줄과 대사 파일은 남는다.
 - 요약에 반복별 적중, 메모에 Repeated 가 적힌 장면 수, 미리 읽기 시간(앞 장면과 같은 도깨비 / 바뀜)이 따로 나온다.
 - 기억 장면(S14)은 기기 시험 화면과 이 모드 모두 게임처럼 돈다(`NpcTestMemory`, 2026-11-24): 반복마다 기억을 남기고 꺼냈음을 표시한다. 기억이 하나라 반복 1은 지난 대화(`recall_talk`), 반복 2부터는 평소 안부(`answer_status`)다. CSV 의 요청서버값 칸에 "기억: 지난 대화 꺼냄 (꺼냈음 표시)" · "기억: 평소 안부 (꺼낸 뒤 한 번 쉼 표시)"가 적힌다. 처음 미리 만들 때 그다음 평소 안부도 함께 만든다.
 - 기기와 다른 점: LM Studio 는 같은 도깨비가 이어져도 미리 읽기 때 1토큰을 다시 부르므로 그 시간이 0 은 아니다(짧은 호출 한 번). 수 초가 걸리면 뒤에서 만들던 대사 뒤에 줄을 선 것이다. seed 는 `--seed 0` 이 고치기 전 LLMUnity, 생략이 고친 뒤와 같은 상황이다.

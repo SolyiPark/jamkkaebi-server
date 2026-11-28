@@ -20,7 +20,7 @@
       "nickname": "도윤",
       "intimacy": 0,
       "input": "tap",
-      "event": "주인이 아침에 너를 보러 찾아왔다.",
+      "event": "주인이 아침에 찾아왔다.",
       "facts": [
         {
           "key": "time_of_day",
@@ -59,7 +59,7 @@
       "nickname": "도윤",
       "intimacy": 3,
       "input": "tap",
-      "event": "주인이 밤에 너를 보러 찾아왔다.",
+      "event": "주인이 밤에 찾아왔다.",
       "facts": [
         {
           "key": "time_of_day",
@@ -154,7 +154,7 @@
         {
           "key": "last_care_days_ago",
           "value": 2,
-          "text": "주인이 2일 전에 너를 살살 닦아 관리해 주었다"
+          "text": "주인이 2일 전에 살살 닦아 관리해 주었다"
         }
       ],
       "memory": [],
@@ -285,7 +285,7 @@
       "nickname": "도윤",
       "intimacy": 0,
       "input": "care",
-      "event": "주인이 너를 관리해 주었다.",
+      "event": "주인이 관리해 주었다.",
       "facts": [
         {
           "key": "care_result",
@@ -320,7 +320,7 @@
       "nickname": "도윤",
       "intimacy": 0,
       "input": "care",
-      "event": "주인이 너를 관리해 주었다.",
+      "event": "주인이 관리해 주었다.",
       "facts": [
         {
           "key": "care_result",
@@ -355,7 +355,7 @@
       "nickname": "도윤",
       "intimacy": 0,
       "input": "care",
-      "event": "주인이 오랜만에 너를 관리해 주었다.",
+      "event": "주인이 오랜만에 관리해 주었다.",
       "facts": [
         {
           "key": "care_result",
@@ -856,7 +856,7 @@
       "nickname": "도윤",
       "intimacy": 2,
       "input": "tap",
-      "event": "주인이 아침에 너를 보러 찾아왔다.",
+      "event": "주인이 아침에 찾아왔다.",
       "facts": [
         {
           "key": "time_of_day",
@@ -896,7 +896,7 @@
       "nickname": "도윤",
       "intimacy": 3,
       "input": "tap",
-      "event": "주인이 아침에 너를 보러 찾아왔다.",
+      "event": "주인이 아침에 찾아왔다.",
       "facts": [
         {
           "key": "time_of_day",
@@ -936,7 +936,7 @@
       "nickname": "도윤",
       "intimacy": 4,
       "input": "tap",
-      "event": "주인이 아침에 너를 보러 찾아왔다.",
+      "event": "주인이 아침에 찾아왔다.",
       "facts": [
         {
           "key": "time_of_day",
