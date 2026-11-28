@@ -1287,11 +1287,24 @@ namespace Jamkkaebi.Npc
         /// 새로 만들어도 그보다 늦게 끝나고, 만들던 것은 멈추지 않아 다음 요청이 꺼내 쓴다. 뒤에서 만드는 것이 없거나, 다른 상황이거나, 끝났는데 쓸 대사가 없으면
         /// (검사에 걸림·최근 대사와 겹침) null — 예전처럼 만들던 것을 멈추고 그 자리에서 만든다.
         /// </summary>
-        // 이 요청을 모델로 만들 수 있는지 (SlmReactionGenerator.CanGenerate). 다른 생성기는 알 수 없어 만들 수 있다고 본다
+        // 이 요청을 모델로 만들 수 있는지 (SlmReactionGenerator.CanGenerate). 다른 생성기는 알 수 없어 만들 수 있다고 본다.
+        // "음..."을 띄울지만 정하는 미리 보기라, 여기서 난 예외(백엔드의 IsLoaded 가 던짐 등)는 가두고 띄우지 않는다 — 생성 자체의 실패는 RunSlm 이 예전처럼
+        // 기본 대사로 받는다 (RequestAsync 는 예외를 던지지 않는다, CodeRabbit 리뷰)
         private bool CanGenerate(ReactionRequest request)
         {
             SlmReactionGenerator generator = slm as SlmReactionGenerator;
-            return generator == null || generator.CanGenerate(request);
+            if (generator == null)
+            {
+                return true;
+            }
+            try
+            {
+                return generator.CanGenerate(request);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
         }
 
         private async Task<SameSituationOutcome> WaitForSameSituation(ReactionRequest request, Session session, ThinkingNotice notice)

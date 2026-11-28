@@ -137,9 +137,13 @@ NpcContext context = builder.Build(new NpcContextInput
 // Progress 는 만든 스레드(Unity 메인 스레드)에서 부르므로 말풍선을 바로 바꿔도 된다. 미리 만든 대사·정해진 대사·기본 대사로 바로 답하면 알리지 않는다
 // 말풍선은 가장 최근 요청의 것이다: 같은 NPC 에 새 요청이 오면 앞 요청은 버려져(ShouldShow == false) 늦게 돌아온다. 그 응답·알림이 새 요청의 말풍선을 덮거나 거두지 않게
 // 요청마다 번호(bubbleTicket, 이 NPC 의 필드)를 받아 두고, 번호가 지금 것일 때만 말풍선을 건드린다 (CodeRabbit 리뷰)
+// Progress 는 알림을 메인 스레드로 넘겨 나중에 부른다 — 대사가 먼저 끝나면 늦게 온 "음..."이 띄운 대사를 덮거나 거둔 말풍선을 다시 열 수 있다.
+// 그래서 이 요청이 끝났는지(answered)도 본다: await 바로 다음에 세우고, 알림은 말풍선의 주인이면서 아직 끝나지 않았을 때만 띄운다 (CodeRabbit 리뷰)
 int ticket = ++bubbleTicket;
-var thinking = new Progress<string>(line => { if (ticket == bubbleTicket) ShowBubble(line); });
+bool answered = false;
+var thinking = new Progress<string>(line => { if (ticket == bubbleTicket && !answered) ShowBubble(line); });
 NpcResponse response = await manager.RequestAsync(context.Request, ct, thinking);
+answered = true;   // 응답을 다루기 전에 세운다 — 이 뒤에 오는 알림은 버린다
 MemoryEntry memory = context.Finish(ticket == bubbleTicket ? response : null);   // 꼭 한 번 부른다. 못 띄웠으면 고른 실화를 '안 들려줌'으로 되돌린다
 if (ticket != bubbleTicket)
 {

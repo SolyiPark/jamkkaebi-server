@@ -323,6 +323,7 @@ public static class Program
             Stopwatch budgetWatch = Stopwatch.StartNew();
             Task<NpcResponse> budgetTask = Task.Run(() => budgetManager.RequestAsync(Tap(8), CancellationToken.None, budgetThinking));
             Check(SpinWait.SpinUntil(() => budgetThinking.Lines.Count > 0, 5000), "기다림 한도: 요청이 같은 상황을 기다리기 시작함");
+            long waitSeen = budgetWatch.ElapsedMilliseconds; // 요청은 "음..."을 알린 바로 뒤에 기다리기 시작한다 — 기다림 기한은 늦어도 waitSeen + SlmTimeout
             Thread.Sleep(1000);                            // 기다리는 동안 만들던 것이 쓸 수 없는 대사로 끝난다
             long released = budgetWatch.ElapsedMilliseconds;
             budgetRelease.TrySetResult(true);
@@ -331,7 +332,17 @@ public static class Program
             budgetManager.CancelPrefetch();
             if (budgetAnswer != null && budgetAnswer.Note != null && budgetAnswer.Note.StartsWith(NpcRequestManager.SameSituationTimeoutNote))
             {
-                Console.WriteLine("  (기다림 한도 준비가 늦어 기다림이 먼저 끝남 — " + released + "ms 에 놓음, 다시 " + budgetTry + "/3)");
+                // 기다리다 시간 초과는 정말 기한을 넘겨 놓았을 때만 준비 실패다. 기한 안에 놓았는데 시간 초과로 답했으면 제품 실패다 — 건너뛰지 않고 걸리게 한다 (CodeRabbit 리뷰).
+                // 기한은 waitSeen + SlmTimeout 보다 이르거나 같다(요청은 waitSeen 전에 기다리기 시작했다). 시계 차이를 위해 100ms 여유를 둔다
+                long deadline = waitSeen + (long)budgetTimeout.TotalMilliseconds;
+                bool overran = released >= deadline - 100;
+                Check(overran, "기다림 한도: 기한(" + deadline + "ms) 안인 " + released + "ms 에 놓았는데 기다리다 시간 초과로 답하지 않음 ← " + budgetAnswer.Note);
+                if (!overran)
+                {
+                    budgetChecked = true; // 제품 실패로 적었다 — 다시 하지 않는다
+                    break;
+                }
+                Console.WriteLine("  (기다림 한도 준비가 늦어 기다림이 먼저 끝남 — 기한 " + deadline + "ms, " + released + "ms 에 놓음, 다시 " + budgetTry + "/3)");
                 continue; // 준비 실패: 만들던 것을 놓기 전에 기다림(SlmTimeout)이 끝났다 — 제품 동작은 맞다
             }
             budgetChecked = true;
@@ -401,6 +412,33 @@ public static class Program
         NpcResponse unsupported = quick.RequestAsync(Request(noPersona, InteractionMode.Owner, NpcInputs.Tap, NpcActions.Greet), CancellationToken.None, unsupportedThinking).Result;
         Check(unsupported.ShouldShow && unsupported.UsedFallback && unsupportedThinking.Lines.Count == 0,
                 "페르소나가 없는 도깨비(" + noPersona + "번)는 모델을 부르지 않아 '음...'을 알리지 않음 ← " + unsupported.Note + ", 알림 " + unsupportedThinking.Lines.Count + "번");
+        // "음..."을 띄울지 미리 보는 검사(CanGenerate)에서 예외가 나도 RequestAsync 는 예외를 던지지 않고 기본 대사로 답한다 (CodeRabbit 리뷰).
+        // 상태는 Ready 라고 알리지만 IsLoaded 가 던지는 백엔드 — 예전에는 같은 예외가 생성 안에서 나 RunSlm 이 기본 대사로 받았다
+        var shakySlm = new SlmReactionGenerator(new ThrowingLoadedBackend(), assembler, validator);
+        var shaky = new NpcRequestManager(shakySlm, rule) { SlmTimeout = TimeSpan.FromSeconds(5) };
+        var shakyThinking = new ThinkingRecorder();
+        Task<NpcResponse> shakyTask;
+        try
+        {
+            shakyTask = shaky.RequestAsync(Tap(8), CancellationToken.None, shakyThinking);
+        }
+        catch (Exception e)
+        {
+            shakyTask = Task.FromException<NpcResponse>(e); // 예전 코드: RequestAsync 를 부르자마자 예외가 났다
+        }
+        bool shakyDone;
+        try
+        {
+            shakyDone = shakyTask.Wait(5000) || shakyTask.IsCompleted;
+        }
+        catch (AggregateException)
+        {
+            shakyDone = true; // 예외로 끝났다 — 아래 검사가 RanToCompletion 이 아님을 적는다 (시험 전체를 멈추지 않게)
+        }
+        Check(shakyDone && shakyTask.Status == TaskStatus.RanToCompletion && shakyTask.Result.ShouldShow && shakyTask.Result.UsedFallback && shakyThinking.Lines.Count == 0,
+                "IsLoaded 가 던져도 예외 없이 기본 대사로 답하고 '음...'은 띄우지 않음 ← " + shakyTask.Status
+                + (shakyTask.Status == TaskStatus.RanToCompletion ? ", " + shakyTask.Result.Note : ""));
+
         // 바로 꺼낸 대사와 기다려 꺼낸 대사는 메모가 다르다 — 시험 도구가 기다린 시간을 따로 센다 (Copilot 리뷰)
         Check(hitAnswer.Note == NpcRequestManager.PrefetchedNote && NpcRequestManager.IsPrefetched(hitAnswer) && !NpcRequestManager.IsPrefetched(liveAnswer),
                 "바로 꺼낸 대사는 PrefetchedNote, 그 자리에서 만든 대사는 미리 만든 대사가 아님");
@@ -478,6 +516,39 @@ public static class Program
             }
         }
         Check(prompts > 0 && offenders.Count == 0, "상황 문장에 '너를', 할 일 문장에 '~다고'가 없음 (프롬프트 " + prompts + "개) ← " + string.Join(" / ", offenders.Distinct().Take(3).ToArray()));
+    }
+
+    // 상태는 Ready 라고 알리지만 IsLoaded 를 읽으면 예외를 던지는 백엔드 (CanGenerate 의 예외를 가두는지 본다)
+    private sealed class ThrowingLoadedBackend : INpcModelBackend, INpcModelHealth
+    {
+        public bool IsLoaded
+        {
+            get { throw new InvalidOperationException("시험: 모델 상태를 읽지 못함"); }
+        }
+
+        public NpcModelStatus Status
+        {
+            get { return NpcModelStatus.Ready; }
+        }
+
+        public Task LoadAsync(CancellationToken ct)
+        {
+            return Task.FromResult(true);
+        }
+
+        public void Unload()
+        {
+        }
+
+        public Task<string> CompleteAsync(NpcPrompt prompt, CancellationToken ct)
+        {
+            return Task.FromResult(Out("greet", "player", "드디어 왔구나, 기다렸어!"));
+        }
+
+        public Task PrepareAsync(string system, CancellationToken ct)
+        {
+            return Task.FromResult(true);
+        }
     }
 
     // RequestAsync 의 thinking 으로 받은 말을 모은다 (Throw 면 받을 때 예외를 던진다 — 요청이 예외를 삼키는지 본다)
