@@ -55,7 +55,7 @@ AI 반응 생성기의 클라이언트 쪽 코드다. 생성기 두 가지와 �
 
 1. Unity 프로젝트의 `Packages/manifest.json` 의 `dependencies` 에 아래 한 줄을 넣는다. 끝의 태그가 쓰는 판이다.
    ```json
-   "com.jamkkaebi.npc": "https://github.com/SolyiPark/jamkkaebi-server.git?path=/tools/unity-npc-generator#npc-v0.1.0"
+   "com.jamkkaebi.npc": "https://github.com/SolyiPark/jamkkaebi-server.git?path=/tools/unity-npc-generator#npc-v0.1.1"
    ```
    - PC 에 Git 이 설치돼 있고 PATH 에 있어야 한다 (Unity 가 git 주소 패키지를 받을 때 쓴다).
    - 판을 올릴 때는 끝의 태그만 바꾼다. 브랜치 이름으로 참조하지 않는다.
