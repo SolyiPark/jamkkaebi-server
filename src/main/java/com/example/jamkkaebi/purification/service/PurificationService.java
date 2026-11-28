@@ -235,6 +235,9 @@ public class PurificationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.RELIC_NOT_OWNED));
         RelicMaster master = ownership.require(user.getId(), userRelic.getRelicId()).master();
 
+        // 계획 선명도가 없는 옛 세션은 유물을 바꾸기 전의 선명도로 출발점을 정해 둔다(정산 뒤에 다시 계산하면 두 번 오른다).
+        session.fillPlanClarity(clarityPolicy.clarityOf(userRelic, now));
+
         boolean success = request.result() == PlayResult.SUCCESS;
         boolean perfect = success && request.damage() == 0 && session.getEntryRoute().allowsPerfectBonus();
         RewardCalculator.Reward reward = rewardCalculator.calculate(
@@ -295,10 +298,12 @@ public class PurificationService {
         if (restorePolicy.effectOf(session.getDifficulty()) != RestoreEffect.ONE_STEP) {
             return Clarity.CLEAR;
         }
-        // 계획 선명도를 저장하기 전에 시작한 세션은 지금 선명도로 대신한다.
-        Clarity planned = session.getPlanClarity() != null
-                ? session.getPlanClarity()
-                : clarityPolicy.clarityOf(userRelic, now);
+        Clarity planned = session.getPlanClarity();
+        if (planned == null) {
+            // 이 수정 전에 계획 선명도 없이 정산된 세션을 같은 내용으로 다시 보고한 경우뿐이다.
+            // 유물은 이미 올라 있으므로 다시 올리지 않고 지금 선명도를 쓴다.
+            return clarityPolicy.clarityOf(userRelic, now);
+        }
         return planned.stepUp();
     }
 

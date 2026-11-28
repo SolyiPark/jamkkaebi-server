@@ -1,11 +1,14 @@
 package com.example.jamkkaebi.coreloop;
 
+import com.example.jamkkaebi.relic.domain.Clarity;
 import com.example.jamkkaebi.relic.domain.Difficulty;
 import com.example.jamkkaebi.relic.domain.Era;
 import com.example.jamkkaebi.relic.domain.RelicStatus;
 import com.example.jamkkaebi.relic.domain.UserRelic;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -22,6 +25,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * <p>백엔드 계획 M1 의 완료 판정이 그대로 이 파일의 첫 테스트다.
  */
 class CoreLoopFlowTest extends CoreLoopApiTestSupport {
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Test
     @DisplayName("상자를 열어 얻은 유물을 3페이즈까지 마치면 완료 상태가 되고 이름이 공개된다")
@@ -303,6 +309,36 @@ class CoreLoopFlowTest extends CoreLoopApiTestSupport {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.clarity").value("CLEAR"))
                 .andExpect(jsonPath("$.data.next.action").value("DONE"));
+    }
+
+    @Test
+    @DisplayName("계획 선명도가 없는 옛 관리 세션도 정산 전 선명도에서 한 칸만 오르고, 다시 보고해도 같은 다음 단계다")
+    void 계획_선명도_없는_세션은_한_번만_오른다() throws Exception {
+        Player player = player("옛세션");
+        int relicId = completedRelic(player);
+        clock.advance(Duration.ofDays(15));
+        String token = startPurification(player, relicId, Difficulty.NORMAL);
+        // 계획 선명도를 저장하기 전에 시작한 세션을 흉내 낸다.
+        jdbcTemplate.update("UPDATE play_sessions SET plan_clarity = NULL WHERE session_token = ?", token);
+        clock.advance(Duration.ofMinutes(1));
+
+        String body = """
+                {"result":"SUCCESS","tapsUsed":10,"scoutsUsed":1,"damage":0,
+                 "bonusTiles":{"jeongseong":0}}
+                """;
+        post(player, "/api/purifications/{token}/result", body, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.clarity").value("FADED"))
+                .andExpect(jsonPath("$.data.next.action").value("CONTINUE_RESTORE"))
+                .andExpect(jsonPath("$.data.next.phase").value("RECALL"));
+        post(player, "/api/purifications/{token}/result", body, token)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.next.action").value("CONTINUE_RESTORE"))
+                .andExpect(jsonPath("$.data.next.phase").value("RECALL"))
+                .andExpect(jsonPath("$.data.careCount").value(1));
+
+        assertThat(playSessionRepository.findBySessionToken(token).orElseThrow().getPlanClarity())
+                .isEqualTo(Clarity.RESEALED);
     }
 
     @Test

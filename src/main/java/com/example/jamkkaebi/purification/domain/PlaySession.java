@@ -158,6 +158,16 @@ public class PlaySession extends BaseTimeEntity {
         return status == SessionStatus.ISSUED && now.isBefore(expiresAt);
     }
 
+    /**
+     * 계획 선명도가 비어 있는 관리 세션(계획 선명도를 저장하기 전에 시작한 세션)에 출발 선명도를 정해 둔다.
+     * 정산 전에 한 번만 정해, 정산·응답·같은 내용의 재보고가 같은 값을 쓰게 한다. 이미 있으면 바꾸지 않는다.
+     */
+    public void fillPlanClarity(Clarity clarity) {
+        if (planClarity == null && entryRoute == EntryRoute.CARE) {
+            planClarity = clarity;
+        }
+    }
+
     public void supersede() {
         if (status == SessionStatus.ISSUED) {
             status = SessionStatus.SUPERSEDED;
