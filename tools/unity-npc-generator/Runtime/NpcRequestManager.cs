@@ -91,6 +91,18 @@ namespace Jamkkaebi.Npc
 
         /// <summary>미리 만들어 둔 대사를 꺼내 쓴 경우의 Note. 그 요청에서는 SLM 을 부르지 않았다 (응답이 바로 뜬다).</summary>
         public const string PrefetchedNote = "미리 만든 대사";
+
+        /// <summary>
+        /// 같은 상황을 뒤에서 만드는 것을 기다렸다가 꺼낸 미리 만든 대사의 메모 (WaitForSameSituation). 바로 꺼낸 것(PrefetchedNote)과 달리 기다린 시간이 있다 —
+        /// 기기·PC 시험은 이것을 따로 세고 그 시간을 보고한다 (Copilot 리뷰). 미리 만든 대사인지는 IsPrefetched 로 둘을 함께 본다.
+        /// </summary>
+        public const string PrefetchWaitedNote = "같은 상황을 기다려 꺼낸 미리 만든 대사";
+
+        /// <summary>미리 만든 대사로 답한 응답인지 (바로 꺼냄 PrefetchedNote · 기다려 꺼냄 PrefetchWaitedNote).</summary>
+        public static bool IsPrefetched(NpcResponse response)
+        {
+            return response != null && response.ShouldShow && (response.Note == PrefetchedNote || response.Note == PrefetchWaitedNote);
+        }
         /// <summary>
         /// 모델이 멈춰(취소한 생성이 CancelHold 가 지나도 끝나지 않음, <see cref="INpcModelHealth"/>) 기본 대사로 대신한 경우의 Note.
         /// 아직 안 올라온 것("모델이 아직 준비되지 않음")과 구분한다 — 기기 시험에서 이 메모가 나오면 모델이 묶인 것이다.
@@ -542,6 +554,8 @@ namespace Jamkkaebi.Npc
             public int Count;
             public int NextVariation;
             public int Failures;
+            // 이 작업이 도는 동안 같은 상황의 미리 만들기·다시 만들기가 합쳐졌는지 (EnqueuePrefetch). 일꾼은 다 만들었다고 본 뒤에도 이것이 서 있으면 지우지 않고 다시 본다. gate 안에서 읽고 쓴다
+            public bool Refreshed;
         }
 
         /// <summary>
@@ -696,6 +710,11 @@ namespace Jamkkaebi.Npc
                     }
                     fallbackNote = sameSituation.FallbackNote;
                 }
+                else if (modelWait.Elapsed >= SlmTimeout)
+                {
+                    //기다림에 주어진 시간을 다 썼으면 새 생성을 시작하지 않는다.
+                    fallbackNote = SameSituationTimeoutNote + "(" + (int)SlmTimeout.TotalMilliseconds + "ms) -> 기본 대사";
+                }
                 else
                 {
                     usedModel = true;
@@ -705,7 +724,12 @@ namespace Jamkkaebi.Npc
                     MarkModelRelic(request.RelicId);
                     // 기기에서는 한 번 만드는 데 10초가 넘어 다시 만들 틈이 없다 — 첫 시도부터 최근 대사와 다른 첫 낱말로 만들게 한다
                     PickFreshStarter(request, request.RecentLines);
-                    notice.Show(session.Token); // 그 자리에서 만든다 — 기다리는 동안 "음..." (같은 상황을 기다렸다가 온 요청은 이미 띄웠다)
+                    // 그 자리에서 만든다 — 기다리는 동안 "음..." (같은 상황을 기다렸다가 온 요청은 이미 띄웠다).
+                    // 모델을 부르지 않고 끝날 요청(페르소나 없는 도깨비 등 — 생성기가 Unsupported 로 바로 끝낸다)은 띄우지 않는다 (Copilot 리뷰)
+                    if (CanGenerate(request))
+                    {
+                        notice.Show(session.Token);
+                    }
                     // 같은 상황을 기다렸다가 쓸 대사가 없어 여기 왔으면 이미 기다린 만큼 뺀다 (예전에는 다시 SlmTimeout 을 다 줘 플레이어가 SlmTimeout 의 두 배까지 기다렸다)
                     TimeSpan waitedBefore = modelWait.Elapsed;
                     TimeSpan budget = SlmTimeout - waitedBefore;
@@ -762,6 +786,12 @@ namespace Jamkkaebi.Npc
         // 보관함에서 이 요청의 대사를 꺼내 띄운다 (같은 상황에서 만든 것, 최근 대사와 90% 이상 겹치지 않는 것). 없으면 null
         private NpcResponse ServePrefetched(ReactionRequest request)
         {
+            return ServePrefetched(request, PrefetchedNote);
+        }
+
+        // note: 응답 메모 (바로 꺼냄 PrefetchedNote, 같은 상황을 기다려 꺼냄 PrefetchWaitedNote)
+        private NpcResponse ServePrefetched(ReactionRequest request, string note)
+        {
             ReactionResult ready = Cache.TryTake(request, request.RecentLines);
             if (ready == null)
             {
@@ -778,7 +808,7 @@ namespace Jamkkaebi.Npc
             Remember(request, served.Line);
             Refill(request, false);
             SaveSoon(); // 꺼낸 대사가 파일에서 빠지게 한다 (RecentLineCount 가 0 이면 Remember 가 저장하지 않는다)
-            return NpcResponse.Show(served, null, PrefetchedNote);
+            return NpcResponse.Show(served, null, note);
         }
 
         private static long NowMs()
@@ -896,6 +926,9 @@ namespace Jamkkaebi.Npc
         /// <summary>시험용: 미리 만들기가 플레이어 대기 확인을 지나 도깨비를 적기 직전에 부른다 (Verify 가 그 틈에 요청을 끼워 넣는다). 게임에서는 쓰지 않는다.</summary>
         internal Action BeforePrefetchMarkForTest { get; set; }
 
+        /// <summary>시험용: 일꾼이 작업을 다 만들었다고 본 뒤, 줄에서 지우기 전에 부른다 (Verify 가 그 틈에 같은 상황의 다시 만들기를 끼워 넣는다). 게임에서는 null.</summary>
+        internal Action<ReactionRequest> AfterPrefetchJobForTest { get; set; }
+
         /// <summary>시험용: 모델이 시스템 메시지를 읽어 둔 도깨비 (모르면 null).</summary>
         internal int? ModelRelicForTest
         {
@@ -964,6 +997,13 @@ namespace Jamkkaebi.Npc
                     {
                         // 합쳐도 상황마다 둘 수 있는 수(MaxPerKey)를 넘지 않는다 — 넘기면 다 찬 뒤에도 넣지 못하는 생성을 실패가 쌓일 때까지 거듭한다
                         queued.Count = Math.Max(queued.Count, Math.Min(count, Math.Max(1, Cache.MaxPerKey)));
+                        // 일꾼이 이 작업을 다 만들었다고 보고 지우려는 참일 수 있다 — 표시해 두면 지우지 않고 다시 본다 (Copilot 리뷰: 꺼내 간 만큼의 다시 만들기가 사라졌다).
+                        // 실패가 쌓여 그만두려던 작업이면 새로 줄에 넣은 것처럼 실패를 다시 센다 (지워진 뒤 새로 넣었을 때와 같게)
+                        queued.Refreshed = true;
+                        if (queued.Failures >= MaxPrefetchFailures)
+                        {
+                            queued.Failures = 0;
+                        }
                         return;
                     }
                 }
@@ -1047,12 +1087,29 @@ namespace Jamkkaebi.Npc
                         await Task.Delay(poll).ConfigureAwait(false);
                         continue;
                     }
+                    lock (gate)
+                    {
+                        job.Refreshed = false; // 이번에 돌기 시작한 뒤에 합쳐진 것만 본다
+                    }
                     bool finished = await RunPrefetchJob(job).ConfigureAwait(false);
+                    Action<ReactionRequest> afterJob = AfterPrefetchJobForTest;
+                    if (finished && afterJob != null)
+                    {
+                        afterJob(job.Template);
+                    }
                     if (finished)
                     {
                         lock (gate)
                         {
-                            prefetchJobs.Remove(job); // CancelPrefetch 가 이미 뺐으면 아무것도 하지 않는다
+                            // 다 만들었다고 본 뒤 지우기 전에 같은 상황이 합쳐졌으면(요청이 꺼내 가서 다시 만들기를 넣음) 지우지 않는다 — 다음 바퀴에 모자란 만큼 다시 만든다
+                            if (job.Refreshed)
+                            {
+                                job.Refreshed = false;
+                            }
+                            else
+                            {
+                                prefetchJobs.Remove(job); // CancelPrefetch 가 이미 뺐으면 아무것도 하지 않는다
+                            }
                         }
                     }
                 }
@@ -1230,12 +1287,20 @@ namespace Jamkkaebi.Npc
         /// 새로 만들어도 그보다 늦게 끝나고, 만들던 것은 멈추지 않아 다음 요청이 꺼내 쓴다. 뒤에서 만드는 것이 없거나, 다른 상황이거나, 끝났는데 쓸 대사가 없으면
         /// (검사에 걸림·최근 대사와 겹침) null — 예전처럼 만들던 것을 멈추고 그 자리에서 만든다.
         /// </summary>
+        // 이 요청을 모델로 만들 수 있는지 (SlmReactionGenerator.CanGenerate). 다른 생성기는 알 수 없어 만들 수 있다고 본다
+        private bool CanGenerate(ReactionRequest request)
+        {
+            SlmReactionGenerator generator = slm as SlmReactionGenerator;
+            return generator == null || generator.CanGenerate(request);
+        }
+
         private async Task<SameSituationOutcome> WaitForSameSituation(ReactionRequest request, Session session, ThinkingNotice notice)
         {
             Task<bool> building = UsePrefetched ? SameSituationPrefetch(request) : null;
             if (building == null)
             {
-                return null;
+                NpcResponse ready = UsePrefetched ? ServePrefetched(request) : null;
+                return ready != null ? new SameSituationOutcome {Response = ready} : null;
             }
             notice.Show(session.Token); // 뒤에서 만드는 것을 기다린다 — 기다리는 동안 "음..."
             Task first;
@@ -1252,7 +1317,7 @@ namespace Jamkkaebi.Npc
             {
                 return new SameSituationOutcome { FallbackNote = SameSituationTimeoutNote + "(" + (int)SlmTimeout.TotalMilliseconds + "ms) → 기본 대사" };
             }
-            NpcResponse built = ServePrefetched(request);
+            NpcResponse built = ServePrefetched(request, PrefetchWaitedNote);
             return built != null ? new SameSituationOutcome { Response = built } : null;
         }
 

@@ -268,7 +268,7 @@ public static class Program
         NpcResponse waited = waiting.Wait(5000) ? waiting.Result : null;
         // 꺼낸 대사가 뒤에서 만들던 생성의 것("왔구나, 순찰 중이었어!")인지로 본다 — 요청이 새로 만들었다면 가짜 모델의 다른 답("드디어 왔구나, 기다렸어!")이다.
         // 모델 호출 수는 세지 않는다: 요청이 대사를 꺼내 간 뒤 미리 만들기가 보관함을 다시 채우려고 한 번 더 부를 수 있다 (정상)
-        Check(stillWaiting && waited != null && waited.Note == NpcRequestManager.PrefetchedNote && waited.Reaction != null && waited.Reaction.Line == "왔구나, 순찰 중이었어!"
+        Check(stillWaiting && waited != null && waited.Note == NpcRequestManager.PrefetchWaitedNote && NpcRequestManager.IsPrefetched(waited) && waited.Reaction != null && waited.Reaction.Line == "왔구나, 순찰 중이었어!"
                 && cancelled == 0,
                 "같은 상황을 뒤에서 만들던 것을 멈추지 않고 기다렸다 꺼내 씀 ← 기다림 " + stillWaiting + ", 메모 " + (waited != null ? waited.Note : "없음")
                 + ", 대사 " + (waited != null && waited.Reaction != null ? waited.Reaction.Line : "없음") + ", 취소 " + cancelled + "번");
@@ -345,6 +345,28 @@ public static class Program
             Console.WriteLine("  건너뜀: 기다림 한도 시험의 준비가 세 번 모두 늦었다 (기계가 바쁨 — 제품 실패가 아니다)");
         }
 
+        // 2-2) 다 만든 작업을 지우기 직전에 같은 상황의 다시 만들기가 합쳐지면 지우지 않고 다시 만든다 (Copilot 리뷰: 기다려 꺼낸 요청이 넣은 다시 만들기가
+        //      곧 지워질 작업에 합쳐져 사라지고 보관함이 빈 채로 남았다). 시험 고리가 '다 만듦 → 지우기' 사이에 그 요청을 끼워 넣는다
+        var refillBackend = new FakeBackend { Reply = Out("greet", "player", "왔구나, 순찰 중이었어!") };
+        var refillSlm2 = new SlmReactionGenerator(refillBackend, assembler, validator) { MaxAttempts = 1 };
+        refillSlm2.LoadAsync(CancellationToken.None).Wait();
+        var refilling = new NpcRequestManager(refillSlm2, rule) { SlmTimeout = TimeSpan.FromSeconds(5), PrefetchTimeout = TimeSpan.FromSeconds(5), PrefetchIdleDelay = TimeSpan.Zero, RefillAfterUse = true, RefillTarget = r => 1 };
+        int hooked = 0;
+        NpcResponse takenInGap = null;
+        refilling.AfterPrefetchJobForTest = template =>
+        {
+            if (Interlocked.Exchange(ref hooked, 1) == 0)
+            {
+                refillBackend.Reply = Out("greet", "player", "드디어 왔구나, 기다렸어!");   // 다시 만들 대사 (앞 것과 겹치지 않게)
+                takenInGap = refilling.RequestAsync(Tap(8)).Result;   // 다 만든 대사를 꺼내 가고, 다시 만들기를 넣는다
+            }
+        };
+        refilling.PrefetchTemplate(Tap(8), 1);
+        Check(SpinWait.SpinUntil(() => Volatile.Read(ref hooked) == 1, 5000) && refilling.PrefetchCompletion.Wait(5000), "다시 만들기 유실 시험: 미리 만들기가 끝남");
+        Check(takenInGap != null && NpcRequestManager.IsPrefetched(takenInGap) && refilling.Cache.TemplateCount(Tap(8)) == 1 && refillBackend.Calls == 2,
+                "지우기 직전에 꺼내 간 만큼 다시 만들어 보관함을 채움 ← 꺼냄 " + (takenInGap != null ? takenInGap.Note : "없음") + ", 보관 " + refilling.Cache.TemplateCount(Tap(8))
+                + "개, 모델 " + refillBackend.Calls + "번");
+
         // 3) 다른 상황이면 예전처럼 만들던 것을 멈추고 그 자리에서 만든다 (플레이어가 먼저)
         cancelled = 0;
         started = new TaskCompletionSource<bool>();
@@ -373,6 +395,15 @@ public static class Program
         var quietThinking = new ThinkingRecorder();
         quiet.RequestAsync(Tap(8), CancellationToken.None, quietThinking).Wait(5000);
         Check(quietThinking.Lines.Count == 0, "ThinkingLine 을 비우면 알리지 않음");
+        // 모델을 부르지 않고 끝날 요청(페르소나가 없는 도깨비 — 생성기가 Unsupported 로 바로 끝낸다)은 알리지 않는다 (Copilot 리뷰)
+        int noPersona = Enumerable.Range(1, 20).First(id => personas.Find(id) == null);
+        var unsupportedThinking = new ThinkingRecorder();
+        NpcResponse unsupported = quick.RequestAsync(Request(noPersona, InteractionMode.Owner, NpcInputs.Tap, NpcActions.Greet), CancellationToken.None, unsupportedThinking).Result;
+        Check(unsupported.ShouldShow && unsupported.UsedFallback && unsupportedThinking.Lines.Count == 0,
+                "페르소나가 없는 도깨비(" + noPersona + "번)는 모델을 부르지 않아 '음...'을 알리지 않음 ← " + unsupported.Note + ", 알림 " + unsupportedThinking.Lines.Count + "번");
+        // 바로 꺼낸 대사와 기다려 꺼낸 대사는 메모가 다르다 — 시험 도구가 기다린 시간을 따로 센다 (Copilot 리뷰)
+        Check(hitAnswer.Note == NpcRequestManager.PrefetchedNote && NpcRequestManager.IsPrefetched(hitAnswer) && !NpcRequestManager.IsPrefetched(liveAnswer),
+                "바로 꺼낸 대사는 PrefetchedNote, 그 자리에서 만든 대사는 미리 만든 대사가 아님");
         // 버려진 요청(취소된 요청)은 알리지 않는다 — 새 요청의 말풍선을 덮지 않게 (CodeRabbit 리뷰)
         var cancelledThinking = new ThinkingRecorder();
         using (var gone = new CancellationTokenSource())

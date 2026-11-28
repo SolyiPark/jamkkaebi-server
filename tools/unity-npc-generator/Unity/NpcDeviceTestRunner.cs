@@ -293,6 +293,7 @@ namespace Jamkkaebi.Npc
             var testMemory = new NpcTestMemory(personaCatalog, DateTime.Today);
             var memoryScenes = new HashSet<string>(sceneList.Where(NpcTestMemory.Handles).Select(sc => sc.Id));
             int prefetchHits = 0;
+            var waitedHitTimes = new List<long>(); // 같은 상황을 기다려 꺼낸 미리 만든 대사의 전체 시간
             if (prefetchFirst && slm != null && slm.IsReady)
             {
                 status = "미리 만드는 중";
@@ -455,7 +456,8 @@ namespace Jamkkaebi.Npc
                     bool isSilent = response.Note == NpcRequestManager.SilentNote;
                     bool isFixed = response.Note == NpcRequestManager.FixedLinesNote || isSilent;
                     bool fromSlm = response.ShouldShow && !response.UsedFallback;
-                    bool prefetched = response.ShouldShow && response.Note == NpcRequestManager.PrefetchedNote;
+                    bool prefetched = NpcRequestManager.IsPrefetched(response);
+                    bool waitedPrefetch = prefetched && response.Note == NpcRequestManager.PrefetchWaitedNote; // 같은 상황을 기다려 꺼냄 — 시간이 있다
                     string source = !response.ShouldShow ? "없음" : (prefetched ? "미리" : (fromSlm ? "SLM" : (isSilent ? "대사없음" : (isFixed ? "정해진" : "기본"))));
                     string action = response.ShouldShow ? response.Reaction.ActionId : "";
                     string line = response.ShouldShow ? response.Reaction.Line : "";
@@ -472,8 +474,12 @@ namespace Jamkkaebi.Npc
                     }
                     else if (prefetched)
                     {
-                        // 미리 만든 대사(칸을 채워 완성): 모델을 부르지 않아 시간은 거의 0 이다. SLM 시간 통계에는 넣지 않는다
+                        // 미리 만든 대사(칸을 채워 완성): 바로 꺼냈으면 모델을 부르지 않아 시간은 거의 0 이다. 같은 상황을 기다려 꺼냈으면 그 시간을 따로 센다. SLM 시간 통계에는 넣지 않는다
                         prefetchHits++;
+                        if (waitedPrefetch)
+                        {
+                            waitedHitTimes.Add(watch.ElapsedMilliseconds);
+                        }
                     }
                     else if (fromSlm)
                     {
@@ -564,7 +570,10 @@ namespace Jamkkaebi.Npc
             if (prefetchFirst || useLineStore || refillAfterUse || prefetchHits > 0)
             {
                 int asked = total - fixedCount;
-                Say("미리 만든 대사 적중 " + prefetchHits + "/" + asked + " (적중하면 모델을 부르지 않고 칸에 서버 값을 넣어 바로 완성 — 전체 시간 0ms 안팎)");
+                Say("미리 만든 대사 적중 " + prefetchHits + "/" + asked + " — 바로 꺼냄 " + (prefetchHits - waitedHitTimes.Count) + "건(모델을 부르지 않고 칸에 서버 값을 넣어 완성, 전체 시간 0ms 안팎)"
+                    + (waitedHitTimes.Count > 0
+                        ? ", 같은 상황을 기다려 꺼냄 " + waitedHitTimes.Count + "건(전체 시간 중앙값 " + Percentile(waitedHitTimes, 0.5) + "ms, 최대 " + waitedHitTimes.Max() + "ms)"
+                        : ", 같은 상황을 기다려 꺼냄 0건"));
             }
             if (useLineStore)
             {

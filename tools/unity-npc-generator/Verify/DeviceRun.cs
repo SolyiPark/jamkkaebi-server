@@ -274,6 +274,7 @@ public static class DeviceRun
         var testMemory = new NpcTestMemory(personas, DateTime.Today);
         var memoryScenes = new HashSet<string>(sceneList.Where(NpcTestMemory.Handles).Select(sc => sc.Id));
         int prefetchHits = 0;
+        var waitedHitTimes = new List<long>(); // 같은 상황을 기다려 꺼낸 미리 만든 대사의 전체 시간
         if (s.Prefetch && slm.IsReady)
         {
             Stopwatch preparing = Stopwatch.StartNew();
@@ -411,7 +412,8 @@ public static class DeviceRun
                 bool isSilent = response.Note == NpcRequestManager.SilentNote;
                 bool isFixed = response.Note == NpcRequestManager.FixedLinesNote || isSilent;
                 bool fromSlm = response.ShouldShow && !response.UsedFallback;
-                bool prefetched = response.ShouldShow && response.Note == NpcRequestManager.PrefetchedNote;
+                bool prefetched = NpcRequestManager.IsPrefetched(response);
+                bool waitedPrefetch = prefetched && response.Note == NpcRequestManager.PrefetchWaitedNote; // 같은 상황을 기다려 꺼냄 — 시간이 있다
                 string source = !response.ShouldShow ? "없음" : (prefetched ? "미리" : (fromSlm ? "SLM" : (isSilent ? "대사없음" : (isFixed ? "정해진" : "기본"))));
                 string action = response.ShouldShow ? response.Reaction.ActionId : "";
                 string line = response.ShouldShow ? response.Reaction.Line : "";
@@ -429,6 +431,10 @@ public static class DeviceRun
                 {
                     prefetchHits++;
                     repHits++;
+                    if (waitedPrefetch)
+                    {
+                        waitedHitTimes.Add(watch.ElapsedMilliseconds);
+                    }
                 }
                 else if (fromSlm)
                 {
@@ -469,6 +475,10 @@ public static class DeviceRun
         Say("=== 요약 ===");
         Say("SLM 대사 " + slmCount + "/" + (total - fixedCount) + " (이야기·끌려갈 때 " + fixedCount + "건은 정해진 대사), 기대 행동 일치 " + expectedOk + "/" + total);
         Say("미리 만든 대사 적중 " + prefetchHits + "/" + (total - fixedCount) + ", 반복별 " + string.Join("·", hitsPerRep.Select(h => h.ToString(CultureInfo.InvariantCulture)).ToArray()));
+        List<long> waitedSorted = waitedHitTimes.OrderBy(t => t).ToList();
+        Say("  그중 같은 상황을 기다려 꺼냄 " + waitedSorted.Count + "건"
+            + (waitedSorted.Count > 0 ? " (전체 시간 중앙값 " + waitedSorted[waitedSorted.Count / 2] + "ms, 최대 " + waitedSorted[waitedSorted.Count - 1] + "ms)" : "")
+            + ", 나머지는 바로 꺼냄(0ms 안팎)");
         Say("메모에 Repeated 가 적힌 장면 " + repeated + "건");
         if (prepareDeferred > 0)
         {

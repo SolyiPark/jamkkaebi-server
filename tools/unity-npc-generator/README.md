@@ -140,7 +140,7 @@ NpcContext context = builder.Build(new NpcContextInput
 int ticket = ++bubbleTicket;
 var thinking = new Progress<string>(line => { if (ticket == bubbleTicket) ShowBubble(line); });
 NpcResponse response = await manager.RequestAsync(context.Request, ct, thinking);
-MemoryEntry memory = context.Finish(response);   // 꼭 한 번 부른다. 못 띄웠으면 고른 실화를 '안 들려줌'으로 되돌린다
+MemoryEntry memory = context.Finish(ticket == bubbleTicket ? response : null);   // 꼭 한 번 부른다. 못 띄웠으면 고른 실화를 '안 들려줌'으로 되돌린다
 if (ticket != bubbleTicket)
 {
     return;   // 새 요청이 말풍선을 맡았다 — 이 응답은 띄우지도 거두지도 않는다
