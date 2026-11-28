@@ -142,7 +142,8 @@ namespace Jamkkaebi.Npc
                 if (ticket.PreviousSeq >= 0)
                 {
                     // 전에 들려준 적이 있던 실화면 원래 자리(오래된 순서)로 돌려놓는다
-                    history.Insert(System.Math.Min(ticket.PreviousPosition, history.Count), new Entry(ticket.Index, ticket.PreviousSeq));
+                    int restoredPosition = history.FindIndex(entry => entry.Seq > ticket.PreviousSeq);
+                    history.Insert(restoredPosition < 0 ? history.Count : restoredPosition, new Entry(ticket.Index, ticket.PreviousSeq));
                 }
                 return true;
             }
